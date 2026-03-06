@@ -1,0 +1,22 @@
+{
+  "scripts": {
+    "dev": "vite",
+    "backend": "node server.js",
+    "start": "node server.js",
+    "build": "vite build",
+    "smoke": "node tests/smoke.js"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^5.1.4",
+    "bcryptjs": "^3.0.3",
+    "cors": "^2.8.6",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.18.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.7.0",
+    "vite": "^7.3.1"
+  }
+}

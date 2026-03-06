@@ -1,0 +1,392 @@
+// server.js — NACFE Fleet Benchmarking API
+// Requirements: npm install express mysql2 cors bcryptjs jsonwebtoken dotenv
+// Usage: node server.js (or nodemon server.js for dev)
+
+require("dotenv").config();
+const express = require("express");
+const mysql   = require("mysql2/promise");
+const cors    = require("cors");
+const bcrypt  = require("bcryptjs");
+const jwt     = require("jsonwebtoken");
+const path    = require("path");
+
+const app  = express();
+const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production";
+
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  credentials: true,
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
+}));
+app.use(express.json());
+
+// ─── Logging Middleware ────────────────────────────────────────────────────────
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
+  next();
+});
+
+// ─── Database Pool ──────────────────────────────────────────────────────────
+const db = mysql.createPool({
+  host:     process.env.DB_HOST     || "localhost",
+  port:     process.env.DB_PORT     || 3306,
+  user:     process.env.DB_USER     || "root",
+  password: process.env.DB_PASS     || "",
+  database: process.env.DB_NAME     || "",
+  waitForConnections: true,
+  connectionLimit: 10,
+});
+
+// ─── Auth Middleware ─────────────────────────────────────────────────────────
+function requireAuth(req, res, next) {
+  const header = req.headers.authorization;
+  if (!header) {
+    console.warn(`[AUTH] Missing Authorization header on ${req.method} ${req.path}`);
+    return res.status(401).json({ error: "Missing Authorization header" });
+  }
+  if (!header.startsWith("Bearer ")) {
+    console.warn(`[AUTH] Invalid Authorization format: ${header.substring(0, 20)}...`);
+    return res.status(401).json({ error: "Invalid token format" });
+  }
+  try {
+    const token = header.split(" ")[1];
+    req.user = jwt.verify(token, JWT_SECRET);
+    next();
+  } catch (err) {
+    console.warn(`[AUTH] JWT verification failed: ${err.message}`);
+    res.status(401).json({ error: "Invalid token" });
+  }
+}
+
+// ─── Auth Routes ─────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/auth/login
+ * Body: { email }
+ * Returns: { token, fleet }
+ *
+ * This login accepts only an email address and matches it against
+ * `ffs_contact.email`. It joins to the `fleets` table to return fleet info.
+ */
+app.post("/api/auth/login", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: "email required" });
+
+  try {
+    const [rows] = await db.query(
+      `SELECT f.*, c.first_name, c.last_name, c.email
+       FROM ffs_contact c
+       JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
+       WHERE c.email = ? LIMIT 1`,
+      [email]
+    );
+    const row = rows[0];
+    if (!row) return res.status(401).json({ error: "Fleet not found for that email" });
+
+    const token = jwt.sign(
+      { fleet_id: row.fleet_id, fleet_name: row.fleet_name },
+      JWT_SECRET,
+      { expiresIn: "8h" }
+    );
+
+    res.json({
+      token,
+      fleet: {
+        id:      row.fleet_id,
+        name:    row.fleet_name,
+        contact: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
+        email:   row.email,
+        hq:      row.fleet_city ? `${row.fleet_city}, ${row.fleet_state}` : null,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// ─── Fleet Routes ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/fleet/me
+ * Returns the current fleet's profile and list of years they've submitted
+ */
+app.get("/api/fleet/me", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [fleetRows] = await db.query(
+      "SELECT * FROM ffs_fleet WHERE fleet_id = ?",
+      [fleet_id]
+    );
+    if (!fleetRows[0]) return res.status(404).json({ error: "Fleet not found" });
+
+    const [yearRows] = await db.query(
+      "SELECT DISTINCT adoption_year FROM ffs_adoption WHERE fleet_id = ? ORDER BY adoption_year DESC",
+      [fleet_id]
+    );
+
+    const f = fleetRows[0];
+    res.json({
+      fleet: {
+        id: f.fleet_id,
+        name: f.fleet_name,
+        contact: null,
+        email: null,
+        hq: f.fleet_city && f.fleet_state ? `${f.fleet_city}, ${f.fleet_state}` : null,
+        submissionYears: yearRows.map(r => r.adoption_year),
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// ─── General Data Routes ──────────────────────────────────────────────────────
+
+/**
+ * GET /api/general?fleet_id=1
+ * Returns all historical general data rows for this fleet keyed by year.
+ * ASSUMPTION: `general_data` table has columns matching the General tab:
+ *   fleet_id, survey_year,
+ *   sleeper_tractors_owned, day_cab_tractors_owned, trailers_owned,
+ *   leased_tractors, owner_operators, avg_tractor_age, avg_trailer_age,
+ *   ecm_miles, ecm_fuel
+ */
+app.get("/api/general", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [rows] = await db.query(
+      `SELECT utilization_year, application, utliz_tractor_qty AS tractors, utliz_trailer_qty AS trailers
+       FROM ffs_equip_utilization
+       WHERE fleet_id = ?
+       ORDER BY utilization_year`,
+      [fleet_id]
+    );
+    // Transform array → { year: data } map for the frontend
+    const byYear = {};
+    rows.forEach(r => { byYear[r.utilization_year] = r; });
+    res.json(byYear);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// ─── Technology Adoption Routes ───────────────────────────────────────────────
+
+/**
+ * GET /api/mpg
+ * Returns IFTA miles per gallon by year for the fleet.
+ * response: { "2023": 4.32, "2022": 4.21, ... }
+ */
+app.get("/api/mpg", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [rows] = await db.query(
+      `SELECT mpg_year, 
+              IF(SUM(ifta_fuel) > 0, SUM(ifta_miles)/SUM(ifta_fuel), NULL) AS mpg
+       FROM ffs_mpg
+       WHERE fleet_id = ?
+       GROUP BY mpg_year
+       ORDER BY mpg_year`,
+      [fleet_id]
+    );
+    const byYear = {};
+    rows.forEach(r => {
+      if (r.mpg != null) byYear[r.mpg_year] = parseFloat(r.mpg);
+    });
+    res.json(byYear);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// ─── Technology Adoption Routes ───────────────────────────────────────────────
+
+/**
+ * GET /api/techs?config=1
+ * Returns technology adoption percentages for all years.
+ * ASSUMPTION: your DB has a `tech_adoptions` table (from the Techs-Tractor tabs):
+ *   fleet_id, survey_year, config_num (1 or 2), tech_key, pct_adoption
+ *
+ * tech_key matches the keys used in the frontend (e.g. "diesel_apu", "battery_hvac")
+ */
+app.get("/api/techs", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const config = parseInt(req.query.config) || 1;
+  try {
+    const [rows] = await db.query(
+      `SELECT a.adoption_year, t.tech_group, t.technology, t.tech_expl, a.adoption_percent
+       FROM ffs_adoption a JOIN ffs_tech t ON a.tech_id = t.tech_id
+       WHERE a.fleet_id = ? AND a.config = ?
+       ORDER BY a.adoption_year, t.tech_group, t.technology`,
+      [fleet_id, config]
+    );
+
+    // build categories map and year data
+    const categories = {};
+    const byYear = {};
+
+    rows.forEach(r => {
+      // categories: group -> array of { label, desc }
+      if (!categories[r.tech_group]) categories[r.tech_group] = [];
+      // avoid duplicates
+      if (!categories[r.tech_group].some(t => t.label === r.technology)) {
+        categories[r.tech_group].push({ label: r.technology, desc: r.tech_expl || '' });
+      }
+
+      if (!byYear[r.adoption_year]) byYear[r.adoption_year] = {};
+      byYear[r.adoption_year][r.technology] = parseFloat(r.adoption_percent);
+    });
+
+    // also include available config numbers for this fleet so frontend can
+    // present a dropdown if there are multiple tractor configs. In addition
+    // pull descriptive metadata from `ffs_fleet_config` (cab_type, fuel_type)
+    // so the UI can show readable labels for each config.
+    const [cfgRows] = await db.query(
+      `SELECT DISTINCT config FROM ffs_adoption WHERE fleet_id = ? ORDER BY config`,
+      [fleet_id]
+    );
+    const configs = cfgRows.map(r => r.config);
+
+    // fetch config metadata if available
+    let configsWithMeta = configs.map(c => ({ config: c }));
+    if (configs.length) {
+      try {
+        const [cfgDetails] = await db.query(
+          `SELECT config, cab_type, fuel_type
+           FROM ffs_fleet_config
+           WHERE fleet_id = ?`,
+          [fleet_id]
+        );
+        console.log('[techs] ffs_fleet_config rows:', JSON.stringify(cfgDetails));
+        console.log('[techs] configs from ffs_adoption:', JSON.stringify(configs));
+        const detailMap = {};
+        cfgDetails.forEach(d => { detailMap[d.config] = d; });
+        console.log('[techs] detailMap keys:', Object.keys(detailMap));
+        configsWithMeta = configs.map(c => {
+          const d = detailMap[c];
+          const label = d ? [d.cab_type, d.fuel_type].filter(Boolean).join(', ') || `Config ${c}` : `Config ${c}`;
+          return { config: c, cab_type: d?.cab_type || null, fuel_type: d?.fuel_type || null, label };
+        });
+      } catch (errCfg) {
+        // if the config table isn't present or query fails, fall back to numbers
+        console.warn('Could not fetch ffs_fleet_config metadata:', errCfg.message);
+      }
+    }
+
+    res.json({ categories, data: byYear, configs: configsWithMeta });
+  } catch (err) {
+    console.error("Error fetching techs:", err.message);
+    res.status(500).json({ error: "Failed to fetch technology data" });
+  }
+});
+
+// ─── Submission Routes ────────────────────────────────────────────────────────
+
+/**
+ * POST /api/submissions
+ * Saves a new year's data entry.
+ * Body: {
+ *   survey_year: 2024,
+ *   general: { sleepers, dayCabs, trailers, ecmMiles, ecmFuel },
+ *   techs: { diesel_apu: 0, battery_hvac: 100, ... }   (values 0-100)
+ * }
+ */
+app.post("/api/submissions", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const { adoption_year, general, techs } = req.body;
+
+  if (!survey_year || !general)
+    return res.status(400).json({ error: "adoption_year and general data required" });
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // Upsert general data
+    await conn.query(
+      `INSERT INTO ffs_equip_utilization
+         (fleet_id, utilization_year, utliz_tractor_qty,
+         entry_timestamp)
+       VALUES (?, ?, ?, NOW())
+       ON DUPLICATE KEY UPDATE
+         tractors_owned = VALUES(tractors_owned),
+         trailers_owned         = VALUES(trailers_owned),
+         submitted_at           = NOW()`,
+      [fleet_id, survey_year,
+       general.tractors, general.trailers]
+    );
+
+    // Upsert each technology row
+    if (techs) {
+      for (const [tech_key, pct] of Object.entries(techs)) {
+        if (pct === "" || pct == null) continue;
+        await conn.query(
+          `INSERT INTO ffs_adoption (fleet_id, adoption_year, config, tech_id, adoption_percent)
+           VALUES (?, ?, 1, ?, ?)
+           ON DUPLICATE KEY UPDATE pct_adoption = VALUES(pct_adoption)`,
+          [fleet_id, survey_year, tech_key, parseFloat(pct) / 100]
+        );
+      }
+    }
+
+    await conn.commit();
+    res.json({ ok: true, message: `${survey_year} data saved.` });
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: "Failed to save submission" });
+  } finally {
+    conn.release();
+  }
+});
+
+/**
+ * GET /api/submissions/:year
+ * Returns a single year's full submission for review/edit.
+ */
+app.get("/api/submissions/:year", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const year = parseInt(req.params.year);
+  try {
+    const [[general]] = await db.query(
+      "SELECT * FROM ffs_equip_utilization WHERE fleet_id = ? AND survey_year = ?",
+      [fleet_id, year]
+    );
+    const [techRows] = await db.query(
+      "SELECT technology, adoption_percent FROM ffs_adoption a join ffs_tech t on a.tech_id = t.tech_id WHERE fleet_id = ? AND survey_year = ? AND config_num = 1",
+      [fleet_id, year]
+    );
+    const techs = {};
+    techRows.forEach(r => { techs[r.tech_key] = r.pct_adoption; });
+    res.json({ year, general: general || null, techs });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+// ─── Health check ─────────────────────────────────────────────────────────────
+app.get("/api/health", async (req, res) => {
+  try {
+    await db.query("SELECT 1");
+    res.json({ status: "ok", db: "connected" });
+  } catch {
+    res.status(500).json({ status: "error", db: "unreachable" });
+  }
+});
+
+// ─── Serve React frontend ──────────────────────────────────────────────────────
+app.use(express.static(path.join(__dirname, "dist")));
+
+// Catch-all: serve index.html for any non-API route (React Router support)
+app.get(/^(?!\/api).*$/, (req, res) => {
+  res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
+
+app.listen(PORT, () => console.log(`NACFE API running on http://localhost:${PORT}`));
