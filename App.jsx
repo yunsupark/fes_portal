@@ -603,7 +603,7 @@ export default function App() {
 // ─── Styles ──────────────────────────────────────────────────────────────────
 const styles = {
   // Login
-  loginBg: { minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#FFFFFF", fontFamily:"Arial, sans-serif" },
+  loginBg: { minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:"#F2F3F5", fontFamily:"Arial, sans-serif" },
   loginCard: { background:"#1C1F2E", border:"1px solid rgba(255,255,255,0.12)", borderRadius:12, padding:"48px 40px", width:"100%", maxWidth:400, boxShadow:"0 8px 40px rgba(0,0,0,0.4)" },
   loginLogo: { display:"flex", justifyContent:"center", marginBottom:28 },
   loginLogoImg: { height:52, objectFit:"contain" },
