@@ -286,6 +286,105 @@ app.get("/api/techs", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Fleet Details Routes ─────────────────────────────────────────────────────
+
+/**
+ * GET /api/fleet-details
+ * Returns combined ffs_equip_utilization + ffs_mpg data keyed by year.
+ * response: { "2023": { tractors, trailers, ifta_miles, ifta_fuel }, ... }
+ */
+app.get("/api/fleet-details", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [utilRows] = await db.query(
+      `SELECT utilization_year AS year,
+              SUM(utliz_tractor_qty) AS tractors,
+              SUM(utliz_trailer_qty) AS trailers
+       FROM ffs_equip_utilization
+       WHERE fleet_id = ?
+       GROUP BY utilization_year
+       ORDER BY utilization_year`,
+      [fleet_id]
+    );
+    const [mpgRows] = await db.query(
+      `SELECT mpg_year AS year,
+              SUM(ifta_miles) AS ifta_miles,
+              SUM(ifta_fuel)  AS ifta_fuel
+       FROM ffs_mpg
+       WHERE fleet_id = ?
+       GROUP BY mpg_year
+       ORDER BY mpg_year`,
+      [fleet_id]
+    );
+
+    const byYear = {};
+    utilRows.forEach(r => {
+      byYear[r.year] = {
+        tractors: r.tractors != null ? parseFloat(r.tractors) : null,
+        trailers: r.trailers != null ? parseFloat(r.trailers) : null,
+      };
+    });
+    mpgRows.forEach(r => {
+      if (!byYear[r.year]) byYear[r.year] = {};
+      byYear[r.year].ifta_miles = r.ifta_miles != null ? parseFloat(r.ifta_miles) : null;
+      byYear[r.year].ifta_fuel  = r.ifta_fuel  != null ? parseFloat(r.ifta_fuel)  : null;
+    });
+
+    res.json(byYear);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * PUT /api/fleet-details/:year
+ * Upserts one year's equip utilization and mpg data.
+ * Body: { tractors, trailers, ifta_miles, ifta_fuel }
+ */
+app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const year = parseInt(req.params.year);
+  if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
+
+  const { tractors, trailers, ifta_miles, ifta_fuel } = req.body;
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    if (tractors != null || trailers != null) {
+      await conn.query(
+        `INSERT INTO ffs_equip_utilization (fleet_id, utilization_year, utliz_tractor_qty, utliz_trailer_qty)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           utliz_tractor_qty = VALUES(utliz_tractor_qty),
+           utliz_trailer_qty = VALUES(utliz_trailer_qty)`,
+        [fleet_id, year, tractors ?? null, trailers ?? null]
+      );
+    }
+
+    if (ifta_miles != null || ifta_fuel != null) {
+      await conn.query(
+        `INSERT INTO ffs_mpg (fleet_id, mpg_year, ifta_miles, ifta_fuel)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+           ifta_miles = VALUES(ifta_miles),
+           ifta_fuel  = VALUES(ifta_fuel)`,
+        [fleet_id, year, ifta_miles ?? null, ifta_fuel ?? null]
+      );
+    }
+
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: "Failed to save fleet details" });
+  } finally {
+    conn.release();
+  }
+});
+
 // ─── Submission Routes ────────────────────────────────────────────────────────
 
 /**

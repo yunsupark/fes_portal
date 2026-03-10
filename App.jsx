@@ -273,6 +273,164 @@ function SubmissionHistory({ years, onStartEntry }) {
   );
 }
 
+// ─── Fleet Details Table ─────────────────────────────────────────────────────
+function FleetDetailsTable({ token }) {
+  const EDITABLE_YEARS = [2024, 2025];
+  const PRIOR_YEARS    = [2022, 2023];
+  const ALL_YEARS      = [...PRIOR_YEARS, ...EDITABLE_YEARS];
+
+  const [data,   setData]   = useState({});
+  const [edits,  setEdits]  = useState({});
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState(null); // null | 'saved' | 'error'
+
+  const loadData = async () => {
+    const r = await fetch('/api/fleet-details', { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return;
+    const d = await r.json();
+    setData(d);
+    const init = {};
+    EDITABLE_YEARS.forEach(yr => {
+      const row = d[yr] || {};
+      init[yr] = {
+        tractors:   row.tractors   ?? '',
+        trailers:   row.trailers   ?? '',
+        ifta_miles: row.ifta_miles ?? '',
+        ifta_fuel:  row.ifta_fuel  ?? '',
+      };
+    });
+    setEdits(init);
+  };
+
+  useEffect(() => { if (token) loadData(); }, [token]);
+
+  const setEdit = (yr, field, val) =>
+    setEdits(prev => ({ ...prev, [yr]: { ...prev[yr], [field]: val } }));
+
+  const calcMpg = (source) => {
+    const miles = parseFloat(source?.ifta_miles);
+    const fuel  = parseFloat(source?.ifta_fuel);
+    if (!miles || !fuel) return '—';
+    return (miles / fuel).toFixed(3);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setStatus(null);
+    try {
+      for (const yr of EDITABLE_YEARS) {
+        const e = edits[yr] || {};
+        await fetch(`/api/fleet-details/${yr}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({
+            tractors:   e.tractors   !== '' ? parseFloat(e.tractors)   : null,
+            trailers:   e.trailers   !== '' ? parseFloat(e.trailers)   : null,
+            ifta_miles: e.ifta_miles !== '' ? parseFloat(e.ifta_miles) : null,
+            ifta_fuel:  e.ifta_fuel  !== '' ? parseFloat(e.ifta_fuel)  : null,
+          }),
+        });
+      }
+      await loadData();
+      setStatus('saved');
+      setTimeout(() => setStatus(null), 3000);
+    } catch (err) {
+      console.error(err);
+      setStatus('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const displayVal = (yr, field) => {
+    const v = data[yr]?.[field];
+    return v != null ? fmt(v) : '—';
+  };
+
+  const SECTIONS = [
+    {
+      label: 'Equipment Utilization',
+      rows: [
+        { key: 'tractors',   label: 'Tractors' },
+        { key: 'trailers',   label: 'Trailers' },
+      ],
+    },
+    {
+      label: 'Fuel (IFTA)',
+      rows: [
+        { key: 'ifta_miles', label: 'IFTA Miles' },
+        { key: 'ifta_fuel',  label: 'IFTA Fuel (gal)' },
+        { key: 'mpg',        label: 'Fuel Economy (MPG)', readOnly: true },
+      ],
+    },
+  ];
+
+  return (
+    <div style={styles.chartCard}>
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
+        <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Details</h3>
+        <div style={{display:'flex', alignItems:'center', gap:12}}>
+          {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved successfully.</span>}
+          {status === 'error' && <span style={{color:'#dc2626', fontSize:13}}>Error saving. Try again.</span>}
+          <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+      <div style={{overflowX:'auto'}}>
+        <table style={styles.detailTable}>
+          <thead>
+            <tr>
+              <th style={styles.detailThLabel}>Field</th>
+              {ALL_YEARS.map(yr => (
+                <th key={yr} style={{
+                  ...styles.detailTh,
+                  ...(EDITABLE_YEARS.includes(yr) ? styles.detailThEditable : {}),
+                }}>
+                  {yr}{EDITABLE_YEARS.includes(yr) ? ' ✎' : ''}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {SECTIONS.map(({ label: sLabel, rows }) => (
+              <React.Fragment key={sLabel}>
+                <tr>
+                  <td colSpan={ALL_YEARS.length + 1} style={styles.detailSectionRow}>{sLabel}</td>
+                </tr>
+                {rows.map(({ key, label, readOnly }) => (
+                  <tr key={key}>
+                    <td style={styles.detailTdLabel}>{label}</td>
+                    {ALL_YEARS.map(yr => {
+                      const editable = EDITABLE_YEARS.includes(yr) && !readOnly;
+                      return (
+                        <td key={yr} style={{...styles.detailTd, ...(editable ? styles.detailTdEditable : {})}}>
+                          {editable ? (
+                            <input
+                              style={styles.detailInput}
+                              type="number"
+                              value={edits[yr]?.[key] ?? ''}
+                              onChange={e => setEdit(yr, key, e.target.value)}
+                              placeholder="—"
+                            />
+                          ) : key === 'mpg'
+                            ? calcMpg(EDITABLE_YEARS.includes(yr) ? edits[yr] : data[yr])
+                            : displayVal(yr, key)
+                          }
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function DataEntryForm({ fleet, categories = {}, prevTech = {}, generalData = {}, onCancel, onSave }) {
   const currentYear = new Date().getFullYear();
   const prevYear = currentYear - 1;
@@ -581,6 +739,9 @@ export default function App() {
           </div>
         </div>
 
+        {/* Fleet Details Table */}
+        <FleetDetailsTable token={token} />
+
         {/* Tech Heatmap */}
         <TechHeatmap techData={tech} years={fleet?.submissionYears} categories={techCategories} availableConfigs={availableConfigs} selectedConfig={selectedConfig} onConfigChange={setSelectedConfig} />
       </main>
@@ -707,4 +868,14 @@ const styles = {
   reviewItem: { display:"flex", justifyContent:"space-between", padding:"8px 14px", background:"#F9FAFB", borderRadius:6, border:"1px solid #E5E7EB" },
   reviewLabel: { color:"#6B7280", fontSize:13 },
   reviewValue: { color:"#111827", fontSize:13, fontFamily:"monospace" },
+  // Fleet Details Table
+  detailTable:      { width:"100%", borderCollapse:"collapse", fontSize:14 },
+  detailThLabel:    { padding:"8px 12px", textAlign:"left", borderBottom:"2px solid #E5E7EB", color:"#6B7280", fontWeight:600 },
+  detailTh:         { padding:"8px 16px", textAlign:"center", borderBottom:"2px solid #E5E7EB", color:"#6B7280", fontWeight:600, minWidth:110 },
+  detailThEditable: { color:"#1c3660", background:"#EEF4FF" },
+  detailTdLabel:    { padding:"8px 12px", textAlign:"left", borderBottom:"1px solid #F3F4F6", color:"#374151", fontWeight:500 },
+  detailTd:         { padding:"8px 16px", textAlign:"center", borderBottom:"1px solid #F3F4F6", color:"#374151" },
+  detailTdEditable: { background:"#F9FAFB", padding:"4px 8px" },
+  detailSectionRow: { background:"#F3F4F6", fontWeight:700, color:"#1c3660", padding:"6px 12px", fontSize:11, textTransform:"uppercase", letterSpacing:"0.06em" },
+  detailInput:      { width:"100%", border:"1px solid #D1D5DB", borderRadius:4, padding:"4px 8px", fontSize:14, textAlign:"center", outline:"none", boxSizing:"border-box" },
 };
