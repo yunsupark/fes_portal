@@ -290,20 +290,19 @@ app.get("/api/techs", requireAuth, async (req, res) => {
 
 /**
  * GET /api/fleet-details
- * Returns combined ffs_equip_utilization + ffs_mpg data keyed by year.
- * response: { "2023": { tractors, trailers, ifta_miles, ifta_fuel }, ... }
+ * Returns combined ffs_equip_utilization (per application row) + ffs_mpg keyed by year.
+ * response: { "2023": { utilization: [...], ifta_miles, ifta_fuel }, ... }
  */
 app.get("/api/fleet-details", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
   try {
     const [utilRows] = await db.query(
-      `SELECT utilization_year AS year,
-              SUM(utliz_tractor_qty) AS tractors,
-              SUM(utliz_trailer_qty) AS trailers
+      `SELECT utilization_year AS year, application,
+              utliz_tractor_qty AS tractors, utliz_trailer_qty AS trailers,
+              grossed_out_perc, cubed_out_perc, ave_length_haul, empty_miles_perc
        FROM ffs_equip_utilization
        WHERE fleet_id = ?
-       GROUP BY utilization_year
-       ORDER BY utilization_year`,
+       ORDER BY utilization_year, application`,
       [fleet_id]
     );
     const [mpgRows] = await db.query(
@@ -319,13 +318,19 @@ app.get("/api/fleet-details", requireAuth, async (req, res) => {
 
     const byYear = {};
     utilRows.forEach(r => {
-      byYear[r.year] = {
-        tractors: r.tractors != null ? parseFloat(r.tractors) : null,
-        trailers: r.trailers != null ? parseFloat(r.trailers) : null,
-      };
+      if (!byYear[r.year]) byYear[r.year] = { utilization: [], ifta_miles: null, ifta_fuel: null };
+      byYear[r.year].utilization.push({
+        application:      r.application || '',
+        tractors:         r.tractors         != null ? parseInt(r.tractors)          : null,
+        trailers:         r.trailers         != null ? parseInt(r.trailers)          : null,
+        grossed_out_perc: r.grossed_out_perc != null ? parseFloat(r.grossed_out_perc) : null,
+        cubed_out_perc:   r.cubed_out_perc   != null ? parseFloat(r.cubed_out_perc)   : null,
+        ave_length_haul:  r.ave_length_haul  != null ? parseInt(r.ave_length_haul)    : null,
+        empty_miles_perc: r.empty_miles_perc != null ? parseFloat(r.empty_miles_perc) : null,
+      });
     });
     mpgRows.forEach(r => {
-      if (!byYear[r.year]) byYear[r.year] = {};
+      if (!byYear[r.year]) byYear[r.year] = { utilization: [], ifta_miles: null, ifta_fuel: null };
       byYear[r.year].ifta_miles = r.ifta_miles != null ? parseFloat(r.ifta_miles) : null;
       byYear[r.year].ifta_fuel  = r.ifta_fuel  != null ? parseFloat(r.ifta_fuel)  : null;
     });
@@ -339,28 +344,40 @@ app.get("/api/fleet-details", requireAuth, async (req, res) => {
 
 /**
  * PUT /api/fleet-details/:year
- * Upserts one year's equip utilization and mpg data.
- * Body: { tractors, trailers, ifta_miles, ifta_fuel }
+ * Upserts one year's per-application utilization rows and mpg data.
+ * Body: { utilization: [{ application, tractors, trailers, grossed_out_perc, cubed_out_perc, ave_length_haul, empty_miles_perc }], ifta_miles, ifta_fuel }
  */
 app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
   const year = parseInt(req.params.year);
   if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
 
-  const { tractors, trailers, ifta_miles, ifta_fuel } = req.body;
+  const { utilization, ifta_miles, ifta_fuel } = req.body;
   const conn = await db.getConnection();
   try {
     await conn.beginTransaction();
 
-    if (tractors != null || trailers != null) {
-      await conn.query(
-        `INSERT INTO ffs_equip_utilization (fleet_id, utilization_year, utliz_tractor_qty, utliz_trailer_qty)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-           utliz_tractor_qty = VALUES(utliz_tractor_qty),
-           utliz_trailer_qty = VALUES(utliz_trailer_qty)`,
-        [fleet_id, year, tractors ?? null, trailers ?? null]
-      );
+    if (Array.isArray(utilization)) {
+      for (const row of utilization) {
+        await conn.query(
+          `INSERT INTO ffs_equip_utilization
+             (fleet_id, utilization_year, application,
+              utliz_tractor_qty, utliz_trailer_qty,
+              grossed_out_perc, cubed_out_perc, ave_length_haul, empty_miles_perc)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON DUPLICATE KEY UPDATE
+             utliz_tractor_qty = VALUES(utliz_tractor_qty),
+             utliz_trailer_qty = VALUES(utliz_trailer_qty),
+             grossed_out_perc  = VALUES(grossed_out_perc),
+             cubed_out_perc    = VALUES(cubed_out_perc),
+             ave_length_haul   = VALUES(ave_length_haul),
+             empty_miles_perc  = VALUES(empty_miles_perc)`,
+          [fleet_id, year, row.application ?? null,
+           row.tractors ?? null, row.trailers ?? null,
+           row.grossed_out_perc ?? null, row.cubed_out_perc ?? null,
+           row.ave_length_haul ?? null, row.empty_miles_perc ?? null]
+        );
+      }
     }
 
     if (ifta_miles != null || ifta_fuel != null) {

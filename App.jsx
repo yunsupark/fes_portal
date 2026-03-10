@@ -274,15 +274,30 @@ function SubmissionHistory({ years, onStartEntry }) {
 }
 
 // ─── Fleet Details Table ─────────────────────────────────────────────────────
+const APPLICATION_OPTIONS = [
+  'Van OTR (>400 mi/day)', 'Van regional (<400 mi/day)', 'Dedicated Van',
+  'LTL', 'Flatbed', 'Reefer', 'Tank', 'Intermodal', 'Metro P&D', 'Other',
+];
+
+const EMPTY_UTIL_ROW = () => ({
+  application: '', tractors: '', trailers: '',
+  grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
+});
+
 function FleetDetailsTable({ token }) {
   const EDITABLE_YEARS = [2024, 2025];
-  const PRIOR_YEARS    = [2022, 2023];
-  const ALL_YEARS      = [...PRIOR_YEARS, ...EDITABLE_YEARS];
+  const ALL_YEARS      = [2022, 2023, 2024, 2025];
 
-  const [data,   setData]   = useState({});
-  const [edits,  setEdits]  = useState({});
-  const [saving, setSaving] = useState(false);
-  const [status, setStatus] = useState(null); // null | 'saved' | 'error'
+  const [data,         setData]         = useState({});
+  const [edits,        setEdits]        = useState({});   // { year: { utilization: [...], ifta_miles, ifta_fuel } }
+  const [selectedYear, setSelectedYear] = useState(2024);
+  const [saving,       setSaving]       = useState(false);
+  const [status,       setStatus]       = useState(null);
+
+  // Convert stored ratio (0–1) → display pct string
+  const ratioPct = v => v != null ? (parseFloat(v) * 100).toFixed(1) : '';
+  // Convert display pct string → stored ratio
+  const pctRatio = s => s !== '' && s != null ? parseFloat(s) / 100 : null;
 
   const loadData = async () => {
     const r = await fetch('/api/fleet-details', { headers: { Authorization: `Bearer ${token}` } });
@@ -291,32 +306,57 @@ function FleetDetailsTable({ token }) {
     setData(d);
     const init = {};
     EDITABLE_YEARS.forEach(yr => {
-      const row = d[yr] || {};
+      const yd = d[yr] || {};
       init[yr] = {
-        tractors:   row.tractors   ?? '',
-        trailers:   row.trailers   ?? '',
-        ifta_miles: row.ifta_miles ?? '',
-        ifta_fuel:  row.ifta_fuel  ?? '',
+        ifta_miles: yd.ifta_miles ?? '',
+        ifta_fuel:  yd.ifta_fuel  ?? '',
+        utilization: (yd.utilization || []).map(row => ({
+          application:    row.application    ?? '',
+          tractors:       row.tractors       ?? '',
+          trailers:       row.trailers       ?? '',
+          grossed_out_pct: ratioPct(row.grossed_out_perc),
+          cubed_out_pct:   ratioPct(row.cubed_out_perc),
+          ave_length_haul: row.ave_length_haul ?? '',
+          empty_miles_pct: ratioPct(row.empty_miles_perc),
+        })),
       };
+      if (init[yr].utilization.length === 0) init[yr].utilization = [EMPTY_UTIL_ROW()];
     });
     setEdits(init);
   };
 
   useEffect(() => { if (token) loadData(); }, [token]);
 
-  const setEdit = (yr, field, val) =>
+  const setUtilCell = (yr, idx, field, val) =>
+    setEdits(prev => {
+      const rows = [...(prev[yr]?.utilization || [])];
+      rows[idx] = { ...rows[idx], [field]: val };
+      return { ...prev, [yr]: { ...prev[yr], utilization: rows } };
+    });
+
+  const addRow = (yr) =>
+    setEdits(prev => ({
+      ...prev,
+      [yr]: { ...prev[yr], utilization: [...(prev[yr]?.utilization || []), EMPTY_UTIL_ROW()] },
+    }));
+
+  const removeRow = (yr, idx) =>
+    setEdits(prev => {
+      const rows = (prev[yr]?.utilization || []).filter((_, i) => i !== idx);
+      return { ...prev, [yr]: { ...prev[yr], utilization: rows.length ? rows : [EMPTY_UTIL_ROW()] } };
+    });
+
+  const setIFTA = (yr, field, val) =>
     setEdits(prev => ({ ...prev, [yr]: { ...prev[yr], [field]: val } }));
 
-  const calcMpg = (source) => {
-    const miles = parseFloat(source?.ifta_miles);
-    const fuel  = parseFloat(source?.ifta_fuel);
-    if (!miles || !fuel) return '—';
-    return (miles / fuel).toFixed(3);
+  const calcMpg = (miles, fuel) => {
+    const m = parseFloat(miles), f = parseFloat(fuel);
+    if (!m || !f) return '—';
+    return (m / f).toFixed(3);
   };
 
   const handleSave = async () => {
-    setSaving(true);
-    setStatus(null);
+    setSaving(true); setStatus(null);
     try {
       for (const yr of EDITABLE_YEARS) {
         const e = edits[yr] || {};
@@ -324,8 +364,15 @@ function FleetDetailsTable({ token }) {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({
-            tractors:   e.tractors   !== '' ? parseFloat(e.tractors)   : null,
-            trailers:   e.trailers   !== '' ? parseFloat(e.trailers)   : null,
+            utilization: (e.utilization || []).filter(r => r.application).map(r => ({
+              application:      r.application,
+              tractors:         r.tractors       !== '' ? parseInt(r.tractors)        : null,
+              trailers:         r.trailers        !== '' ? parseInt(r.trailers)        : null,
+              grossed_out_perc: pctRatio(r.grossed_out_pct),
+              cubed_out_perc:   pctRatio(r.cubed_out_pct),
+              ave_length_haul:  r.ave_length_haul !== '' ? parseInt(r.ave_length_haul) : null,
+              empty_miles_perc: pctRatio(r.empty_miles_pct),
+            })),
             ifta_miles: e.ifta_miles !== '' ? parseFloat(e.ifta_miles) : null,
             ifta_fuel:  e.ifta_fuel  !== '' ? parseFloat(e.ifta_fuel)  : null,
           }),
@@ -342,88 +389,142 @@ function FleetDetailsTable({ token }) {
     }
   };
 
-  const displayVal = (yr, field) => {
-    const v = data[yr]?.[field];
+  const isEditable = EDITABLE_YEARS.includes(selectedYear);
+  const yd = isEditable ? (edits[selectedYear] || {}) : (data[selectedYear] || {});
+  const utilRows = isEditable ? (yd.utilization || []) : (yd.utilization || []);
+
+  const UTIL_COLS = [
+    { key: 'tractors',        label: 'Tractors',           type: 'int' },
+    { key: 'trailers',        label: 'Trailers',           type: 'int' },
+    { key: 'grossed_out_pct', label: 'Grossed Out %',      type: 'pct', dbKey: 'grossed_out_perc' },
+    { key: 'cubed_out_pct',   label: 'Cubed Out %',        type: 'pct', dbKey: 'cubed_out_perc'   },
+    { key: 'ave_length_haul', label: 'Avg Haul (mi)',      type: 'int' },
+    { key: 'empty_miles_pct', label: 'Empty Miles %',      type: 'pct', dbKey: 'empty_miles_perc' },
+  ];
+
+  const displayUtil = (row, col) => {
+    if (col.type === 'pct') {
+      const v = row[col.dbKey];
+      return v != null ? `${(parseFloat(v) * 100).toFixed(1)}%` : '—';
+    }
+    const v = row[col.key];
     return v != null ? fmt(v) : '—';
   };
 
-  const SECTIONS = [
-    {
-      label: 'Equipment Utilization',
-      rows: [
-        { key: 'tractors',   label: 'Tractors' },
-        { key: 'trailers',   label: 'Trailers' },
-      ],
-    },
-    {
-      label: 'Fuel (IFTA)',
-      rows: [
-        { key: 'ifta_miles', label: 'IFTA Miles' },
-        { key: 'ifta_fuel',  label: 'IFTA Fuel (gal)' },
-        { key: 'mpg',        label: 'Fuel Economy (MPG)', readOnly: true },
-      ],
-    },
-  ];
-
   return (
     <div style={styles.chartCard}>
-      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
+      {/* Header */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Details</h3>
-        <div style={{display:'flex', alignItems:'center', gap:12}}>
-          {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved successfully.</span>}
-          {status === 'error' && <span style={{color:'#dc2626', fontSize:13}}>Error saving. Try again.</span>}
-          <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+        <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+          {/* Year tabs */}
+          {ALL_YEARS.map(yr => (
+            <button key={yr} onClick={() => setSelectedYear(yr)} style={{
+              padding:'4px 14px', borderRadius:6, border:'1px solid',
+              fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
+              borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
+              background: yr === selectedYear ? '#1c3660' : '#fff',
+              color: yr === selectedYear ? '#fff' : '#374151',
+            }}>
+              {yr}{EDITABLE_YEARS.includes(yr) ? ' ✎' : ''}
+            </button>
+          ))}
+          {isEditable && <>
+            {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
+            {status === 'error' && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
+            <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </>}
         </div>
       </div>
+
+      {/* Equipment Utilization */}
+      <div style={styles.detailSectionRow}>Equipment Utilization</div>
+      <div style={{overflowX:'auto', marginBottom:16}}>
+        <table style={styles.detailTable}>
+          <thead>
+            <tr>
+              <th style={{...styles.detailThLabel, minWidth:180}}>Application</th>
+              {UTIL_COLS.map(c => <th key={c.key} style={styles.detailTh}>{c.label}</th>)}
+              {isEditable && <th style={styles.detailTh}></th>}
+            </tr>
+          </thead>
+          <tbody>
+            {utilRows.length === 0
+              ? <tr><td colSpan={UTIL_COLS.length + 2} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data</td></tr>
+              : utilRows.map((row, idx) => (
+                <tr key={idx}>
+                  <td style={{...styles.detailTdLabel, ...(isEditable ? styles.detailTdEditable : {})}}>
+                    {isEditable ? (
+                      <select style={{...styles.detailInput, textAlign:'left'}}
+                        value={row.application}
+                        onChange={e => setUtilCell(selectedYear, idx, 'application', e.target.value)}>
+                        <option value="">— select —</option>
+                        {APPLICATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                      </select>
+                    ) : row.application || '—'}
+                  </td>
+                  {UTIL_COLS.map(col => (
+                    <td key={col.key} style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
+                      {isEditable ? (
+                        <input style={styles.detailInput} type="number"
+                          value={row[col.key] ?? ''}
+                          onChange={e => setUtilCell(selectedYear, idx, col.key, e.target.value)}
+                          placeholder="—" />
+                      ) : displayUtil(row, col)}
+                    </td>
+                  ))}
+                  {isEditable && (
+                    <td style={styles.detailTd}>
+                      <button onClick={() => removeRow(selectedYear, idx)}
+                        style={{background:'none', border:'none', color:'#9CA3AF', cursor:'pointer', fontSize:16}}>✕</button>
+                    </td>
+                  )}
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      {isEditable && (
+        <button onClick={() => addRow(selectedYear)}
+          style={{...styles.btnGhost, fontSize:13, marginBottom:20}}>+ Add Application Row</button>
+      )}
+
+      {/* IFTA / Fuel */}
+      <div style={styles.detailSectionRow}>Fuel (IFTA)</div>
       <div style={{overflowX:'auto'}}>
         <table style={styles.detailTable}>
           <thead>
             <tr>
               <th style={styles.detailThLabel}>Field</th>
-              {ALL_YEARS.map(yr => (
-                <th key={yr} style={{
-                  ...styles.detailTh,
-                  ...(EDITABLE_YEARS.includes(yr) ? styles.detailThEditable : {}),
-                }}>
-                  {yr}{EDITABLE_YEARS.includes(yr) ? ' ✎' : ''}
-                </th>
-              ))}
+              <th style={styles.detailTh}>Value</th>
             </tr>
           </thead>
           <tbody>
-            {SECTIONS.map(({ label: sLabel, rows }) => (
-              <React.Fragment key={sLabel}>
-                <tr>
-                  <td colSpan={ALL_YEARS.length + 1} style={styles.detailSectionRow}>{sLabel}</td>
-                </tr>
-                {rows.map(({ key, label, readOnly }) => (
-                  <tr key={key}>
-                    <td style={styles.detailTdLabel}>{label}</td>
-                    {ALL_YEARS.map(yr => {
-                      const editable = EDITABLE_YEARS.includes(yr) && !readOnly;
-                      return (
-                        <td key={yr} style={{...styles.detailTd, ...(editable ? styles.detailTdEditable : {})}}>
-                          {editable ? (
-                            <input
-                              style={styles.detailInput}
-                              type="number"
-                              value={edits[yr]?.[key] ?? ''}
-                              onChange={e => setEdit(yr, key, e.target.value)}
-                              placeholder="—"
-                            />
-                          ) : key === 'mpg'
-                            ? calcMpg(EDITABLE_YEARS.includes(yr) ? edits[yr] : data[yr])
-                            : displayVal(yr, key)
-                          }
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </React.Fragment>
+            {[
+              { key: 'ifta_miles', label: 'IFTA Miles' },
+              { key: 'ifta_fuel',  label: 'IFTA Fuel (gal)' },
+            ].map(({ key, label }) => (
+              <tr key={key}>
+                <td style={styles.detailTdLabel}>{label}</td>
+                <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
+                  {isEditable ? (
+                    <input style={{...styles.detailInput, maxWidth:180}} type="number"
+                      value={yd[key] ?? ''}
+                      onChange={e => setIFTA(selectedYear, key, e.target.value)}
+                      placeholder="—" />
+                  ) : yd[key] != null ? fmt(yd[key]) : '—'}
+                </td>
+              </tr>
             ))}
+            <tr>
+              <td style={styles.detailTdLabel}>Fuel Economy (MPG)</td>
+              <td style={styles.detailTd}>
+                {calcMpg(isEditable ? yd.ifta_miles : yd.ifta_miles, isEditable ? yd.ifta_fuel : yd.ifta_fuel)}
+              </td>
+            </tr>
           </tbody>
         </table>
       </div>
