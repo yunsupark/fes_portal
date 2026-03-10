@@ -402,6 +402,102 @@ app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Fleet Equipment Routes ───────────────────────────────────────────────────
+
+/**
+ * GET /api/fleet-equip
+ * Returns all ffs_fleet_equip rows keyed by equip_year.
+ */
+app.get("/api/fleet-equip", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [rows] = await db.query(
+      `SELECT fleet_equip_id, equip_year, qty, cab_type,
+              tractor_make, tractor_model,
+              engine_make, engine_model, engine_rating,
+              transmission_make, transmission_model,
+              axle_make, axle_model, axle_ratio
+       FROM ffs_fleet_equip
+       WHERE fleet_id = ?
+       ORDER BY equip_year, fleet_equip_id`,
+      [fleet_id]
+    );
+    const byYear = {};
+    rows.forEach(r => {
+      if (!byYear[r.equip_year]) byYear[r.equip_year] = [];
+      byYear[r.equip_year].push({
+        fleet_equip_id:    r.fleet_equip_id,
+        qty:               r.qty,
+        cab_type:          r.cab_type          || '',
+        tractor_make:      r.tractor_make      || '',
+        tractor_model:     r.tractor_model     || '',
+        engine_make:       r.engine_make       || '',
+        engine_model:      r.engine_model      || '',
+        engine_rating:     r.engine_rating     || '',
+        transmission_make:  r.transmission_make  || '',
+        transmission_model: r.transmission_model || '',
+        axle_make:         r.axle_make         || '',
+        axle_model:        r.axle_model        || '',
+        axle_ratio:        r.axle_ratio != null ? parseFloat(r.axle_ratio) : null,
+      });
+    });
+    res.json(byYear);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * PUT /api/fleet-equip/:year
+ * Replaces all equipment rows for this fleet and equip_year.
+ * Body: { rows: [{ qty, cab_type, tractor_make, ... }] }
+ */
+app.put("/api/fleet-equip/:year", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const year = parseInt(req.params.year);
+  if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
+
+  const { rows } = req.body;
+  if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array required" });
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query(
+      "DELETE FROM ffs_fleet_equip WHERE fleet_id = ? AND equip_year = ?",
+      [fleet_id, year]
+    );
+    for (const r of rows) {
+      await conn.query(
+        `INSERT INTO ffs_fleet_equip
+           (fleet_id, equip_year, qty, cab_type,
+            tractor_make, tractor_model,
+            engine_make, engine_model, engine_rating,
+            transmission_make, transmission_model,
+            axle_make, axle_model, axle_ratio)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [fleet_id, year,
+         r.qty               || null, r.cab_type          || null,
+         r.tractor_make      || null, r.tractor_model     || null,
+         r.engine_make       || null, r.engine_model      || null,
+         r.engine_rating     || null,
+         r.transmission_make  || null, r.transmission_model || null,
+         r.axle_make         || null, r.axle_model        || null,
+         r.axle_ratio != null && r.axle_ratio !== '' ? parseFloat(r.axle_ratio) : null]
+      );
+    }
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: "Failed to save fleet equipment" });
+  } finally {
+    conn.release();
+  }
+});
+
 // ─── Submission Routes ────────────────────────────────────────────────────────
 
 /**

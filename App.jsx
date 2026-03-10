@@ -532,6 +532,174 @@ function FleetDetailsTable({ token }) {
   );
 }
 
+// ─── Fleet Equipment Table ────────────────────────────────────────────────────
+const EMPTY_EQUIP_ROW = () => ({
+  qty: '', cab_type: '', tractor_make: '', tractor_model: '',
+  engine_make: '', engine_model: '', engine_rating: '',
+  transmission_make: '', transmission_model: '',
+  axle_make: '', axle_model: '', axle_ratio: '',
+});
+
+const EQUIP_COLS = [
+  { key: 'qty',                label: 'Qty',              type: 'int',  width: 60  },
+  { key: 'cab_type',           label: 'Cab Type',         type: 'text', width: 100 },
+  { key: 'tractor_make',       label: 'Tractor Make',     type: 'text', width: 120 },
+  { key: 'tractor_model',      label: 'Tractor Model',    type: 'text', width: 130 },
+  { key: 'engine_make',        label: 'Engine Make',      type: 'text', width: 110 },
+  { key: 'engine_model',       label: 'Engine Model',     type: 'text', width: 120 },
+  { key: 'engine_rating',      label: 'Engine Rating',    type: 'text', width: 110 },
+  { key: 'transmission_make',  label: 'Trans Make',       type: 'text', width: 110 },
+  { key: 'transmission_model', label: 'Trans Model',      type: 'text', width: 120 },
+  { key: 'axle_make',          label: 'Axle Make',        type: 'text', width: 100 },
+  { key: 'axle_model',         label: 'Axle Model',       type: 'text', width: 100 },
+  { key: 'axle_ratio',         label: 'Axle Ratio',       type: 'dec',  width: 90  },
+];
+
+function FleetEquipTable({ token }) {
+  const [data,         setData]         = useState({});  // { year: [rows] }
+  const [edits,        setEdits]        = useState({});  // { year: [rows] }
+  const [years,        setYears]        = useState([]);  // sorted list of available years
+  const [selectedYear, setSelectedYear] = useState(null);
+  const [saving,       setSaving]       = useState(false);
+  const [status,       setStatus]       = useState(null);
+
+  const loadData = async () => {
+    const r = await fetch('/api/fleet-equip', { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return;
+    const d = await r.json();
+    setData(d);
+    const yrList = Object.keys(d).map(Number).sort((a, b) => b - a);
+    setYears(yrList);
+    setSelectedYear(prev => prev ?? (yrList[0] || 2024));
+    // seed edits for each year
+    const init = {};
+    yrList.forEach(yr => {
+      init[yr] = (d[yr] || []).map(row => ({ ...row }));
+    });
+    // ensure 2024 and 2025 exist in edits even if no DB data
+    [2024, 2025].forEach(yr => {
+      if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()];
+    });
+    setEdits(init);
+  };
+
+  useEffect(() => { if (token) loadData(); }, [token]);
+
+  // Ensure newly selected year has edits initialized
+  useEffect(() => {
+    if (selectedYear == null) return;
+    setEdits(prev => {
+      if (prev[selectedYear]) return prev;
+      return { ...prev, [selectedYear]: [EMPTY_EQUIP_ROW()] };
+    });
+    setYears(prev => prev.includes(selectedYear) ? prev : [...prev, selectedYear].sort((a, b) => b - a));
+  }, [selectedYear]);
+
+  const setCell = (yr, idx, field, val) =>
+    setEdits(prev => {
+      const rows = [...(prev[yr] || [])];
+      rows[idx] = { ...rows[idx], [field]: val };
+      return { ...prev, [yr]: rows };
+    });
+
+  const addRow = (yr) =>
+    setEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_EQUIP_ROW()] }));
+
+  const removeRow = (yr, idx) =>
+    setEdits(prev => {
+      const rows = (prev[yr] || []).filter((_, i) => i !== idx);
+      return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
+    });
+
+  const handleSave = async () => {
+    if (selectedYear == null) return;
+    setSaving(true); setStatus(null);
+    try {
+      const rows = (edits[selectedYear] || []).filter(r => r.qty || r.tractor_make || r.cab_type);
+      await fetch(`/api/fleet-equip/${selectedYear}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rows }),
+      });
+      await loadData();
+      setStatus('saved');
+      setTimeout(() => setStatus(null), 3000);
+    } catch (err) {
+      console.error(err);
+      setStatus('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const displayRows = edits[selectedYear] || data[selectedYear] || [];
+  const allYearsForTabs = [...new Set([...years, 2024, 2025])].sort((a, b) => b - a);
+
+  return (
+    <div style={styles.chartCard}>
+      {/* Header */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
+        <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Equipment</h3>
+        <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+          {allYearsForTabs.map(yr => (
+            <button key={yr} onClick={() => setSelectedYear(yr)} style={{
+              padding:'4px 14px', borderRadius:6, border:'1px solid',
+              fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
+              borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
+              background: yr === selectedYear ? '#1c3660' : '#fff',
+              color: yr === selectedYear ? '#fff' : '#374151',
+            }}>{yr}</button>
+          ))}
+          {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
+          {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
+          <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{overflowX:'auto'}}>
+        <table style={styles.detailTable}>
+          <thead>
+            <tr>
+              {EQUIP_COLS.map(c => (
+                <th key={c.key} style={{...styles.detailTh, minWidth: c.width}}>{c.label}</th>
+              ))}
+              <th style={styles.detailTh}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {displayRows.length === 0
+              ? <tr><td colSpan={EQUIP_COLS.length + 1} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data for this year</td></tr>
+              : displayRows.map((row, idx) => (
+                <tr key={idx}>
+                  {EQUIP_COLS.map(col => (
+                    <td key={col.key} style={{...styles.detailTd, ...styles.detailTdEditable}}>
+                      <input
+                        style={{...styles.detailInput, textAlign: col.type === 'text' ? 'left' : 'center'}}
+                        type={col.type === 'text' ? 'text' : 'number'}
+                        value={row[col.key] ?? ''}
+                        onChange={e => setCell(selectedYear, idx, col.key, e.target.value)}
+                        placeholder="—"
+                      />
+                    </td>
+                  ))}
+                  <td style={styles.detailTd}>
+                    <button onClick={() => removeRow(selectedYear, idx)}
+                      style={{background:'none', border:'none', color:'#9CA3AF', cursor:'pointer', fontSize:16}}>✕</button>
+                  </td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+      <button onClick={() => addRow(selectedYear)}
+        style={{...styles.btnGhost, fontSize:13, marginTop:12}}>+ Add Row</button>
+    </div>
+  );
+}
+
 function DataEntryForm({ fleet, categories = {}, prevTech = {}, generalData = {}, onCancel, onSave }) {
   const currentYear = new Date().getFullYear();
   const prevYear = currentYear - 1;
@@ -842,6 +1010,9 @@ export default function App() {
 
         {/* Fleet Details Table */}
         <FleetDetailsTable token={token} />
+
+        {/* Fleet Equipment Table */}
+        <FleetEquipTable token={token} />
 
         {/* Tech Heatmap */}
         <TechHeatmap techData={tech} years={fleet?.submissionYears} categories={techCategories} availableConfigs={availableConfigs} selectedConfig={selectedConfig} onConfigChange={setSelectedConfig} />
