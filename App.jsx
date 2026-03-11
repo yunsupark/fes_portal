@@ -551,25 +551,16 @@ const ENGINE_MAKE_LIMITS = {
   'Hyundai':      null,
 };
 
-// Reusable dropdown that falls back to a text input when "Other" is chosen
+// Reusable dropdown that falls back to a text input when "Other" is chosen.
+// External resets are handled by re-keying EquipCell, which remounts this component.
 function SelectOrOther({ options, value, onChange, placeholder = '—', inputType = 'text', width }) {
-  const valueInList = options.includes(value);
-  // isOther: true if user explicitly chose Other, OR existing value isn't in the list
-  const [isOther, setIsOther] = useState(!valueInList && value !== '' && value != null);
-
-  // Sync when value is cleared externally (e.g. tractor make change resets engine fields)
-  useEffect(() => {
-    if (value === '' || value == null) setIsOther(false);
-    else if (!options.includes(value)) setIsOther(true);
-  }, [value, JSON.stringify(options)]);
-
-  const selectVal  = isOther ? '__other__' : (value || '');
+  const [isOther, setIsOther] = useState(() => value !== '' && value != null && !options.includes(value));
   const inputStyle = { border:'1px solid #D1D5DB', borderRadius:4, padding:'3px 6px', fontSize:13, background:'#fff', width: width || '100%', boxSizing:'border-box' };
 
   return (
     <div style={{display:'flex', flexDirection:'column', gap:3}}>
-      <select value={selectVal} onChange={e => {
-        if (e.target.value === '__other__') { setIsOther(true); onChange(''); }
+      <select value={isOther ? '__other__' : (value || '')} onChange={e => {
+        if (e.target.value === '__other__') { setIsOther(true); }
         else { setIsOther(false); onChange(e.target.value); }
       }} style={inputStyle}>
         <option value="">{placeholder}</option>
@@ -763,6 +754,7 @@ function FleetEquipTable({ token }) {
                   {EQUIP_COLS.map(col => (
                     <td key={col.key} style={{...styles.detailTd, ...styles.detailTdEditable, verticalAlign:'top'}}>
                       <EquipCell
+                        key={`${idx}-${col.key}-${row.tractor_make}-${row.engine_make}`}
                         colKey={col.key}
                         row={row}
                         onChange={val => setCell(selectedYear, idx, col.key, val)}
