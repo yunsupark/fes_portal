@@ -550,6 +550,8 @@ const ENGINE_MAKE_LIMITS = {
   'Tesla':        null,
   'Hyundai':      null,
 };
+// Specific make+model combos that are electric/fuel-cell (engine = N/A)
+const NA_MODELS = new Set(['Freightliner:eCascadia', 'Kenworth:T680e']);
 
 // Reusable dropdown that falls back to a text input when "Other" is chosen.
 // External resets are handled by re-keying EquipCell, which remounts this component.
@@ -593,7 +595,7 @@ const EQUIP_COLS = [
 function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
   const tractorMake = row.tractor_make;
   const engineMake  = row.engine_make;
-  const isNA        = ENGINE_MAKE_LIMITS[tractorMake] === null;
+  const isNA        = ENGINE_MAKE_LIMITS[tractorMake] === null || NA_MODELS.has(`${tractorMake}:${row.tractor_model}`);
   const inputStyle  = { border:'1px solid #D1D5DB', borderRadius:4, padding:'3px 6px', fontSize:13, width:'100%', boxSizing:'border-box' };
 
   if (colKey === 'qty') {
