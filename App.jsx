@@ -285,40 +285,47 @@ const EMPTY_UTIL_ROW = () => ({
 });
 
 function FleetDetailsTable({ token }) {
-  const EDITABLE_YEARS = [2024, 2025];
-  const ALL_YEARS      = [2022, 2023, 2024, 2025];
+  const NUM_YEARS = 5;
 
-  const [data,         setData]         = useState({});
-  const [edits,        setEdits]        = useState({});   // { year: { utilization: [...], ifta_miles, ifta_fuel } }
-  const [selectedYear, setSelectedYear] = useState(2024);
-  const [saving,       setSaving]       = useState(false);
-  const [status,       setStatus]       = useState(null);
+  const [data,            setData]           = useState({});
+  const [edits,           setEdits]          = useState({});
+  const [years,           setYears]          = useState([]);
+  const [selectedYear,    setSelectedYear]   = useState(null);
+  const [saving,          setSaving]         = useState(false);
+  const [status,          setStatus]         = useState(null);
+  const [showCopyPicker,  setShowCopyPicker] = useState(false);
 
-  // Convert stored ratio (0–1) → display pct string
   const ratioPct = v => v != null ? (parseFloat(v) * 100).toFixed(1) : '';
-  // Convert display pct string → stored ratio
   const pctRatio = s => s !== '' && s != null ? parseFloat(s) / 100 : null;
+
+  const toEditRow = row => ({
+    application:     row.application     ?? '',
+    tractors:        row.tractors        ?? '',
+    trailers:        row.trailers        ?? '',
+    grossed_out_pct: ratioPct(row.grossed_out_perc),
+    cubed_out_pct:   ratioPct(row.cubed_out_perc),
+    ave_length_haul: row.ave_length_haul ?? '',
+    empty_miles_pct: ratioPct(row.empty_miles_perc),
+  });
 
   const loadData = async () => {
     const r = await fetch('/api/fleet-details', { headers: { Authorization: `Bearer ${token}` } });
     if (!r.ok) return;
     const d = await r.json();
     setData(d);
+    // Build year list: DB years + 2024/2025, sorted descending, take NUM_YEARS
+    const dbYears = Object.keys(d).map(Number);
+    const yrList  = [...new Set([...dbYears, 2024, 2025])].sort((a, b) => b - a).slice(0, NUM_YEARS);
+    setYears(yrList);
+    setSelectedYear(prev => prev ?? yrList[0]);
+    // Seed edits for all displayed years
     const init = {};
-    EDITABLE_YEARS.forEach(yr => {
+    yrList.forEach(yr => {
       const yd = d[yr] || {};
       init[yr] = {
-        ifta_miles: yd.ifta_miles ?? '',
-        ifta_fuel:  yd.ifta_fuel  ?? '',
-        utilization: (yd.utilization || []).map(row => ({
-          application:    row.application    ?? '',
-          tractors:       row.tractors       ?? '',
-          trailers:       row.trailers       ?? '',
-          grossed_out_pct: ratioPct(row.grossed_out_perc),
-          cubed_out_pct:   ratioPct(row.cubed_out_perc),
-          ave_length_haul: row.ave_length_haul ?? '',
-          empty_miles_pct: ratioPct(row.empty_miles_perc),
-        })),
+        ifta_miles:  yd.ifta_miles ?? '',
+        ifta_fuel:   yd.ifta_fuel  ?? '',
+        utilization: (yd.utilization || []).map(toEditRow),
       };
       if (init[yr].utilization.length === 0) init[yr].utilization = [EMPTY_UTIL_ROW()];
     });
@@ -327,6 +334,13 @@ function FleetDetailsTable({ token }) {
 
   useEffect(() => { if (token) loadData(); }, [token]);
 
+  useEffect(() => {
+    if (selectedYear == null) return;
+    setEdits(prev => prev[selectedYear] ? prev : {
+      ...prev, [selectedYear]: { ifta_miles: '', ifta_fuel: '', utilization: [EMPTY_UTIL_ROW()] },
+    });
+  }, [selectedYear]);
+
   const setUtilCell = (yr, idx, field, val) =>
     setEdits(prev => {
       const rows = [...(prev[yr]?.utilization || [])];
@@ -334,10 +348,10 @@ function FleetDetailsTable({ token }) {
       return { ...prev, [yr]: { ...prev[yr], utilization: rows } };
     });
 
-  const addRow = (yr) =>
+  const addRow = (yr, template = null) =>
     setEdits(prev => ({
       ...prev,
-      [yr]: { ...prev[yr], utilization: [...(prev[yr]?.utilization || []), EMPTY_UTIL_ROW()] },
+      [yr]: { ...prev[yr], utilization: [...(prev[yr]?.utilization || []), template ? { ...template } : EMPTY_UTIL_ROW()] },
     }));
 
   const removeRow = (yr, idx) =>
@@ -356,28 +370,27 @@ function FleetDetailsTable({ token }) {
   };
 
   const handleSave = async () => {
+    if (selectedYear == null) return;
     setSaving(true); setStatus(null);
     try {
-      for (const yr of EDITABLE_YEARS) {
-        const e = edits[yr] || {};
-        await fetch(`/api/fleet-details/${yr}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({
-            utilization: (e.utilization || []).filter(r => r.application).map(r => ({
-              application:      r.application,
-              tractors:         r.tractors       !== '' ? parseInt(r.tractors)        : null,
-              trailers:         r.trailers        !== '' ? parseInt(r.trailers)        : null,
-              grossed_out_perc: pctRatio(r.grossed_out_pct),
-              cubed_out_perc:   pctRatio(r.cubed_out_pct),
-              ave_length_haul:  r.ave_length_haul !== '' ? parseInt(r.ave_length_haul) : null,
-              empty_miles_perc: pctRatio(r.empty_miles_pct),
-            })),
-            ifta_miles: e.ifta_miles !== '' ? parseFloat(e.ifta_miles) : null,
-            ifta_fuel:  e.ifta_fuel  !== '' ? parseFloat(e.ifta_fuel)  : null,
-          }),
-        });
-      }
+      const e = edits[selectedYear] || {};
+      await fetch(`/api/fleet-details/${selectedYear}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          utilization: (e.utilization || []).filter(r => r.application).map(r => ({
+            application:      r.application,
+            tractors:         r.tractors       !== '' ? parseInt(r.tractors)        : null,
+            trailers:         r.trailers        !== '' ? parseInt(r.trailers)        : null,
+            grossed_out_perc: pctRatio(r.grossed_out_pct),
+            cubed_out_perc:   pctRatio(r.cubed_out_pct),
+            ave_length_haul:  r.ave_length_haul !== '' ? parseInt(r.ave_length_haul) : null,
+            empty_miles_perc: pctRatio(r.empty_miles_pct),
+          })),
+          ifta_miles: e.ifta_miles !== '' ? parseFloat(e.ifta_miles) : null,
+          ifta_fuel:  e.ifta_fuel  !== '' ? parseFloat(e.ifta_fuel)  : null,
+        }),
+      });
       await loadData();
       setStatus('saved');
       setTimeout(() => setStatus(null), 3000);
@@ -389,27 +402,26 @@ function FleetDetailsTable({ token }) {
     }
   };
 
-  const isEditable = EDITABLE_YEARS.includes(selectedYear);
-  const yd = isEditable ? (edits[selectedYear] || {}) : (data[selectedYear] || {});
-  const utilRows = isEditable ? (yd.utilization || []) : (yd.utilization || []);
-
   const UTIL_COLS = [
-    { key: 'tractors',        label: 'Tractors',           type: 'int' },
-    { key: 'trailers',        label: 'Trailers',           type: 'int' },
-    { key: 'grossed_out_pct', label: 'Grossed Out %',      type: 'pct', dbKey: 'grossed_out_perc' },
-    { key: 'cubed_out_pct',   label: 'Cubed Out %',        type: 'pct', dbKey: 'cubed_out_perc'   },
-    { key: 'ave_length_haul', label: 'Avg Haul (mi)',      type: 'int' },
-    { key: 'empty_miles_pct', label: 'Empty Miles %',      type: 'pct', dbKey: 'empty_miles_perc' },
+    { key: 'tractors',        label: 'Tractors',      type: 'int' },
+    { key: 'trailers',        label: 'Trailers',      type: 'int' },
+    { key: 'grossed_out_pct', label: 'Grossed Out %', type: 'pct', dbKey: 'grossed_out_perc' },
+    { key: 'cubed_out_pct',   label: 'Cubed Out %',   type: 'pct', dbKey: 'cubed_out_perc'   },
+    { key: 'ave_length_haul', label: 'Avg Haul (mi)', type: 'int' },
+    { key: 'empty_miles_pct', label: 'Empty Miles %', type: 'pct', dbKey: 'empty_miles_perc' },
   ];
 
-  const displayUtil = (row, col) => {
-    if (col.type === 'pct') {
-      const v = row[col.dbKey];
-      return v != null ? `${(parseFloat(v) * 100).toFixed(1)}%` : '—';
-    }
-    const v = row[col.key];
-    return v != null ? fmt(v) : '—';
-  };
+  // All non-empty utilization rows across all years for copy picker
+  const allExistingRows = Object.entries(edits)
+    .sort(([a], [b]) => b - a)
+    .flatMap(([yr, yd]) =>
+      (yd.utilization || [])
+        .filter(r => r.application)
+        .map(r => ({ year: parseInt(yr), row: r }))
+    );
+
+  const yd       = edits[selectedYear] || {};
+  const utilRows = yd.utilization || [];
 
   return (
     <div style={styles.chartCard}>
@@ -417,37 +429,32 @@ function FleetDetailsTable({ token }) {
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Details</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          {/* Year tabs */}
-          {ALL_YEARS.map(yr => (
+          {years.map(yr => (
             <button key={yr} onClick={() => setSelectedYear(yr)} style={{
               padding:'4px 14px', borderRadius:6, border:'1px solid',
               fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
-              background: yr === selectedYear ? '#1c3660' : '#fff',
-              color: yr === selectedYear ? '#fff' : '#374151',
-            }}>
-              {yr}{EDITABLE_YEARS.includes(yr) ? ' ✎' : ''}
-            </button>
+              background:  yr === selectedYear ? '#1c3660' : '#fff',
+              color:        yr === selectedYear ? '#fff' : '#374151',
+            }}>{yr}</button>
           ))}
-          {isEditable && <>
-            {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
-            {status === 'error' && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
-            <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : 'Save Changes'}
-            </button>
-          </>}
+          {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
+          {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
+          <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
         </div>
       </div>
 
       {/* Equipment Utilization */}
       <div style={styles.detailSectionRow}>Equipment Utilization</div>
-      <div style={{overflowX:'auto', marginBottom:16}}>
+      <div style={{overflowX:'auto', marginBottom:12}}>
         <table style={styles.detailTable}>
           <thead>
             <tr>
+              <th style={{...styles.detailTh, minWidth:70}}></th>
               <th style={{...styles.detailThLabel, minWidth:180}}>Application</th>
               {UTIL_COLS.map(c => <th key={c.key} style={styles.detailTh}>{c.label}</th>)}
-              {isEditable && <th style={styles.detailTh}></th>}
             </tr>
           </thead>
           <tbody>
@@ -455,42 +462,75 @@ function FleetDetailsTable({ token }) {
               ? <tr><td colSpan={UTIL_COLS.length + 2} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data</td></tr>
               : utilRows.map((row, idx) => (
                 <tr key={idx}>
-                  <td style={{...styles.detailTdLabel, ...(isEditable ? styles.detailTdEditable : {})}}>
-                    {isEditable ? (
-                      <select style={{...styles.detailInput, textAlign:'left'}}
-                        value={row.application}
-                        onChange={e => setUtilCell(selectedYear, idx, 'application', e.target.value)}>
-                        <option value="">— select —</option>
-                        {APPLICATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                    ) : row.application || '—'}
+                  <td style={{...styles.detailTd, textAlign:'center'}}>
+                    <button onClick={() => removeRow(selectedYear, idx)} style={{
+                      background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                      borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
+                    }}>Remove</button>
+                  </td>
+                  <td style={{...styles.detailTdLabel, ...styles.detailTdEditable}}>
+                    <select style={{...styles.detailInput, textAlign:'left'}}
+                      value={row.application}
+                      onChange={e => setUtilCell(selectedYear, idx, 'application', e.target.value)}>
+                      <option value="">— select —</option>
+                      {APPLICATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
                   </td>
                   {UTIL_COLS.map(col => (
-                    <td key={col.key} style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
-                      {isEditable ? (
-                        <input style={styles.detailInput} type="number"
-                          value={row[col.key] ?? ''}
-                          onChange={e => setUtilCell(selectedYear, idx, col.key, e.target.value)}
-                          placeholder="—" />
-                      ) : displayUtil(row, col)}
+                    <td key={col.key} style={{...styles.detailTd, ...styles.detailTdEditable}}>
+                      <input style={styles.detailInput} type="number"
+                        value={row[col.key] ?? ''}
+                        onChange={e => setUtilCell(selectedYear, idx, col.key, e.target.value)}
+                        placeholder="—" />
                     </td>
                   ))}
-                  {isEditable && (
-                    <td style={styles.detailTd}>
-                      <button onClick={() => removeRow(selectedYear, idx)}
-                        style={{background:'none', border:'none', color:'#9CA3AF', cursor:'pointer', fontSize:16}}>✕</button>
-                    </td>
-                  )}
                 </tr>
               ))
             }
           </tbody>
         </table>
       </div>
-      {isEditable && (
-        <button onClick={() => addRow(selectedYear)}
-          style={{...styles.btnGhost, fontSize:13, marginBottom:20}}>+ Add Application Row</button>
-      )}
+
+      {/* Add / Copy row controls */}
+      <div style={{display:'flex', gap:8, marginBottom:20, alignItems:'flex-start'}}>
+        <button onClick={() => addRow(selectedYear)} style={{...styles.btnGhost, fontSize:13}}>+ Add Row</button>
+        <div style={{position:'relative'}}>
+          <button onClick={() => setShowCopyPicker(p => !p)} style={{...styles.btnGhost, fontSize:13}}>
+            + Copy from Existing
+          </button>
+          {showCopyPicker && (
+            <div style={{position:'absolute', top:'100%', left:0, marginTop:4, background:'#fff', border:'1px solid #D1D5DB', borderRadius:8, boxShadow:'0 4px 20px rgba(0,0,0,0.15)', zIndex:200, minWidth:360, maxHeight:300, overflowY:'auto'}}>
+              {allExistingRows.length === 0
+                ? <div style={{padding:16, color:'#9CA3AF', fontSize:13}}>No existing rows to copy from.</div>
+                : (() => {
+                    const byYear = allExistingRows.reduce((acc, item) => {
+                      if (!acc[item.year]) acc[item.year] = [];
+                      acc[item.year].push(item);
+                      return acc;
+                    }, {});
+                    return Object.entries(byYear).sort(([a],[b]) => b-a).map(([yr, items]) => (
+                      <div key={yr}>
+                        <div style={{padding:'6px 12px', background:'#F3F4F6', fontSize:11, fontWeight:700, color:'#1c3660', textTransform:'uppercase', letterSpacing:'0.05em'}}>{yr}</div>
+                        {items.map((item, i) => (
+                          <button key={i} onClick={() => { addRow(selectedYear, item.row); setShowCopyPicker(false); }} style={{
+                            display:'block', width:'100%', textAlign:'left', padding:'8px 14px',
+                            border:'none', borderBottom:'1px solid #F3F4F6', background:'none',
+                            cursor:'pointer', fontSize:13, color:'#374151',
+                          }}>
+                            {[item.row.application, item.row.tractors ? `${item.row.tractors} tractors` : null, item.row.trailers ? `${item.row.trailers} trailers` : null].filter(Boolean).join(' · ')}
+                          </button>
+                        ))}
+                      </div>
+                    ));
+                  })()
+              }
+              <div style={{padding:8, borderTop:'1px solid #F3F4F6'}}>
+                <button onClick={() => setShowCopyPicker(false)} style={{...styles.btnGhost, fontSize:12, width:'100%'}}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* IFTA / Fuel */}
       <div style={styles.detailSectionRow}>Fuel (IFTA)</div>
@@ -509,21 +549,17 @@ function FleetDetailsTable({ token }) {
             ].map(({ key, label }) => (
               <tr key={key}>
                 <td style={styles.detailTdLabel}>{label}</td>
-                <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
-                  {isEditable ? (
-                    <input style={{...styles.detailInput, maxWidth:180}} type="number"
-                      value={yd[key] ?? ''}
-                      onChange={e => setIFTA(selectedYear, key, e.target.value)}
-                      placeholder="—" />
-                  ) : yd[key] != null ? fmt(yd[key]) : '—'}
+                <td style={{...styles.detailTd, ...styles.detailTdEditable}}>
+                  <input style={{...styles.detailInput, maxWidth:180}} type="number"
+                    value={yd[key] ?? ''}
+                    onChange={e => setIFTA(selectedYear, key, e.target.value)}
+                    placeholder="—" />
                 </td>
               </tr>
             ))}
             <tr>
               <td style={styles.detailTdLabel}>Fuel Economy (MPG)</td>
-              <td style={styles.detailTd}>
-                {calcMpg(isEditable ? yd.ifta_miles : yd.ifta_miles, isEditable ? yd.ifta_fuel : yd.ifta_fuel)}
-              </td>
+              <td style={styles.detailTd}>{calcMpg(yd.ifta_miles, yd.ifta_fuel)}</td>
             </tr>
           </tbody>
         </table>
