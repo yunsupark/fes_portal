@@ -765,8 +765,8 @@ function FleetEquipTable({ token }) {
         <table style={styles.detailTable}>
           <thead>
             <tr>
+              <th style={{...styles.detailTh, minWidth:70}}></th>
               {EQUIP_COLS.map(c => <th key={c.key} style={{...styles.detailTh, minWidth: c.width}}>{c.label}</th>)}
-              <th style={styles.detailTh}></th>
             </tr>
           </thead>
           <tbody>
@@ -774,6 +774,12 @@ function FleetEquipTable({ token }) {
               ? <tr><td colSpan={EQUIP_COLS.length + 1} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data for this year</td></tr>
               : displayRows.map((row, idx) => (
                 <tr key={idx}>
+                  <td style={{...styles.detailTd, textAlign:'center'}}>
+                    <button onClick={() => removeRow(selectedYear, idx)} style={{
+                      background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                      borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
+                    }}>Remove</button>
+                  </td>
                   {EQUIP_COLS.map(col => (
                     <td key={col.key} style={{...styles.detailTd, ...styles.detailTdEditable, verticalAlign:'top'}}>
                       <EquipCell
@@ -786,10 +792,6 @@ function FleetEquipTable({ token }) {
                       />
                     </td>
                   ))}
-                  <td style={styles.detailTd}>
-                    <button onClick={() => removeRow(selectedYear, idx)}
-                      style={{background:'none', border:'none', color:'#9CA3AF', cursor:'pointer', fontSize:16}}>✕</button>
-                  </td>
                 </tr>
               ))
             }
