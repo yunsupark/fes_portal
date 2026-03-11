@@ -663,7 +663,8 @@ function FleetEquipTable({ token }) {
     setData(d);
     const yrList = Object.keys(d).map(Number).sort((a, b) => b - a);
     setYears(yrList);
-    setSelectedYear(prev => prev ?? (yrList[0] || 2025));
+    // Default to most recent year across DB + 2025
+    setSelectedYear(prev => prev ?? Math.max(...yrList, 2025));
     const init = {};
     yrList.forEach(yr => { init[yr] = (d[yr] || []).map(row => ({ ...row })); });
     [2024, 2025].forEach(yr => { if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()]; });
@@ -681,14 +682,18 @@ function FleetEquipTable({ token }) {
   const setCell = (yr, idx, field, val) =>
     setEdits(prev => {
       const rows = [...(prev[yr] || [])];
-      // When tractor make changes, clear dependent fields
       if (field === 'tractor_make') rows[idx] = { ...rows[idx], tractor_make: val, tractor_model: '', engine_make: '', engine_model: '' };
       else if (field === 'engine_make') rows[idx] = { ...rows[idx], engine_make: val, engine_model: '' };
       else rows[idx] = { ...rows[idx], [field]: val };
       return { ...prev, [yr]: rows };
     });
 
-  const addRow    = (yr) => setEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_EQUIP_ROW()] }));
+  const addRow = (yr, template = null) =>
+    setEdits(prev => ({
+      ...prev,
+      [yr]: [...(prev[yr] || []), template ? { ...template, fleet_equip_id: undefined } : EMPTY_EQUIP_ROW()],
+    }));
+
   const removeRow = (yr, idx) => setEdits(prev => {
     const rows = (prev[yr] || []).filter((_, i) => i !== idx);
     return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
@@ -715,8 +720,24 @@ function FleetEquipTable({ token }) {
     }
   };
 
-  const displayRows      = edits[selectedYear] || data[selectedYear] || [];
-  const allYearsForTabs  = [...new Set([...years, 2024, 2025])].sort((a, b) => b - a);
+  // Build flat list of all non-empty rows across all years for the copy picker
+  const allExistingRows = Object.entries(edits)
+    .sort(([a], [b]) => b - a)
+    .flatMap(([yr, rows]) =>
+      rows
+        .filter(r => r.tractor_make || r.cab_type || r.qty)
+        .map(r => ({ year: parseInt(yr), row: r }))
+    );
+
+  const [showCopyPicker, setShowCopyPicker] = useState(false);
+
+  const copyRow = (sourceRow) => {
+    addRow(selectedYear, sourceRow);
+    setShowCopyPicker(false);
+  };
+
+  const displayRows     = edits[selectedYear] || data[selectedYear] || [];
+  const allYearsForTabs = [...new Set([...years, 2024, 2025])].sort((a, b) => b - a);
 
   return (
     <div style={styles.chartCard}>
@@ -775,7 +796,49 @@ function FleetEquipTable({ token }) {
           </tbody>
         </table>
       </div>
-      <button onClick={() => addRow(selectedYear)} style={{...styles.btnGhost, fontSize:13, marginTop:12}}>+ Add Row</button>
+
+      {/* Add row / Copy row controls */}
+      <div style={{display:'flex', gap:8, marginTop:12, alignItems:'flex-start'}}>
+        <button onClick={() => addRow(selectedYear)} style={{...styles.btnGhost, fontSize:13}}>+ Add Row</button>
+        <div style={{position:'relative'}}>
+          <button onClick={() => setShowCopyPicker(p => !p)} style={{...styles.btnGhost, fontSize:13}}>
+            + Copy from Existing
+          </button>
+          {showCopyPicker && (
+            <div style={{position:'absolute', top:'100%', left:0, marginTop:4, background:'#fff', border:'1px solid #D1D5DB', borderRadius:8, boxShadow:'0 4px 20px rgba(0,0,0,0.15)', zIndex:200, minWidth:380, maxHeight:320, overflowY:'auto'}}>
+              {allExistingRows.length === 0
+                ? <div style={{padding:16, color:'#9CA3AF', fontSize:13}}>No existing rows to copy from.</div>
+                : (() => {
+                    const byYear = allExistingRows.reduce((acc, item) => {
+                      if (!acc[item.year]) acc[item.year] = [];
+                      acc[item.year].push(item);
+                      return acc;
+                    }, {});
+                    return Object.entries(byYear).sort(([a],[b]) => b-a).map(([yr, items]) => (
+                      <div key={yr}>
+                        <div style={{padding:'6px 12px', background:'#F3F4F6', fontSize:11, fontWeight:700, color:'#1c3660', textTransform:'uppercase', letterSpacing:'0.05em'}}>
+                          {yr}
+                        </div>
+                        {items.map((item, i) => (
+                          <button key={i} onClick={() => copyRow(item.row)} style={{
+                            display:'block', width:'100%', textAlign:'left', padding:'8px 14px',
+                            border:'none', borderBottom:'1px solid #F3F4F6', background:'none',
+                            cursor:'pointer', fontSize:13, color:'#374151',
+                          }}>
+                            {[item.row.tractor_make, item.row.tractor_model, item.row.cab_type, item.row.qty ? `qty: ${item.row.qty}` : null].filter(Boolean).join(' · ')}
+                          </button>
+                        ))}
+                      </div>
+                    ));
+                  })()
+              }
+              <div style={{padding:8, borderTop:'1px solid #F3F4F6'}}>
+                <button onClick={() => setShowCopyPicker(false)} style={{...styles.btnGhost, fontSize:12, width:'100%'}}>Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
