@@ -553,24 +553,32 @@ const ENGINE_MAKE_LIMITS = {
 
 // Reusable dropdown that falls back to a text input when "Other" is chosen
 function SelectOrOther({ options, value, onChange, placeholder = '—', inputType = 'text', width }) {
-  const inList = options.includes(value);
-  const showOther = value !== '' && value != null && !inList;
-  const selectVal = showOther ? '__other__' : (value || '');
+  const valueInList = options.includes(value);
+  // isOther: true if user explicitly chose Other, OR existing value isn't in the list
+  const [isOther, setIsOther] = useState(!valueInList && value !== '' && value != null);
+
+  // Sync when value is cleared externally (e.g. tractor make change resets engine fields)
+  useEffect(() => {
+    if (value === '' || value == null) setIsOther(false);
+    else if (!options.includes(value)) setIsOther(true);
+  }, [value, JSON.stringify(options)]);
+
+  const selectVal  = isOther ? '__other__' : (value || '');
   const inputStyle = { border:'1px solid #D1D5DB', borderRadius:4, padding:'3px 6px', fontSize:13, background:'#fff', width: width || '100%', boxSizing:'border-box' };
 
   return (
     <div style={{display:'flex', flexDirection:'column', gap:3}}>
       <select value={selectVal} onChange={e => {
-        if (e.target.value === '__other__') onChange('');
-        else onChange(e.target.value);
+        if (e.target.value === '__other__') { setIsOther(true); onChange(''); }
+        else { setIsOther(false); onChange(e.target.value); }
       }} style={inputStyle}>
         <option value="">{placeholder}</option>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
         <option value="__other__">Other</option>
       </select>
-      {(selectVal === '__other__' || showOther) && (
+      {isOther && (
         <input type={inputType} value={value} onChange={e => onChange(e.target.value)}
-          placeholder="Enter manually…" style={{...inputStyle, borderColor:'#A41C24'}} />
+          placeholder="Enter manually…" style={{...inputStyle, borderColor:'#A41C24'}} autoFocus />
       )}
     </div>
   );
