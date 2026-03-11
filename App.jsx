@@ -540,76 +540,158 @@ const EMPTY_EQUIP_ROW = () => ({
   axle_make: '', axle_model: '', axle_ratio: '',
 });
 
+// Engine make restrictions by tractor make. null = N/A (electric/fuel cell), undefined = show all
+const ENGINE_MAKE_LIMITS = {
+  'Freightliner': ['Detroit', 'Cummins'],
+  'Kenworth':     ['Paccar', 'Cummins'],
+  'Peterbilt':    ['Paccar', 'Cummins'],
+  'Volvo':        ['Volvo', 'Cummins'],
+  'International':['International', 'Cummins'],
+  'Tesla':        null,
+  'Hyundai':      null,
+};
+
+// Reusable dropdown that falls back to a text input when "Other" is chosen
+function SelectOrOther({ options, value, onChange, placeholder = '—', inputType = 'text', width }) {
+  const inList = options.includes(value);
+  const showOther = value !== '' && value != null && !inList;
+  const selectVal = showOther ? '__other__' : (value || '');
+  const inputStyle = { border:'1px solid #D1D5DB', borderRadius:4, padding:'3px 6px', fontSize:13, background:'#fff', width: width || '100%', boxSizing:'border-box' };
+
+  return (
+    <div style={{display:'flex', flexDirection:'column', gap:3}}>
+      <select value={selectVal} onChange={e => {
+        if (e.target.value === '__other__') onChange('');
+        else onChange(e.target.value);
+      }} style={inputStyle}>
+        <option value="">{placeholder}</option>
+        {options.map(o => <option key={o} value={o}>{o}</option>)}
+        <option value="__other__">Other</option>
+      </select>
+      {(selectVal === '__other__' || showOther) && (
+        <input type={inputType} value={value} onChange={e => onChange(e.target.value)}
+          placeholder="Enter manually…" style={{...inputStyle, borderColor:'#A41C24'}} />
+      )}
+    </div>
+  );
+}
+
 const EQUIP_COLS = [
-  { key: 'qty',                label: 'Qty',              type: 'int',  width: 60  },
-  { key: 'cab_type',           label: 'Cab Type',         type: 'text', width: 100 },
-  { key: 'tractor_make',       label: 'Tractor Make',     type: 'text', width: 120 },
-  { key: 'tractor_model',      label: 'Tractor Model',    type: 'text', width: 130 },
-  { key: 'engine_make',        label: 'Engine Make',      type: 'text', width: 110 },
-  { key: 'engine_model',       label: 'Engine Model',     type: 'text', width: 120 },
-  { key: 'engine_rating',      label: 'Engine Rating',    type: 'text', width: 110 },
-  { key: 'transmission_make',  label: 'Trans Make',       type: 'text', width: 110 },
-  { key: 'transmission_model', label: 'Trans Model',      type: 'text', width: 120 },
-  { key: 'axle_make',          label: 'Axle Make',        type: 'text', width: 100 },
-  { key: 'axle_model',         label: 'Axle Model',       type: 'text', width: 100 },
-  { key: 'axle_ratio',         label: 'Axle Ratio',       type: 'dec',  width: 90  },
+  { key: 'qty',                label: 'Qty',           width: 65  },
+  { key: 'cab_type',           label: 'Cab Type',      width: 120 },
+  { key: 'tractor_make',       label: 'Tractor Make',  width: 140 },
+  { key: 'tractor_model',      label: 'Tractor Model', width: 150 },
+  { key: 'engine_make',        label: 'Engine Make',   width: 130 },
+  { key: 'engine_model',       label: 'Engine Model',  width: 130 },
+  { key: 'engine_rating',      label: 'Engine Rating', width: 110 },
+  { key: 'transmission_make',  label: 'Trans Make',    width: 110 },
+  { key: 'transmission_model', label: 'Trans Model',   width: 120 },
+  { key: 'axle_make',          label: 'Axle Make',     width: 100 },
+  { key: 'axle_model',         label: 'Axle Model',    width: 100 },
+  { key: 'axle_ratio',         label: 'Axle Ratio',    width: 90  },
 ];
 
+function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
+  const tractorMake = row.tractor_make;
+  const engineMake  = row.engine_make;
+  const isNA        = ENGINE_MAKE_LIMITS[tractorMake] === null;
+  const inputStyle  = { border:'1px solid #D1D5DB', borderRadius:4, padding:'3px 6px', fontSize:13, width:'100%', boxSizing:'border-box' };
+
+  if (colKey === 'qty') {
+    return <input type="number" value={row.qty ?? ''} onChange={e => onChange(e.target.value)}
+      placeholder="0" style={{...inputStyle, textAlign:'center'}} />;
+  }
+  if (colKey === 'cab_type') {
+    return <SelectOrOther options={['Day Cab', 'Sleeper']} value={row.cab_type} onChange={onChange} placeholder="— select —" />;
+  }
+  if (colKey === 'tractor_make') {
+    const makes = [...new Set(makeModels.map(m => m.make))];
+    return <SelectOrOther options={makes} value={row.tractor_make} onChange={onChange} placeholder="— select —" />;
+  }
+  if (colKey === 'tractor_model') {
+    const models = makeModels.filter(m => m.make === tractorMake).map(m => m.model);
+    return models.length
+      ? <SelectOrOther options={models} value={row.tractor_model} onChange={onChange} placeholder="— select —" />
+      : <input type="text" value={row.tractor_model ?? ''} onChange={e => onChange(e.target.value)} placeholder="Model" style={inputStyle} />;
+  }
+  if (colKey === 'engine_make') {
+    if (isNA) return <span style={{color:'#9CA3AF', fontSize:13}}>N/A</span>;
+    const restricted = ENGINE_MAKE_LIMITS[tractorMake];
+    const allMakes   = [...new Set(engineModels.map(e => e.make))];
+    return <SelectOrOther options={restricted || allMakes} value={row.engine_make} onChange={onChange} placeholder="— select —" />;
+  }
+  if (colKey === 'engine_model') {
+    if (isNA) return <span style={{color:'#9CA3AF', fontSize:13}}>N/A</span>;
+    const models = engineModels.filter(e => e.make === engineMake).map(e => e.model);
+    return models.length
+      ? <SelectOrOther options={models} value={row.engine_model} onChange={onChange} placeholder="— select —" />
+      : <input type="text" value={row.engine_model ?? ''} onChange={e => onChange(e.target.value)} placeholder="Model" style={inputStyle} />;
+  }
+  if (colKey === 'axle_ratio') {
+    return <input type="number" step="0.01" value={row.axle_ratio ?? ''} onChange={e => onChange(e.target.value)}
+      placeholder="0.00" style={{...inputStyle, textAlign:'center'}} />;
+  }
+  // default: free text
+  return <input type="text" value={row[colKey] ?? ''} onChange={e => onChange(e.target.value)}
+    placeholder="—" style={inputStyle} />;
+}
+
 function FleetEquipTable({ token }) {
-  const [data,         setData]         = useState({});  // { year: [rows] }
-  const [edits,        setEdits]        = useState({});  // { year: [rows] }
-  const [years,        setYears]        = useState([]);  // sorted list of available years
+  const [data,         setData]         = useState({});
+  const [edits,        setEdits]        = useState({});
+  const [years,        setYears]        = useState([]);
   const [selectedYear, setSelectedYear] = useState(null);
   const [saving,       setSaving]       = useState(false);
   const [status,       setStatus]       = useState(null);
+  const [makeModels,   setMakeModels]   = useState([]);
+  const [engineModels, setEngineModels] = useState([]);
 
   const loadData = async () => {
-    const r = await fetch('/api/fleet-equip', { headers: { Authorization: `Bearer ${token}` } });
-    if (!r.ok) return;
-    const d = await r.json();
+    const headers = { Authorization: `Bearer ${token}` };
+    const [refRes, equipRes] = await Promise.all([
+      fetch('/api/fleet-equip/reference', { headers }),
+      fetch('/api/fleet-equip',           { headers }),
+    ]);
+    if (refRes.ok) {
+      const ref = await refRes.json();
+      setMakeModels(ref.makeModels   || []);
+      setEngineModels(ref.engineModels || []);
+    }
+    if (!equipRes.ok) return;
+    const d = await equipRes.json();
     setData(d);
     const yrList = Object.keys(d).map(Number).sort((a, b) => b - a);
     setYears(yrList);
-    setSelectedYear(prev => prev ?? (yrList[0] || 2024));
-    // seed edits for each year
+    setSelectedYear(prev => prev ?? (yrList[0] || 2025));
     const init = {};
-    yrList.forEach(yr => {
-      init[yr] = (d[yr] || []).map(row => ({ ...row }));
-    });
-    // ensure 2024 and 2025 exist in edits even if no DB data
-    [2024, 2025].forEach(yr => {
-      if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()];
-    });
+    yrList.forEach(yr => { init[yr] = (d[yr] || []).map(row => ({ ...row })); });
+    [2024, 2025].forEach(yr => { if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()]; });
     setEdits(init);
   };
 
   useEffect(() => { if (token) loadData(); }, [token]);
 
-  // Ensure newly selected year has edits initialized
   useEffect(() => {
     if (selectedYear == null) return;
-    setEdits(prev => {
-      if (prev[selectedYear]) return prev;
-      return { ...prev, [selectedYear]: [EMPTY_EQUIP_ROW()] };
-    });
+    setEdits(prev => prev[selectedYear] ? prev : { ...prev, [selectedYear]: [EMPTY_EQUIP_ROW()] });
     setYears(prev => prev.includes(selectedYear) ? prev : [...prev, selectedYear].sort((a, b) => b - a));
   }, [selectedYear]);
 
   const setCell = (yr, idx, field, val) =>
     setEdits(prev => {
       const rows = [...(prev[yr] || [])];
-      rows[idx] = { ...rows[idx], [field]: val };
+      // When tractor make changes, clear dependent fields
+      if (field === 'tractor_make') rows[idx] = { ...rows[idx], tractor_make: val, tractor_model: '', engine_make: '', engine_model: '' };
+      else if (field === 'engine_make') rows[idx] = { ...rows[idx], engine_make: val, engine_model: '' };
+      else rows[idx] = { ...rows[idx], [field]: val };
       return { ...prev, [yr]: rows };
     });
 
-  const addRow = (yr) =>
-    setEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_EQUIP_ROW()] }));
-
-  const removeRow = (yr, idx) =>
-    setEdits(prev => {
-      const rows = (prev[yr] || []).filter((_, i) => i !== idx);
-      return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
-    });
+  const addRow    = (yr) => setEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_EQUIP_ROW()] }));
+  const removeRow = (yr, idx) => setEdits(prev => {
+    const rows = (prev[yr] || []).filter((_, i) => i !== idx);
+    return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
+  });
 
   const handleSave = async () => {
     if (selectedYear == null) return;
@@ -632,12 +714,11 @@ function FleetEquipTable({ token }) {
     }
   };
 
-  const displayRows = edits[selectedYear] || data[selectedYear] || [];
-  const allYearsForTabs = [...new Set([...years, 2024, 2025])].sort((a, b) => b - a);
+  const displayRows      = edits[selectedYear] || data[selectedYear] || [];
+  const allYearsForTabs  = [...new Set([...years, 2024, 2025])].sort((a, b) => b - a);
 
   return (
     <div style={styles.chartCard}>
-      {/* Header */}
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Equipment</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
@@ -646,8 +727,8 @@ function FleetEquipTable({ token }) {
               padding:'4px 14px', borderRadius:6, border:'1px solid',
               fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
-              background: yr === selectedYear ? '#1c3660' : '#fff',
-              color: yr === selectedYear ? '#fff' : '#374151',
+              background:  yr === selectedYear ? '#1c3660' : '#fff',
+              color:       yr === selectedYear ? '#fff' : '#374151',
             }}>{yr}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
@@ -662,9 +743,7 @@ function FleetEquipTable({ token }) {
         <table style={styles.detailTable}>
           <thead>
             <tr>
-              {EQUIP_COLS.map(c => (
-                <th key={c.key} style={{...styles.detailTh, minWidth: c.width}}>{c.label}</th>
-              ))}
+              {EQUIP_COLS.map(c => <th key={c.key} style={{...styles.detailTh, minWidth: c.width}}>{c.label}</th>)}
               <th style={styles.detailTh}></th>
             </tr>
           </thead>
@@ -674,13 +753,13 @@ function FleetEquipTable({ token }) {
               : displayRows.map((row, idx) => (
                 <tr key={idx}>
                   {EQUIP_COLS.map(col => (
-                    <td key={col.key} style={{...styles.detailTd, ...styles.detailTdEditable}}>
-                      <input
-                        style={{...styles.detailInput, textAlign: col.type === 'text' ? 'left' : 'center'}}
-                        type={col.type === 'text' ? 'text' : 'number'}
-                        value={row[col.key] ?? ''}
-                        onChange={e => setCell(selectedYear, idx, col.key, e.target.value)}
-                        placeholder="—"
+                    <td key={col.key} style={{...styles.detailTd, ...styles.detailTdEditable, verticalAlign:'top'}}>
+                      <EquipCell
+                        colKey={col.key}
+                        row={row}
+                        onChange={val => setCell(selectedYear, idx, col.key, val)}
+                        makeModels={makeModels}
+                        engineModels={engineModels}
                       />
                     </td>
                   ))}
@@ -694,8 +773,7 @@ function FleetEquipTable({ token }) {
           </tbody>
         </table>
       </div>
-      <button onClick={() => addRow(selectedYear)}
-        style={{...styles.btnGhost, fontSize:13, marginTop:12}}>+ Add Row</button>
+      <button onClick={() => addRow(selectedYear)} style={{...styles.btnGhost, fontSize:13, marginTop:12}}>+ Add Row</button>
     </div>
   );
 }

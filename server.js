@@ -405,6 +405,21 @@ app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
 // ─── Fleet Equipment Routes ───────────────────────────────────────────────────
 
 /**
+ * GET /api/fleet-equip/reference
+ * Returns make/model lookup tables for the fleet equipment form.
+ */
+app.get("/api/fleet-equip/reference", requireAuth, async (req, res) => {
+  try {
+    const [makeModels]   = await db.query("SELECT make, model FROM ffs_make_model ORDER BY make, model");
+    const [engineModels] = await db.query("SELECT make, engine_model AS model FROM ffs_engine_model ORDER BY make, engine_model");
+    res.json({ makeModels, engineModels });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
  * GET /api/fleet-equip
  * Returns all ffs_fleet_equip rows keyed by equip_year.
  */
