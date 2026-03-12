@@ -323,8 +323,6 @@ function FleetDetailsTable({ token }) {
     yrList.forEach(yr => {
       const yd = d[yr] || {};
       init[yr] = {
-        ifta_miles:  yd.ifta_miles ?? '',
-        ifta_fuel:   yd.ifta_fuel  ?? '',
         utilization: (yd.utilization || []).map(toEditRow),
       };
       if (init[yr].utilization.length === 0) init[yr].utilization = [EMPTY_UTIL_ROW()];
@@ -337,7 +335,7 @@ function FleetDetailsTable({ token }) {
   useEffect(() => {
     if (selectedYear == null) return;
     setEdits(prev => prev[selectedYear] ? prev : {
-      ...prev, [selectedYear]: { ifta_miles: '', ifta_fuel: '', utilization: [EMPTY_UTIL_ROW()] },
+      ...prev, [selectedYear]: { utilization: [EMPTY_UTIL_ROW()] },
     });
   }, [selectedYear]);
 
@@ -360,15 +358,6 @@ function FleetDetailsTable({ token }) {
       return { ...prev, [yr]: { ...prev[yr], utilization: rows.length ? rows : [EMPTY_UTIL_ROW()] } };
     });
 
-  const setIFTA = (yr, field, val) =>
-    setEdits(prev => ({ ...prev, [yr]: { ...prev[yr], [field]: val } }));
-
-  const calcMpg = (miles, fuel) => {
-    const m = parseFloat(miles), f = parseFloat(fuel);
-    if (!m || !f) return '—';
-    return (m / f).toFixed(3);
-  };
-
   const handleSave = async () => {
     if (selectedYear == null) return;
     setSaving(true); setStatus(null);
@@ -387,8 +376,6 @@ function FleetDetailsTable({ token }) {
             ave_length_haul:  r.ave_length_haul !== '' ? parseInt(r.ave_length_haul) : null,
             empty_miles_perc: pctRatio(r.empty_miles_pct),
           })),
-          ifta_miles: e.ifta_miles !== '' ? parseFloat(e.ifta_miles) : null,
-          ifta_fuel:  e.ifta_fuel  !== '' ? parseFloat(e.ifta_fuel)  : null,
         }),
       });
       await loadData();
@@ -420,8 +407,7 @@ function FleetDetailsTable({ token }) {
         .map(r => ({ year: parseInt(yr), row: r }))
     );
 
-  const yd       = edits[selectedYear] || {};
-  const utilRows = yd.utilization || [];
+  const utilRows = (edits[selectedYear] || {}).utilization || [];
 
   return (
     <div style={styles.chartCard}>
@@ -532,38 +518,185 @@ function FleetDetailsTable({ token }) {
         </div>
       </div>
 
-      {/* IFTA / Fuel */}
-      <div style={styles.detailSectionRow}>Fuel (IFTA)</div>
+    </div>
+  );
+}
+
+// ─── Fuel Table ──────────────────────────────────────────────────────────────
+const FUEL_OPTIONS    = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
+const EDITABLE_YEARS  = [2024, 2025];
+const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: '' });
+
+function FuelTable({ token }) {
+  const NUM_YEARS = 5;
+
+  const [rows,         setRows]         = useState([]);   // flat array from API
+  const [edits,        setEdits]        = useState({});   // { year: [rows] }
+  const [years,        setYears]        = useState([]);
+  const [selectedYear, setSelectedYear] = useState(null);
+  const [saving,       setSaving]       = useState(false);
+  const [status,       setStatus]       = useState(null);
+
+  const loadData = async () => {
+    const r = await fetch('/api/fuel', { headers: { Authorization: `Bearer ${token}` } });
+    if (!r.ok) return;
+    const data = await r.json();
+    setRows(data);
+    const dbYears = [...new Set(data.map(r => r.year))];
+    const yrList  = [...new Set([...dbYears, ...EDITABLE_YEARS])].sort((a, b) => b - a).slice(0, NUM_YEARS);
+    setYears(yrList);
+    setSelectedYear(prev => prev ?? yrList[0]);
+    // Seed edits for editable years from existing data
+    const init = {};
+    EDITABLE_YEARS.forEach(yr => {
+      const yrRows = data.filter(r => r.year === yr);
+      init[yr] = yrRows.length
+        ? yrRows.map(r => ({
+            fuel_type:  r.fuel_type || 'Diesel',
+            ifta_miles: r.ifta_miles ?? '',
+            volume:     ['CNG','LNG'].includes(r.fuel_type) ? (r.nat_gas_dge ?? '') : (r.ifta_fuel ?? ''),
+          }))
+        : [EMPTY_FUEL_ROW()];
+    });
+    setEdits(init);
+  };
+
+  useEffect(() => { if (token) loadData(); }, [token]);
+
+  const isEditable = EDITABLE_YEARS.includes(selectedYear);
+
+  const setCell = (yr, idx, field, val) =>
+    setEdits(prev => {
+      const r = [...(prev[yr] || [])];
+      r[idx] = { ...r[idx], [field]: val };
+      return { ...prev, [yr]: r };
+    });
+
+  const addRow    = (yr) => setEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_FUEL_ROW()] }));
+  const removeRow = (yr, idx) => setEdits(prev => {
+    const r = (prev[yr] || []).filter((_, i) => i !== idx);
+    return { ...prev, [yr]: r.length ? r : [EMPTY_FUEL_ROW()] };
+  });
+
+  const handleSave = async () => {
+    if (!isEditable) return;
+    setSaving(true); setStatus(null);
+    try {
+      const saveRows = (edits[selectedYear] || []).filter(r => r.fuel_type);
+      await fetch(`/api/fuel/${selectedYear}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ rows: saveRows }),
+      });
+      await loadData();
+      setStatus('saved');
+      setTimeout(() => setStatus(null), 3000);
+    } catch (err) {
+      console.error(err);
+      setStatus('error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Rows to display for selected year
+  const displayRows = isEditable
+    ? (edits[selectedYear] || [])
+    : rows.filter(r => r.year === selectedYear);
+
+
+  return (
+    <div style={styles.chartCard}>
+      {/* Header */}
+      <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
+        <h3 style={{...styles.chartTitle, marginBottom:0}}>Fuel (IFTA)</h3>
+        <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
+          {years.map(yr => (
+            <button key={yr} onClick={() => setSelectedYear(yr)} style={{
+              padding:'4px 14px', borderRadius:6, border:'1px solid',
+              fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
+              borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
+              background:  yr === selectedYear ? '#1c3660' : '#fff',
+              color:        yr === selectedYear ? '#fff' : '#374151',
+            }}>{yr}</button>
+          ))}
+          {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
+          {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
+          {isEditable && (
+            <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          )}
+        </div>
+      </div>
+
       <div style={{overflowX:'auto'}}>
         <table style={styles.detailTable}>
           <thead>
             <tr>
-              <th style={styles.detailThLabel}>Field</th>
-              <th style={styles.detailTh}>Value</th>
+              {isEditable && <th style={{...styles.detailTh, minWidth:70}}></th>}
+              <th style={{...styles.detailTh, minWidth:130}}>Fuel Type</th>
+              <th style={{...styles.detailTh, minWidth:150}}>IFTA Miles</th>
+              <th style={{...styles.detailTh, minWidth:150}}>IFTA Gallons / DGE</th>
             </tr>
           </thead>
           <tbody>
-            {[
-              { key: 'ifta_miles', label: 'IFTA Miles' },
-              { key: 'ifta_fuel',  label: 'IFTA Fuel (gal)' },
-            ].map(({ key, label }) => (
-              <tr key={key}>
-                <td style={styles.detailTdLabel}>{label}</td>
-                <td style={{...styles.detailTd, ...styles.detailTdEditable}}>
-                  <input style={{...styles.detailInput, maxWidth:180}} type="number"
-                    value={yd[key] ?? ''}
-                    onChange={e => setIFTA(selectedYear, key, e.target.value)}
-                    placeholder="—" />
-                </td>
-              </tr>
-            ))}
-            <tr>
-              <td style={styles.detailTdLabel}>Fuel Economy (MPG)</td>
-              <td style={styles.detailTd}>{calcMpg(yd.ifta_miles, yd.ifta_fuel)}</td>
-            </tr>
+            {displayRows.length === 0
+              ? <tr><td colSpan={isEditable ? 4 : 3} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data for this year</td></tr>
+              : displayRows.map((row, idx) => {
+                  const isCng = ['CNG','LNG'].includes(row.fuel_type);
+                  return (
+                    <tr key={idx}>
+                      {isEditable && (
+                        <td style={{...styles.detailTd, textAlign:'center'}}>
+                          <button onClick={() => removeRow(selectedYear, idx)} style={{
+                            background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                            borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer',
+                          }}>Remove</button>
+                        </td>
+                      )}
+                      <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
+                        {isEditable ? (
+                          <select style={{...styles.detailInput, textAlign:'left'}}
+                            value={row.fuel_type}
+                            onChange={e => setCell(selectedYear, idx, 'fuel_type', e.target.value)}>
+                            {FUEL_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        ) : row.fuel_type || '—'}
+                      </td>
+                      <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
+                        {isEditable ? (
+                          <input style={styles.detailInput} type="number"
+                            value={row.ifta_miles ?? ''}
+                            onChange={e => setCell(selectedYear, idx, 'ifta_miles', e.target.value)}
+                            placeholder="—" />
+                        ) : row.ifta_miles != null ? fmt(row.ifta_miles) : '—'}
+                      </td>
+                      <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
+                        {isEditable ? (
+                          <div style={{display:'flex', alignItems:'center', gap:6}}>
+                            <input style={styles.detailInput} type="number"
+                              value={row.volume ?? ''}
+                              onChange={e => setCell(selectedYear, idx, 'volume', e.target.value)}
+                              placeholder="—" />
+                            <span style={{fontSize:11, color:'#6B7280', whiteSpace:'nowrap'}}>{isCng ? 'DGE' : 'gal'}</span>
+                          </div>
+                        ) : (() => {
+                          const v = isCng ? row.nat_gas_dge : row.ifta_fuel;
+                          return v != null ? `${fmt(v)} ${isCng ? 'DGE' : 'gal'}` : '—';
+                        })()}
+                      </td>
+                    </tr>
+                  );
+                })
+            }
           </tbody>
         </table>
       </div>
+
+      {isEditable && (
+        <button onClick={() => addRow(selectedYear)} style={{...styles.btnGhost, fontSize:13, marginTop:12}}>+ Add Row</button>
+      )}
     </div>
   );
 }
@@ -1194,6 +1327,9 @@ export default function App() {
 
         {/* Fleet Equipment Table */}
         <FleetEquipTable token={token} />
+
+        {/* Fuel Table */}
+        <FuelTable token={token} />
 
         {/* Tech Heatmap */}
         <TechHeatmap techData={tech} years={fleet?.submissionYears} categories={techCategories} availableConfigs={availableConfigs} selectedConfig={selectedConfig} onConfigChange={setSelectedConfig} />

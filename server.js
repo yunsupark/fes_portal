@@ -402,6 +402,77 @@ app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Fuel Routes ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/fuel
+ * Returns all ffs_mpg rows for the fleet, ordered by year desc.
+ */
+app.get("/api/fuel", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [rows] = await db.query(
+      `SELECT mpg_id, mpg_year AS year, fuel_type,
+              ifta_miles, ifta_fuel, nat_gas_dge
+       FROM ffs_mpg
+       WHERE fleet_id = ?
+       ORDER BY mpg_year DESC, mpg_id`,
+      [fleet_id]
+    );
+    res.json(rows.map(r => ({
+      mpg_id:      r.mpg_id,
+      year:        r.year,
+      fuel_type:   r.fuel_type   || '',
+      ifta_miles:  r.ifta_miles  != null ? parseFloat(r.ifta_miles)  : null,
+      ifta_fuel:   r.ifta_fuel   != null ? parseFloat(r.ifta_fuel)   : null,
+      nat_gas_dge: r.nat_gas_dge != null ? parseFloat(r.nat_gas_dge) : null,
+    })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * PUT /api/fuel/:year
+ * Replaces all fuel rows for this fleet and year.
+ * Body: { rows: [{ fuel_type, ifta_miles, ifta_fuel, nat_gas_dge }] }
+ */
+app.put("/api/fuel/:year", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const year = parseInt(req.params.year);
+  if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
+
+  const { rows } = req.body;
+  if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array required" });
+
+  const conn = await db.getConnection();
+  try {
+    await conn.beginTransaction();
+    await conn.query("DELETE FROM ffs_mpg WHERE fleet_id = ? AND mpg_year = ?", [fleet_id, year]);
+    for (const r of rows) {
+      const isCng = ['CNG', 'LNG'].includes(r.fuel_type);
+      await conn.query(
+        `INSERT INTO ffs_mpg (fleet_id, mpg_year, fuel_type, ifta_miles, ifta_fuel, nat_gas_dge)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [fleet_id, year,
+         r.fuel_type   || null,
+         r.ifta_miles  != null && r.ifta_miles  !== '' ? parseFloat(r.ifta_miles)  : null,
+         isCng ? null : (r.volume != null && r.volume !== '' ? parseFloat(r.volume) : null),
+         isCng ? (r.volume != null && r.volume !== '' ? parseFloat(r.volume) : null) : null]
+      );
+    }
+    await conn.commit();
+    res.json({ ok: true });
+  } catch (err) {
+    await conn.rollback();
+    console.error(err);
+    res.status(500).json({ error: "Failed to save fuel data" });
+  } finally {
+    conn.release();
+  }
+});
+
 // ─── Fleet Equipment Routes ───────────────────────────────────────────────────
 
 /**
