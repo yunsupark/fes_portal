@@ -243,41 +243,16 @@ app.get("/api/techs", requireAuth, async (req, res) => {
       byYear[r.adoption_year][r.technology] = parseFloat(r.adoption_percent);
     });
 
-    // also include available config numbers for this fleet so frontend can
-    // present a dropdown if there are multiple tractor configs. In addition
-    // pull descriptive metadata from `ffs_fleet_config` (cab_type, fuel_type)
-    // so the UI can show readable labels for each config.
+    // Get distinct config numbers + cab_type directly from ffs_adoption
     const [cfgRows] = await db.query(
-      `SELECT DISTINCT config FROM ffs_adoption WHERE fleet_id = ? ORDER BY config`,
+      `SELECT DISTINCT config, cab_type FROM ffs_adoption WHERE fleet_id = ? ORDER BY config`,
       [fleet_id]
     );
-    const configs = cfgRows.map(r => r.config);
-
-    // fetch config metadata if available
-    let configsWithMeta = configs.map(c => ({ config: c }));
-    if (configs.length) {
-      try {
-        const [cfgDetails] = await db.query(
-          `SELECT config, cab_type, fuel_type
-           FROM ffs_fleet_config
-           WHERE fleet_id = ?`,
-          [fleet_id]
-        );
-        console.log('[techs] ffs_fleet_config rows:', JSON.stringify(cfgDetails));
-        console.log('[techs] configs from ffs_adoption:', JSON.stringify(configs));
-        const detailMap = {};
-        cfgDetails.forEach(d => { detailMap[d.config] = d; });
-        console.log('[techs] detailMap keys:', Object.keys(detailMap));
-        configsWithMeta = configs.map(c => {
-          const d = detailMap[c];
-          const label = d ? [d.cab_type, d.fuel_type].filter(Boolean).join(', ') || `Config ${c}` : `Config ${c}`;
-          return { config: c, cab_type: d?.cab_type || null, fuel_type: d?.fuel_type || null, label };
-        });
-      } catch (errCfg) {
-        // if the config table isn't present or query fails, fall back to numbers
-        console.warn('Could not fetch ffs_fleet_config metadata:', errCfg.message);
-      }
-    }
+    const configsWithMeta = cfgRows.map(r => ({
+      config:   r.config,
+      cab_type: r.cab_type || null,
+      label:    r.cab_type ? `Config ${r.config}, ${r.cab_type}` : `Config ${r.config}`,
+    }));
 
     res.json({ categories, data: byYear, configs: configsWithMeta });
   } catch (err) {
