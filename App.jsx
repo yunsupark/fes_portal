@@ -350,13 +350,15 @@ function SubmissionHistory({ token, saveCount }) {
 
   const totalTechs = status?.totalTechs || 0;
 
-  // Yellow (ready): at least 1 fuel row AND at least one cab_type has all N techs
+  // Green (ready): all sections have at least 1 entry AND at least one cab_type has all N techs
   const isReady = (yr) => {
     if (!status) return false;
-    const hasFuel = (status.fuel?.[yr] || 0) >= 1;
+    const hasFuel  = (status.fuel?.[yr]       || 0) >= 1;
+    const hasUtil  = (status.utilization?.[yr] || 0) >= 1;
+    const hasEquip = (status.fleetEquip?.[yr]  || 0) >= 1;
     const techByType = status.tech?.[yr] || {};
     const hasTech = totalTechs > 0 && Object.values(techByType).some(n => n >= totalTechs);
-    return hasFuel && hasTech;
+    return hasFuel && hasUtil && hasEquip && hasTech;
   };
 
   // Incomplete items to list in the modal
@@ -406,8 +408,8 @@ function SubmissionHistory({ token, saveCount }) {
         style={{
           padding:'5px 14px', borderRadius:6, border:'none', fontSize:12, fontWeight:700,
           cursor: ready ? 'pointer' : 'not-allowed',
-          background: ready ? '#F59E0B' : '#D1D5DB',
-          color: ready ? '#1c3660' : '#9CA3AF',
+          background: ready ? '#16A34A' : '#D1D5DB',
+          color: ready ? '#fff' : '#9CA3AF',
           whiteSpace:'nowrap',
         }}
       >
@@ -421,15 +423,6 @@ function SubmissionHistory({ token, saveCount }) {
       <h3 style={{...styles.chartTitle, marginBottom:16}}>Submission Status</h3>
       <table style={{width:'100%', borderCollapse:'collapse'}}>
         <thead>
-          {/* Submit button row */}
-          <tr>
-            <td />
-            {YEARS.map(y => (
-              <td key={y} style={{padding:'8px 16px', textAlign:'center'}}>
-                <SubmitBtn yr={y} />
-              </td>
-            ))}
-          </tr>
           <tr>
             <th style={{...headStyle, textAlign:'left'}}>Section</th>
             {YEARS.map(y => <th key={y} style={headStyle}>{y}</th>)}
@@ -460,6 +453,11 @@ function SubmissionHistory({ token, saveCount }) {
           </tr>
         </tbody>
       </table>
+
+      {/* Submit buttons below table */}
+      <div style={{display:'flex', justifyContent:'flex-end', gap:12, marginTop:12}}>
+        {YEARS.map(y => <SubmitBtn key={y} yr={y} />)}
+      </div>
 
       {/* Submit confirmation modal */}
       {submitModal != null && (() => {
@@ -551,7 +549,8 @@ function FleetDetailsTable({ token, onSave }) {
     const dbYears = Object.keys(d).map(Number);
     const yrList  = [...new Set([...dbYears, 2024, 2025])].sort((a, b) => b - a).slice(0, NUM_YEARS);
     setYears(yrList);
-    setSelectedYear(prev => prev ?? yrList[0]);
+    const editableInList = yrList.filter(y => [2024, 2025].includes(y));
+    setSelectedYear(prev => prev ?? (editableInList.length ? Math.min(...editableInList) : yrList[0]));
     // Seed edits for all displayed years
     const init = {};
     yrList.forEach(yr => {
@@ -665,7 +664,7 @@ function FleetDetailsTable({ token, onSave }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}</button>
+            }}>{yr}{[2024,2025].includes(yr) ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -788,7 +787,7 @@ function FuelTable({ token, onSave }) {
     const dbYears = [...new Set(data.map(r => r.year))];
     const yrList  = [...new Set([...dbYears, ...EDITABLE_YEARS])].sort((a, b) => b - a).slice(0, NUM_YEARS);
     setYears(yrList);
-    setSelectedYear(prev => prev ?? yrList[0]);
+    setSelectedYear(prev => prev ?? Math.min(...EDITABLE_YEARS));
     // Seed edits for editable years from existing data
     const init = {};
     EDITABLE_YEARS.forEach(yr => {
@@ -871,7 +870,7 @@ function FuelTable({ token, onSave }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}</button>
+            }}>{yr}{[2024,2025].includes(yr) ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -1092,8 +1091,8 @@ function FleetEquipTable({ token, onSave }) {
     setData(d);
     const yrList = Object.keys(d).map(Number).sort((a, b) => b - a);
     setYears(yrList);
-    // Default to most recent year across DB + 2025
-    setSelectedYear(prev => prev ?? Math.max(...yrList, 2025));
+    // Default to earliest editable year (2024)
+    setSelectedYear(prev => prev ?? 2024);
     const init = {};
     yrList.forEach(yr => { init[yr] = (d[yr] || []).map(row => ({ ...row })); });
     [2024, 2025].forEach(yr => { if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()]; });
@@ -1189,7 +1188,7 @@ function FleetEquipTable({ token, onSave }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:       yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}</button>
+            }}>{yr}{yr >= 2024 ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -1577,9 +1576,6 @@ export default function App() {
               <h1 style={styles.mainTitle}>Dashboard</h1>
               <p style={styles.mainSub}>Last submission: {fleet?.lastSubmission ?? '—'} · Survey year {latestYear ?? '—'}</p>
             </div>
-            <button style={styles.btnPrimary} onClick={() => setEntering(true)}>
-              + Enter {new Date().getFullYear()} Data
-            </button>
         </header>
 
         {/* Charts row */}
