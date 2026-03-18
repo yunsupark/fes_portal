@@ -119,7 +119,7 @@ function TechAdoptionCard({ token }) {
   const [openCats, setOpenCats]         = useState({});
 
   const allTechs = Object.entries(categories).flatMap(([cat, arr]) => arr.map(t => ({...t, category: cat})));
-  const readOnlyYears = years.filter(y => !TECH_EDITABLE_YEARS.includes(y));
+  const readOnlyYears = years.filter(y => !TECH_EDITABLE_YEARS.includes(y)).sort((a, b) => a - b);
   const colCount = readOnlyYears.length + TECH_EDITABLE_YEARS.length + 1;
 
   const fetchData = async (cabType) => {
@@ -226,9 +226,8 @@ function TechAdoptionCard({ token }) {
           <button
             onClick={handleSave}
             disabled={saving}
-            style={{padding:'7px 18px', borderRadius:8, border:'none', cursor: saving ? 'not-allowed' : 'pointer',
-                    background: saving ? '#9CA3AF' : '#1c3660', color:'#fff', fontWeight:600, fontSize:13}}>
-            {saving ? 'Saving…' : 'Save'}
+            style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}}>
+            {saving ? 'Saving…' : 'Save Changes'}
           </button>
         </div>
       </div>
@@ -511,7 +510,7 @@ function FleetDetailsTable({ token }) {
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Details</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          {years.map(yr => (
+          {[...years].sort((a, b) => a - b).map(yr => (
             <button key={yr} onClick={() => setSelectedYear(yr)} style={{
               padding:'4px 14px', borderRadius:6, border:'1px solid',
               fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
@@ -707,7 +706,7 @@ function FuelTable({ token }) {
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fuel (IFTA)</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          {years.map(yr => (
+          {[...years].sort((a, b) => a - b).map(yr => (
             <button key={yr} onClick={() => setSelectedYear(yr)} style={{
               padding:'4px 14px', borderRadius:6, border:'1px solid',
               fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
@@ -1002,7 +1001,7 @@ function FleetEquipTable({ token }) {
   };
 
   const displayRows     = edits[selectedYear] || data[selectedYear] || [];
-  const allYearsForTabs = [...new Set([...years, 2024, 2025])].sort((a, b) => b - a);
+  const allYearsForTabs = [...new Set([...years, 2024, 2025])].sort((a, b) => a - b);
 
   return (
     <div style={styles.chartCard}>
