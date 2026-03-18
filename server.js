@@ -205,6 +205,52 @@ app.get("/api/mpg", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Submission Status ────────────────────────────────────────────────────────
+
+app.get("/api/submission-status", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const years = [2024, 2025];
+  try {
+    const [utilRows] = await db.query(
+      `SELECT utilization_year AS yr, COUNT(*) AS cnt FROM ffs_equip_utilization
+       WHERE fleet_id = ? AND utilization_year IN (?) GROUP BY utilization_year`,
+      [fleet_id, years]
+    );
+    const [equipRows] = await db.query(
+      `SELECT equip_year AS yr, COUNT(*) AS cnt FROM ffs_fleet_equip
+       WHERE fleet_id = ? AND equip_year IN (?) GROUP BY equip_year`,
+      [fleet_id, years]
+    );
+    const [fuelRows] = await db.query(
+      `SELECT mpg_year AS yr, COUNT(*) AS cnt FROM ffs_mpg
+       WHERE fleet_id = ? AND mpg_year IN (?) GROUP BY mpg_year`,
+      [fleet_id, years]
+    );
+    const [techRows] = await db.query(
+      `SELECT adoption_year AS yr, cab_type, COUNT(*) AS cnt FROM ffs_adoption
+       WHERE fleet_id = ? AND adoption_year IN (?) AND cab_type IS NOT NULL
+       GROUP BY adoption_year, cab_type`,
+      [fleet_id, years]
+    );
+
+    const toMap = (rows) => Object.fromEntries(rows.map(r => [r.yr, Number(r.cnt)]));
+    const utilization = toMap(utilRows);
+    const fleetEquip  = toMap(equipRows);
+    const fuel        = toMap(fuelRows);
+
+    const tech = {};
+    techRows.forEach(r => {
+      if (!tech[r.yr]) tech[r.yr] = {};
+      tech[r.yr][r.cab_type] = Number(r.cnt);
+    });
+
+    res.json({ years, utilization, fleetEquip, fuel, tech });
+  } catch (err) {
+    console.error("Error fetching submission status:", err.message);
+    res.status(500).json({ error: "Failed to fetch status" });
+  }
+});
+
 // ─── Technology Adoption Routes ───────────────────────────────────────────────
 
 /**

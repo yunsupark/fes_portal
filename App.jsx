@@ -320,50 +320,67 @@ function HeatCell({ value }) {
   );
 }
 
-function SubmissionHistory({ years, onStartEntry }) {
-  const sorted = [...years].sort((a,b)=>b-a);
-  const currentYear = new Date().getFullYear();
-  const needsUpdate = !years.includes(currentYear);
+function SubmissionHistory({ token }) {
+  const [status, setStatus] = useState(null);
+  const YEARS = [2024, 2025];
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/submission-status', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setStatus(d); })
+      .catch(console.error);
+  }, [token]);
+
+  const cellStyle = { padding:'8px 16px', textAlign:'center', fontSize:13, borderBottom:'1px solid #F3F4F6', color:'#374151' };
+  const headStyle = { padding:'8px 16px', textAlign:'center', fontWeight:700, fontSize:13, color:'#1c3660', borderBottom:'2px solid #E5E7EB', background:'#F9FAFB' };
+  const labelStyle = { padding:'8px 12px', fontSize:13, fontWeight:600, color:'#374151', borderBottom:'1px solid #F3F4F6' };
+
+  const techCell = (yr) => {
+    if (!status) return '—';
+    const byType = status.tech?.[yr];
+    if (!byType || !Object.keys(byType).length) return '—';
+    return Object.entries(byType)
+      .sort(([a],[b]) => a.localeCompare(b))
+      .map(([ct, n]) => `${ct}: ${n}`)
+      .join(', ');
+  };
 
   return (
     <div style={styles.chartCard}>
-      <div style={{display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16}}>
-        <h3 style={{...styles.chartTitle, marginBottom:0}}>Submission History</h3>
-        {needsUpdate && (
-          <button style={styles.btnPrimary} onClick={onStartEntry}>
-            + Enter {currentYear} Data
-          </button>
-        )}
-      </div>
-      <div style={{...styles.historyList, maxHeight:250, overflowY:'auto'}}>
-        {sorted.map(year => (
-          <div key={year} style={styles.historyItem}>
-            <div style={styles.historyYear}>{year}</div>
-            <div style={styles.historyBadge}>
-              <span style={styles.badgeComplete}>✓ Complete</span>
-            </div>
-            <div style={styles.historyActions}>
-              <button style={styles.btnGhost} onClick={() => alert(`Viewing ${year} submission — connect to API`)}>
-                View
-              </button>
-              <button style={styles.btnGhost} onClick={() => alert(`Editing ${year} — connect to API`)}>
-                Edit
-              </button>
-            </div>
-          </div>
-        ))}
-        {needsUpdate && (
-          <div style={{...styles.historyItem, opacity:0.5, borderStyle:"dashed"}}>
-            <div style={styles.historyYear}>{currentYear}</div>
-            <div style={styles.historyBadge}>
-              <span style={styles.badgePending}>⏳ Not submitted</span>
-            </div>
-            <div style={styles.historyActions}>
-              <button style={styles.btnPrimary} onClick={onStartEntry}>Start</button>
-            </div>
-          </div>
-        )}
-      </div>
+      <h3 style={{...styles.chartTitle, marginBottom:16}}>Submission Status</h3>
+      <table style={{width:'100%', borderCollapse:'collapse'}}>
+        <thead>
+          <tr>
+            <th style={{...headStyle, textAlign:'left'}}>Section</th>
+            {YEARS.map(y => <th key={y} style={headStyle}>{y}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {[
+            { label: 'Equipment Utilization', key: 'utilization' },
+            { label: 'Fleet Equipment',       key: 'fleetEquip'  },
+            { label: 'Fuel (IFTA)',           key: 'fuel'        },
+          ].map(({ label, key }) => (
+            <tr key={key}>
+              <td style={labelStyle}>{label}</td>
+              {YEARS.map(y => (
+                <td key={y} style={cellStyle}>
+                  {status ? (status[key]?.[y] ?? 0) : '—'}
+                </td>
+              ))}
+            </tr>
+          ))}
+          <tr>
+            <td style={{...labelStyle, borderBottom:'none'}}>Tech Adoption</td>
+            {YEARS.map(y => (
+              <td key={y} style={{...cellStyle, borderBottom:'none', fontSize:12}}>
+                {techCell(y)}
+              </td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }
@@ -1408,7 +1425,7 @@ export default function App() {
             <MpgChart mpg={mpg} techData={tech} years={fleet?.submissionYears} />
           </div>
           <div style={{flex:"0 0 320px"}}>
-            <SubmissionHistory years={fleet?.submissionYears ?? []} onStartEntry={() => setEntering(true)} />
+            <SubmissionHistory token={token} />
           </div>
         </div>
 
