@@ -243,7 +243,7 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     const lastSubmitted  = submittedYears.length ? Math.max(...submittedYears) : null;
     // Editable: every year after the last submission up to 2025
     const editableYears = [];
-    const startYear = lastSubmitted ? lastSubmitted + 1 : 2024;
+    const startYear = lastSubmitted ? lastSubmitted + 1 : 2003;
     for (let yr = startYear; yr <= 2025; yr++) editableYears.push(yr);
 
     const [utilRows] = await db.query(
