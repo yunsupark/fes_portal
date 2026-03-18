@@ -672,6 +672,7 @@ function FuelTable({ token }) {
       const yrRows = data.filter(r => r.year === yr);
       init[yr] = yrRows.length
         ? yrRows.map(r => ({
+            mpg_id:     r.mpg_id,
             fuel_type:  r.fuel_type || 'Diesel',
             ifta_miles: r.ifta_miles ?? '',
             volume:     ['CNG','LNG'].includes(r.fuel_type) ? (r.nat_gas_dge ?? '') : (r.ifta_fuel ?? ''),

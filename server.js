@@ -76,7 +76,8 @@ app.post("/api/auth/login", async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      `SELECT f.*, c.contact_id, c.first_name, c.last_name, c.email
+      `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
+              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email
        FROM ffs_contact c
        JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
        WHERE c.email = ? LIMIT 1`,
@@ -86,7 +87,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (!row) return res.status(401).json({ error: "Fleet not found for that email" });
 
     const token = jwt.sign(
-      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.contact_id },
+      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id },
       JWT_SECRET,
       { expiresIn: "8h" }
     );
