@@ -142,17 +142,23 @@ function TechAdoptionCard({ token }) {
         return next;
       });
       // init edits from existing data for this cab type
-      const newEdits = { 2024: {}, 2025: {} };
-      TECH_EDITABLE_YEARS.forEach(yr => {
-        const yrData = t.data?.[yr] || {};
-        Object.values(t.categories || {}).forEach(techs_ => {
-          techs_.forEach(tech => {
-            const v = yrData[tech.label];
-            newEdits[yr][tech.label] = v != null ? String(Math.round(v * 100)) : '';
+      setEdits(prev => {
+        const newEdits = { ...prev };
+        TECH_EDITABLE_YEARS.forEach(yr => {
+          // Build a normalized lookup: number-keyed data → string-keyed for safety
+          const yrData = t.data?.[yr] ?? t.data?.[String(yr)] ?? null;
+          if (!yrData) return; // no saved data for this year — keep existing edits
+          const updated = { ...(newEdits[yr] || {}) };
+          Object.values(t.categories || {}).forEach(techs_ => {
+            techs_.forEach(tech => {
+              const v = yrData[tech.label];
+              updated[tech.label] = v != null ? String(Math.round(v * 100)) : '';
+            });
           });
+          newEdits[yr] = updated;
         });
+        return newEdits;
       });
-      setEdits(newEdits);
       setSaveMsg('');
     } catch (err) { console.error(err); }
   };
@@ -197,14 +203,17 @@ function TechAdoptionCard({ token }) {
     setSaving(true); setSaveMsg('');
     try {
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      await Promise.all(TECH_EDITABLE_YEARS.map(yr =>
+      const results = await Promise.all(TECH_EDITABLE_YEARS.map(yr =>
         fetch(`/api/techs/${yr}`, {
           method: 'PUT', headers,
           body: JSON.stringify({ cab_type: selectedCabType, techs: edits[yr] }),
         })
       ));
+      if (results.some(r => !r.ok)) {
+        setSaveMsg('Error saving. Please try again.');
+        return;
+      }
       setSaveMsg('Saved!');
-      fetchData(selectedCabType);
     } catch (err) { setSaveMsg('Error: ' + err.message); }
     finally { setSaving(false); }
   };
