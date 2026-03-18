@@ -108,7 +108,7 @@ const TECH_EDITABLE_YEARS = [2024, 2025];
 const TECH_NUM_YEARS = 5;
 const DAYCAB_IDLE_REDUCTION_IDS = new Set([2, 10, 13]);
 
-function TechAdoptionCard({ token }) {
+function TechAdoptionCard({ token, onSave }) {
   const [techData, setTechData]         = useState({});
   const [categories, setCategories]     = useState({});
   const [yearMeta, setYearMeta]         = useState({});
@@ -214,6 +214,7 @@ function TechAdoptionCard({ token }) {
         return;
       }
       setSaveMsg('Saved!');
+      onSave?.();
     } catch (err) { setSaveMsg('Error: ' + err.message); }
     finally { setSaving(false); }
   };
@@ -333,7 +334,7 @@ function HeatCell({ value }) {
   );
 }
 
-function SubmissionHistory({ token }) {
+function SubmissionHistory({ token, saveCount }) {
   const [status, setStatus]           = useState(null);
   const [submitModal, setSubmitModal] = useState(null); // year number or null
   const YEARS = [2024, 2025];
@@ -345,7 +346,7 @@ function SubmissionHistory({ token }) {
       .then(d => { if (d) setStatus(d); })
       .catch(console.error);
   };
-  useEffect(loadStatus, [token]);
+  useEffect(loadStatus, [token, saveCount]);
 
   const totalTechs = status?.totalTechs || 0;
 
@@ -517,7 +518,7 @@ const EMPTY_UTIL_ROW = () => ({
   grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
 });
 
-function FleetDetailsTable({ token }) {
+function FleetDetailsTable({ token, onSave }) {
   const NUM_YEARS = 5;
 
   const [data,            setData]           = useState({});
@@ -621,6 +622,7 @@ function FleetDetailsTable({ token }) {
       });
       await loadData();
       setStatus('saved');
+      onSave?.();
       setTimeout(() => setStatus(null), 3000);
     } catch (err) {
       console.error(err);
@@ -768,7 +770,7 @@ const FUEL_OPTIONS    = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
 const EDITABLE_YEARS  = [2024, 2025];
 const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: '' });
 
-function FuelTable({ token }) {
+function FuelTable({ token, onSave }) {
   const NUM_YEARS = 5;
 
   const [rows,         setRows]         = useState([]);   // flat array from API
@@ -840,6 +842,7 @@ function FuelTable({ token }) {
       });
       await loadData();
       setStatus('saved');
+      onSave?.();
       setTimeout(() => setStatus(null), 3000);
     } catch (err) {
       console.error(err);
@@ -1063,7 +1066,7 @@ function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
     placeholder="—" style={inputStyle} />;
 }
 
-function FleetEquipTable({ token }) {
+function FleetEquipTable({ token, onSave }) {
   const [data,         setData]         = useState({});
   const [edits,        setEdits]        = useState({});
   const [years,        setYears]        = useState([]);
@@ -1145,6 +1148,7 @@ function FleetEquipTable({ token }) {
       });
       await loadData();
       setStatus('saved');
+      onSave?.();
       setTimeout(() => setStatus(null), 3000);
     } catch (err) {
       console.error(err);
@@ -1471,6 +1475,8 @@ export default function App() {
   const [techCategories, setTechCategories] = useState({});
   const [selectedConfig, setSelectedConfig] = useState(1);
   const [mpg, setMpg] = useState({});
+  const [saveCount, setSaveCount] = useState(0);
+  const notifySave = () => setSaveCount(n => n + 1);
 
   const fleet = fleetState;
   const latestYear = fleet?.submissionYears?.length ? Math.max(...fleet.submissionYears) : (Object.keys(general).length ? Math.max(...Object.keys(general).map(Number)) : null);
@@ -1582,21 +1588,21 @@ export default function App() {
             <MpgChart mpg={mpg} techData={tech} years={fleet?.submissionYears} />
           </div>
           <div style={{flex:"0 0 320px"}}>
-            <SubmissionHistory token={token} />
+            <SubmissionHistory token={token} saveCount={saveCount} />
           </div>
         </div>
 
         {/* Fleet Details Table */}
-        <FleetDetailsTable token={token} />
+        <FleetDetailsTable token={token} onSave={notifySave} />
 
         {/* Fleet Equipment Table */}
-        <FleetEquipTable token={token} />
+        <FleetEquipTable token={token} onSave={notifySave} />
 
         {/* Fuel Table */}
-        <FuelTable token={token} />
+        <FuelTable token={token} onSave={notifySave} />
 
         {/* Tech Adoption Card */}
-        <TechAdoptionCard token={token} />
+        <TechAdoptionCard token={token} onSave={notifySave} />
       </main>
 
       {/* Data Entry Modal */}
