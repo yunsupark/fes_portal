@@ -808,7 +808,7 @@ function FuelTable({ token }) {
                       <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
                         {isEditable ? (
                           <div style={{display:'flex', alignItems:'center', gap:4}}>
-                            <input style={{...styles.detailInput, width:80}} type="number"
+                            <input style={{...styles.detailInput, width:130}} type="number"
                               value={row.volume ?? ''}
                               onChange={e => setCell(selectedYear, idx, 'volume', e.target.value)}
                               placeholder="—" />
