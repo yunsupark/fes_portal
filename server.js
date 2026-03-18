@@ -231,16 +231,27 @@ app.get("/api/techs", requireAuth, async (req, res) => {
     const categories = {};
     const byYear = {};
 
-    rows.forEach(r => {
-      // categories: group -> array of { label, desc }
+    // Also fetch all tech categories (not just those with data) so edit form is complete
+    const [allTechRows] = await db.query(
+      `SELECT tech_id, tech_group, technology, tech_expl FROM ffs_tech ORDER BY tech_group, technology`
+    );
+    allTechRows.forEach(r => {
       if (!categories[r.tech_group]) categories[r.tech_group] = [];
-      // avoid duplicates
+      if (!categories[r.tech_group].some(t => t.label === r.technology)) {
+        categories[r.tech_group].push({ label: r.technology, desc: r.tech_expl || '', tech_id: r.tech_id });
+      }
+    });
+
+    const meta = {}; // cab_type per year
+    rows.forEach(r => {
+      if (!categories[r.tech_group]) categories[r.tech_group] = [];
       if (!categories[r.tech_group].some(t => t.label === r.technology)) {
         categories[r.tech_group].push({ label: r.technology, desc: r.tech_expl || '' });
       }
 
       if (!byYear[r.adoption_year]) byYear[r.adoption_year] = {};
       byYear[r.adoption_year][r.technology] = parseFloat(r.adoption_percent);
+      if (r.cab_type && !meta[r.adoption_year]) meta[r.adoption_year] = { cab_type: r.cab_type };
     });
 
     // Get distinct config numbers + cab_type directly from ffs_adoption
@@ -254,10 +265,51 @@ app.get("/api/techs", requireAuth, async (req, res) => {
       label:    r.cab_type ? `Config ${r.config}, ${r.cab_type}` : `Config ${r.config}`,
     }));
 
-    res.json({ categories, data: byYear, configs: configsWithMeta });
+    res.json({ categories, data: byYear, configs: configsWithMeta, meta });
   } catch (err) {
     console.error("Error fetching techs:", err.message);
     res.status(500).json({ error: "Failed to fetch technology data" });
+  }
+});
+
+/**
+ * PUT /api/techs/:year?config=1
+ * Upserts technology adoption percentages for a single year.
+ * Body: { cab_type: 'Sleeper'|'Day Cab', techs: { 'Technology Label': '85', ... } }
+ */
+app.put("/api/techs/:year", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const year = parseInt(req.params.year);
+  const config = parseInt(req.query.config) || 1;
+  const { cab_type, techs } = req.body;
+  if (!cab_type) return res.status(400).json({ error: "cab_type is required" });
+  if (![2024, 2025].includes(year)) return res.status(400).json({ error: "Only 2024 and 2025 are editable" });
+  try {
+    // Resolve technology labels -> tech_id
+    const labels = Object.keys(techs || {});
+    if (!labels.length) return res.json({ ok: true });
+    const [techRows] = await db.query(
+      `SELECT tech_id, technology FROM ffs_tech WHERE technology IN (?)`,
+      [labels]
+    );
+    const labelToId = {};
+    techRows.forEach(r => { labelToId[r.technology] = r.tech_id; });
+
+    for (const [label, pct] of Object.entries(techs)) {
+      if (pct === '' || pct == null) continue;
+      const tech_id = labelToId[label];
+      if (!tech_id) continue;
+      await db.query(
+        `INSERT INTO ffs_adoption (fleet_id, tech_id, adoption_year, config, adoption_percent, cab_type)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE adoption_percent = VALUES(adoption_percent), cab_type = VALUES(cab_type)`,
+        [fleet_id, tech_id, year, config, parseFloat(pct) / 100, cab_type]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error saving techs:", err.message);
+    res.status(500).json({ error: "Failed to save technology data" });
   }
 });
 
