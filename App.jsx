@@ -321,19 +321,57 @@ function HeatCell({ value }) {
 }
 
 function SubmissionHistory({ token }) {
-  const [status, setStatus] = useState(null);
+  const [status, setStatus]           = useState(null);
+  const [submitModal, setSubmitModal] = useState(null); // year number or null
   const YEARS = [2024, 2025];
 
-  useEffect(() => {
+  const loadStatus = () => {
     if (!token) return;
     fetch('/api/submission-status', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setStatus(d); })
       .catch(console.error);
-  }, [token]);
+  };
+  useEffect(loadStatus, [token]);
 
-  const cellStyle = { padding:'8px 16px', textAlign:'center', fontSize:13, borderBottom:'1px solid #F3F4F6', color:'#374151' };
-  const headStyle = { padding:'8px 16px', textAlign:'center', fontWeight:700, fontSize:13, color:'#1c3660', borderBottom:'2px solid #E5E7EB', background:'#F9FAFB' };
+  const totalTechs = status?.totalTechs || 0;
+
+  // Yellow (ready): at least 1 fuel row AND at least one cab_type has all N techs
+  const isReady = (yr) => {
+    if (!status) return false;
+    const hasFuel = (status.fuel?.[yr] || 0) >= 1;
+    const techByType = status.tech?.[yr] || {};
+    const hasTech = totalTechs > 0 && Object.values(techByType).some(n => n >= totalTechs);
+    return hasFuel && hasTech;
+  };
+
+  // Incomplete items to list in the modal
+  const getIncomplete = (yr) => {
+    if (!status) return [];
+    const items = [];
+    if ((status.utilization?.[yr] || 0) === 0)
+      items.push('Equipment Utilization: no rows entered');
+    if ((status.fleetEquip?.[yr] || 0) === 0)
+      items.push('Fleet Equipment: no rows entered');
+    const techByType = status.tech?.[yr] || {};
+    if (Object.keys(techByType).length === 0) {
+      items.push('Tech Adoption: no data entered');
+    } else {
+      Object.entries(techByType).forEach(([ct, n]) => {
+        if (n < totalTechs)
+          items.push(`Tech Adoption (${ct}): ${n} of ${totalTechs} technologies entered`);
+      });
+    }
+    return items;
+  };
+
+  const handleSubmitConfirm = async (yr) => {
+    setSubmitModal(null);
+    // Future: call POST /api/submit/:year to lock the year
+  };
+
+  const cellStyle  = { padding:'8px 16px', textAlign:'center', fontSize:13, borderBottom:'1px solid #F3F4F6', color:'#374151' };
+  const headStyle  = { padding:'8px 16px', textAlign:'center', fontWeight:700, fontSize:13, color:'#1c3660', borderBottom:'2px solid #E5E7EB', background:'#F9FAFB' };
   const labelStyle = { padding:'8px 12px', fontSize:13, fontWeight:600, color:'#374151', borderBottom:'1px solid #F3F4F6' };
 
   const techCell = (yr) => {
@@ -346,11 +384,40 @@ function SubmissionHistory({ token }) {
       .join(', ');
   };
 
+  const SubmitBtn = ({ yr }) => {
+    const ready = isReady(yr);
+    return (
+      <button
+        onClick={() => ready && setSubmitModal(yr)}
+        style={{
+          padding:'5px 14px', borderRadius:6, border:'none', fontSize:12, fontWeight:700,
+          cursor: ready ? 'pointer' : 'not-allowed',
+          background: ready ? '#F59E0B' : '#D1D5DB',
+          color: ready ? '#1c3660' : '#9CA3AF',
+          whiteSpace:'nowrap',
+        }}
+      >
+        Submit {yr}
+      </button>
+    );
+  };
+
   return (
     <div style={styles.chartCard}>
       <h3 style={{...styles.chartTitle, marginBottom:16}}>Submission Status</h3>
       <table style={{width:'100%', borderCollapse:'collapse'}}>
         <thead>
+          {/* Submit button row */}
+          <tr style={{background:'#FFFBEB'}}>
+            <td style={{padding:'8px 12px', fontSize:12, color:'#6B7280'}}>
+              Ready to submit when Fuel + Tech Adoption complete
+            </td>
+            {YEARS.map(y => (
+              <td key={y} style={{padding:'8px 16px', textAlign:'center'}}>
+                <SubmitBtn yr={y} />
+              </td>
+            ))}
+          </tr>
           <tr>
             <th style={{...headStyle, textAlign:'left'}}>Section</th>
             {YEARS.map(y => <th key={y} style={headStyle}>{y}</th>)}
@@ -381,6 +448,49 @@ function SubmissionHistory({ token }) {
           </tr>
         </tbody>
       </table>
+
+      {/* Submit confirmation modal */}
+      {submitModal != null && (() => {
+        const yr = submitModal;
+        const incomplete = getIncomplete(yr);
+        return (
+          <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000}}>
+            <div style={{background:'#fff', borderRadius:12, padding:32, maxWidth:480, width:'90%', boxShadow:'0 8px 40px rgba(0,0,0,0.25)'}}>
+              <h3 style={{margin:'0 0 16px', color:'#1c3660', fontSize:17}}>Submit {yr} Data</h3>
+
+              {incomplete.length > 0 && (
+                <div style={{marginBottom:16}}>
+                  <p style={{margin:'0 0 8px', fontSize:13, fontWeight:600, color:'#374151'}}>The following entries are incomplete:</p>
+                  <ul style={{margin:0, paddingLeft:20}}>
+                    {incomplete.map((item, i) => (
+                      <li key={i} style={{fontSize:13, color:'#6B7280', marginBottom:4}}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              <div style={{background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:8, padding:'10px 14px', marginBottom:20}}>
+                <p style={{margin:0, fontSize:13, color:'#991B1B', fontWeight:600}}>
+                  Warning: Once submitted, {yr} data cannot be changed.
+                </p>
+              </div>
+
+              <div style={{display:'flex', justifyContent:'flex-end', gap:10}}>
+                <button
+                  onClick={() => setSubmitModal(null)}
+                  style={{padding:'8px 18px', borderRadius:8, border:'1px solid #D1D5DB', background:'#F9FAFB', color:'#374151', fontSize:13, cursor:'pointer', fontWeight:600}}>
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSubmitConfirm(yr)}
+                  style={{padding:'8px 18px', borderRadius:8, border:'none', background:'#F59E0B', color:'#1c3660', fontSize:13, cursor:'pointer', fontWeight:700}}>
+                  Submit {yr}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

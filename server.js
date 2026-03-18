@@ -245,7 +245,10 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       tech[r.yr][r.cab_type] = Number(r.cnt);
     });
 
-    res.json({ years, utilization, fleetEquip, fuel, tech });
+    const [techTotalRow] = await db.query('SELECT COUNT(*) AS cnt FROM ffs_tech');
+    const totalTechs = Number(techTotalRow[0].cnt);
+
+    res.json({ years, utilization, fleetEquip, fuel, tech, totalTechs });
   } catch (err) {
     console.error("Error fetching submission status:", err.message);
     res.status(500).json({ error: "Failed to fetch status" });
