@@ -108,25 +108,25 @@ const TECH_EDITABLE_YEARS = [2024, 2025];
 const TECH_NUM_YEARS = 5;
 
 function TechAdoptionCard({ token }) {
-  const [techData, setTechData]     = useState({});
-  const [categories, setCategories] = useState({});
-  const [yearMeta, setYearMeta]     = useState({});
-  const [years, setYears]           = useState([]);
-  // edits[year][techLabel] = pctString
-  const [edits, setEdits]           = useState({ 2024: {}, 2025: {} });
-  // cabType[year] = 'Sleeper' | 'Day Cab' | ''
-  const [cabType, setCabType]       = useState({ 2024: '', 2025: '' });
-  const [saving, setSaving]         = useState(false);
-  const [saveMsg, setSaveMsg]       = useState('');
-  const [openCats, setOpenCats]     = useState({});
+  const [techData, setTechData]         = useState({});
+  const [categories, setCategories]     = useState({});
+  const [yearMeta, setYearMeta]         = useState({});
+  const [years, setYears]               = useState([]);
+  const [selectedCabType, setSelectedCabType]     = useState('Day Cab');
+  const [edits, setEdits]               = useState({ 2024: {}, 2025: {} });
+  const [saving, setSaving]             = useState(false);
+  const [saveMsg, setSaveMsg]           = useState('');
+  const [openCats, setOpenCats]         = useState({});
 
   const allTechs = Object.entries(categories).flatMap(([cat, arr]) => arr.map(t => ({...t, category: cat})));
   const readOnlyYears = years.filter(y => !TECH_EDITABLE_YEARS.includes(y));
+  const colCount = readOnlyYears.length + TECH_EDITABLE_YEARS.length + 1;
 
-  const fetchData = async () => {
+  const fetchData = async (cabType) => {
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      const res = await fetch(`/api/techs?config=1`, { headers });
+      const param = cabType ? `?cab_type=${encodeURIComponent(cabType)}` : '';
+      const res = await fetch(`/api/techs${param}`, { headers });
       if (!res.ok) return;
       const t = await res.json();
       setTechData(t.data || {});
@@ -140,25 +140,45 @@ function TechAdoptionCard({ token }) {
         Object.keys(t.categories || {}).forEach(cat => { if (!(cat in next)) next[cat] = true; });
         return next;
       });
-      // init edits from existing data
+      // init edits from existing data for this cab type
       const newEdits = { 2024: {}, 2025: {} };
-      const newCabType = { 2024: '', 2025: '' };
       TECH_EDITABLE_YEARS.forEach(yr => {
         const yrData = t.data?.[yr] || {};
-        Object.entries(t.categories || {}).forEach(([, techs_]) => {
+        Object.values(t.categories || {}).forEach(techs_ => {
           techs_.forEach(tech => {
             const v = yrData[tech.label];
             newEdits[yr][tech.label] = v != null ? String(Math.round(v * 100)) : '';
           });
         });
-        newCabType[yr] = t.meta?.[yr]?.cab_type || '';
       });
       setEdits(newEdits);
-      setCabType(newCabType);
+      setSaveMsg('');
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { if (token) fetchData(); }, [token]);
+  // Initial load: determine default cab type, then fetch
+  useEffect(() => {
+    if (!token) return;
+    (async () => {
+      const headers = { Authorization: `Bearer ${token}` };
+      const res = await fetch(`/api/techs`, { headers });
+      if (!res.ok) return;
+      const t = await res.json();
+      const available = t.availableCabTypes || [];
+      // pre-select Day Cab if available, else the last in list, else 'Day Cab'
+      const defaultCab = available.includes('Day Cab') ? 'Day Cab'
+        : available.length ? available[available.length - 1]
+        : 'Day Cab';
+      setSelectedCabType(defaultCab);
+      // now fetch data for that cab type
+      await fetchData(defaultCab);
+    })();
+  }, [token]);
+
+  const handleCabTypeChange = (ct) => {
+    setSelectedCabType(ct);
+    fetchData(ct);
+  };
 
   const handleCopy = (yr) => {
     const priorData = techData[yr - 1] || {};
@@ -169,38 +189,39 @@ function TechAdoptionCard({ token }) {
         return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
       }))
     }));
-    if (!cabType[yr] && yearMeta[yr - 1]?.cab_type) {
-      setCabType(prev => ({ ...prev, [yr]: yearMeta[yr - 1].cab_type }));
-    }
   };
 
   const handleSave = async () => {
-    const missing = TECH_EDITABLE_YEARS.filter(yr => !cabType[yr]);
-    if (missing.length) { setSaveMsg(`Select cab type for ${missing.join(' and ')} before saving.`); return; }
+    if (!selectedCabType) { setSaveMsg('Select a cab type first.'); return; }
     setSaving(true); setSaveMsg('');
     try {
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
       await Promise.all(TECH_EDITABLE_YEARS.map(yr =>
-        fetch(`/api/techs/${yr}?config=1`, {
+        fetch(`/api/techs/${yr}`, {
           method: 'PUT', headers,
-          body: JSON.stringify({ cab_type: cabType[yr], techs: edits[yr] }),
+          body: JSON.stringify({ cab_type: selectedCabType, techs: edits[yr] }),
         })
       ));
       setSaveMsg('Saved!');
-      fetchData();
+      fetchData(selectedCabType);
     } catch (err) { setSaveMsg('Error: ' + err.message); }
     finally { setSaving(false); }
   };
 
-  const selectSm = { padding:'4px 8px', borderRadius:6, background:'#F9FAFB', color:'#111827', border:'1px solid #D1D5DB', fontSize:12 };
-  const colCount = readOnlyYears.length + TECH_EDITABLE_YEARS.length + 1;
-
   return (
     <div style={styles.chartCard}>
-      {/* Header with save button */}
+      {/* Header */}
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Technology Adoption</h3>
         <div style={{display:'flex', alignItems:'center', gap:10}}>
+          <label style={{fontSize:13, fontWeight:600, color:'#374151'}}>Cab Type:</label>
+          <select
+            value={selectedCabType}
+            onChange={e => handleCabTypeChange(e.target.value)}
+            style={{padding:'6px 10px', borderRadius:8, background:'#F9FAFB', color:'#111827', border:'1px solid #D1D5DB', fontSize:13}}>
+            <option value='Day Cab'>Day Cab</option>
+            <option value='Sleeper'>Sleeper</option>
+          </select>
           {saveMsg && <span style={{fontSize:13, color: saveMsg === 'Saved!' ? '#16A34A' : '#DC2626'}}>{saveMsg}</span>}
           <button
             onClick={handleSave}
@@ -213,50 +234,31 @@ function TechAdoptionCard({ token }) {
       </div>
 
       <div style={{overflowX:'auto'}}>
-        <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 280 + TECH_EDITABLE_YEARS.length * 140}}>
+        <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + TECH_EDITABLE_YEARS.length * 130}}>
           <thead>
-            {/* Year header row */}
             <tr>
               <th style={{...styles.heatTh, minWidth:220}}>Technology</th>
               {readOnlyYears.map(y => <th key={y} style={styles.heatThYear}>{y}</th>)}
               {TECH_EDITABLE_YEARS.map(y => (
-                <th key={y} style={{...styles.heatThYear, background:'#EFF6FF', minWidth:130}}>
-                  {y} ✎
+                <th key={y} style={{...styles.heatThYear, background:'#EFF6FF', minWidth:120}}>
+                  <div>{y} ✎</div>
+                  <button onClick={() => handleCopy(y)} style={{marginTop:4, padding:'2px 7px', borderRadius:4, border:'1px solid #D1D5DB', background:'#fff', color:'#374151', fontSize:10, cursor:'pointer', fontWeight:400}}>
+                    Copy from {y - 1}
+                  </button>
                 </th>
               ))}
             </tr>
-            {/* Cab type row */}
+            {/* Cab Type read-only row */}
             <tr style={{background:'#F9FAFB'}}>
-              <td style={{padding:'6px 12px', fontSize:12, fontWeight:600, color:'#374151'}}>
-                Cab Type <span style={{color:'#A41C24'}}>*</span>
-              </td>
+              <td style={{padding:'5px 12px', fontSize:12, fontWeight:600, color:'#374151'}}>Cab Type</td>
               {readOnlyYears.map(y => (
-                <td key={y} style={{...styles.heatCell, fontSize:12, color:'#9CA3AF'}}>
+                <td key={y} style={{...styles.heatCell, fontSize:12, color:'#6B7280'}}>
                   {yearMeta[y]?.cab_type || '—'}
                 </td>
               ))}
               {TECH_EDITABLE_YEARS.map(y => (
-                <td key={y} style={{...styles.heatCell, background:'#EFF6FF'}}>
-                  <select
-                    value={cabType[y]}
-                    onChange={e => setCabType(prev => ({...prev, [y]: e.target.value}))}
-                    style={{...selectSm, border: !cabType[y] ? '1px solid #A41C24' : '1px solid #D1D5DB', width:'100%'}}>
-                    <option value=''>— select —</option>
-                    <option value='Sleeper'>Sleeper</option>
-                    <option value='Day Cab'>Day Cab</option>
-                  </select>
-                </td>
-              ))}
-            </tr>
-            {/* Copy row */}
-            <tr style={{background:'#F9FAFB'}}>
-              <td style={{padding:'4px 12px'}} />
-              {readOnlyYears.map(y => <td key={y} />)}
-              {TECH_EDITABLE_YEARS.map(y => (
-                <td key={y} style={{...styles.heatCell, background:'#EFF6FF', paddingTop:4, paddingBottom:6}}>
-                  <button onClick={() => handleCopy(y)} style={{padding:'3px 8px', borderRadius:5, border:'1px solid #D1D5DB', background:'#fff', color:'#374151', fontSize:11, cursor:'pointer'}}>
-                    Copy from {y - 1}
-                  </button>
+                <td key={y} style={{...styles.heatCell, fontSize:12, color:'#374151', background:'#EFF6FF', fontWeight:500}}>
+                  {yearMeta[y]?.cab_type || '—'}
                 </td>
               ))}
             </tr>

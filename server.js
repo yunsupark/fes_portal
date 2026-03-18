@@ -217,21 +217,10 @@ app.get("/api/mpg", requireAuth, async (req, res) => {
  */
 app.get("/api/techs", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
-  const config = parseInt(req.query.config) || 1;
+  const cab_type_filter = req.query.cab_type || null;
   try {
-    const [rows] = await db.query(
-      `SELECT a.adoption_year, t.tech_group, t.technology, t.tech_expl, a.adoption_percent
-       FROM ffs_adoption a JOIN ffs_tech t ON a.tech_id = t.tech_id
-       WHERE a.fleet_id = ? AND a.config = ?
-       ORDER BY a.adoption_year, t.tech_group, t.technology`,
-      [fleet_id, config]
-    );
-
-    // build categories map and year data
+    // All tech categories (for full edit form even when no data exists)
     const categories = {};
-    const byYear = {};
-
-    // Also fetch all tech categories (not just those with data) so edit form is complete
     const [allTechRows] = await db.query(
       `SELECT tech_id, tech_group, technology, tech_expl FROM ffs_tech ORDER BY tech_group, technology`
     );
@@ -242,30 +231,42 @@ app.get("/api/techs", requireAuth, async (req, res) => {
       }
     });
 
-    const meta = {}; // cab_type per year
-    rows.forEach(r => {
-      if (!categories[r.tech_group]) categories[r.tech_group] = [];
-      if (!categories[r.tech_group].some(t => t.label === r.technology)) {
-        categories[r.tech_group].push({ label: r.technology, desc: r.tech_expl || '' });
-      }
+    // Adoption data filtered by cab_type (or all if none specified)
+    let dataRows;
+    if (cab_type_filter) {
+      [dataRows] = await db.query(
+        `SELECT a.adoption_year, t.tech_group, t.technology, a.adoption_percent, a.cab_type
+         FROM ffs_adoption a JOIN ffs_tech t ON a.tech_id = t.tech_id
+         WHERE a.fleet_id = ? AND a.cab_type = ?
+         ORDER BY a.adoption_year, t.tech_group, t.technology`,
+        [fleet_id, cab_type_filter]
+      );
+    } else {
+      [dataRows] = await db.query(
+        `SELECT a.adoption_year, t.tech_group, t.technology, a.adoption_percent, a.cab_type
+         FROM ffs_adoption a JOIN ffs_tech t ON a.tech_id = t.tech_id
+         WHERE a.fleet_id = ? AND a.config = 1
+         ORDER BY a.adoption_year, t.tech_group, t.technology`,
+        [fleet_id]
+      );
+    }
 
+    const byYear = {};
+    const meta = {};
+    dataRows.forEach(r => {
       if (!byYear[r.adoption_year]) byYear[r.adoption_year] = {};
       byYear[r.adoption_year][r.technology] = parseFloat(r.adoption_percent);
       if (r.cab_type && !meta[r.adoption_year]) meta[r.adoption_year] = { cab_type: r.cab_type };
     });
 
-    // Get distinct config numbers + cab_type directly from ffs_adoption
-    const [cfgRows] = await db.query(
-      `SELECT DISTINCT config, cab_type FROM ffs_adoption WHERE fleet_id = ? ORDER BY config`,
+    // Distinct cab_types that have data for this fleet
+    const [cabTypeRows] = await db.query(
+      `SELECT DISTINCT cab_type FROM ffs_adoption WHERE fleet_id = ? AND cab_type IS NOT NULL ORDER BY cab_type`,
       [fleet_id]
     );
-    const configsWithMeta = cfgRows.map(r => ({
-      config:   r.config,
-      cab_type: r.cab_type || null,
-      label:    r.cab_type ? `Config ${r.config}, ${r.cab_type}` : `Config ${r.config}`,
-    }));
+    const availableCabTypes = cabTypeRows.map(r => r.cab_type);
 
-    res.json({ categories, data: byYear, configs: configsWithMeta, meta });
+    res.json({ categories, data: byYear, meta, availableCabTypes });
   } catch (err) {
     console.error("Error fetching techs:", err.message);
     res.status(500).json({ error: "Failed to fetch technology data" });
@@ -280,11 +281,26 @@ app.get("/api/techs", requireAuth, async (req, res) => {
 app.put("/api/techs/:year", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
   const year = parseInt(req.params.year);
-  const config = parseInt(req.query.config) || 1;
   const { cab_type, techs } = req.body;
   if (!cab_type) return res.status(400).json({ error: "cab_type is required" });
   if (![2024, 2025].includes(year)) return res.status(400).json({ error: "Only 2024 and 2025 are editable" });
   try {
+    // Find existing config for this fleet + cab_type, or assign next available config number
+    const [existingCfg] = await db.query(
+      `SELECT DISTINCT config FROM ffs_adoption WHERE fleet_id = ? AND cab_type = ? LIMIT 1`,
+      [fleet_id, cab_type]
+    );
+    let config;
+    if (existingCfg.length) {
+      config = existingCfg[0].config;
+    } else {
+      const [maxCfg] = await db.query(
+        `SELECT COALESCE(MAX(config), 0) AS max_config FROM ffs_adoption WHERE fleet_id = ?`,
+        [fleet_id]
+      );
+      config = maxCfg[0].max_config + 1;
+    }
+
     // Resolve technology labels -> tech_id
     const labels = Object.keys(techs || {});
     if (!labels.length) return res.json({ ok: true });
