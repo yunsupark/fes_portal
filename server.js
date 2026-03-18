@@ -22,6 +22,28 @@ app.use(cors({
 }));
 app.use(express.json());
 
+/*
+  Run once in MySQL to set up submission tracking:
+
+  CREATE TABLE IF NOT EXISTS ffs_submission (
+    fleet_id     INT NOT NULL,
+    survey_year  INT NOT NULL,
+    submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    contact_id   INT,
+    PRIMARY KEY (fleet_id, survey_year)
+  );
+
+  -- Populate from existing data (marks the latest year with data before 2024 as submitted):
+  INSERT IGNORE INTO ffs_submission (fleet_id, survey_year)
+  SELECT fleet_id, MAX(yr) AS survey_year
+  FROM (
+    SELECT fleet_id, adoption_year AS yr FROM ffs_adoption WHERE adoption_year < 2024
+    UNION ALL
+    SELECT fleet_id, mpg_year AS yr FROM ffs_mpg WHERE mpg_year < 2024
+  ) t
+  GROUP BY fleet_id;
+*/
+
 // ─── Logging Middleware ────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   console.log(`${new Date().toISOString()} | ${req.method} ${req.path}`);
@@ -212,6 +234,18 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
   const years = [2024, 2025];
   try {
+    // Submitted years for this fleet
+    const [subRows] = await db.query(
+      'SELECT survey_year FROM ffs_submission WHERE fleet_id = ? ORDER BY survey_year',
+      [fleet_id]
+    );
+    const submittedYears = subRows.map(r => Number(r.survey_year));
+    const lastSubmitted  = submittedYears.length ? Math.max(...submittedYears) : null;
+    // Editable: every year after the last submission up to 2025
+    const editableYears = [];
+    const startYear = lastSubmitted ? lastSubmitted + 1 : 2024;
+    for (let yr = startYear; yr <= 2025; yr++) editableYears.push(yr);
+
     const [utilRows] = await db.query(
       `SELECT utilization_year AS yr, COUNT(*) AS cnt FROM ffs_equip_utilization
        WHERE fleet_id = ? AND utilization_year IN (?) GROUP BY utilization_year`,
@@ -253,10 +287,26 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     );
     const techCountDayCab = Number(dayCabTechRow[0].cnt);
 
-    res.json({ years, utilization, fleetEquip, fuel, tech, totalTechs, techCountDayCab });
+    res.json({ years, utilization, fleetEquip, fuel, tech, totalTechs, techCountDayCab, submittedYears, editableYears });
   } catch (err) {
     console.error("Error fetching submission status:", err.message);
     res.status(500).json({ error: "Failed to fetch status" });
+  }
+});
+
+app.post("/api/submit/:year", requireAuth, async (req, res) => {
+  const { fleet_id, contact_id } = req.user;
+  const year = parseInt(req.params.year);
+  if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
+  try {
+    await db.query(
+      `INSERT IGNORE INTO ffs_submission (fleet_id, survey_year, contact_id) VALUES (?, ?, ?)`,
+      [fleet_id, year, contact_id ?? null]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error submitting year:", err.message);
+    res.status(500).json({ error: "Failed to submit" });
   }
 });
 

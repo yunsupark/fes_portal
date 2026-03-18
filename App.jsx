@@ -104,24 +104,23 @@ function MpgChart({ mpg = {}, techData = {}, years = [] }) {
   );
 }
 
-const TECH_EDITABLE_YEARS = [2024, 2025];
 const TECH_NUM_YEARS = 5;
 const DAYCAB_IDLE_REDUCTION_IDS = new Set([2, 10, 13]);
 
-function TechAdoptionCard({ token, onSave }) {
+function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [techData, setTechData]         = useState({});
   const [categories, setCategories]     = useState({});
   const [yearMeta, setYearMeta]         = useState({});
   const [years, setYears]               = useState([]);
   const [selectedCabType, setSelectedCabType]     = useState('Day Cab');
-  const [edits, setEdits]               = useState({ 2024: {}, 2025: {} });
+  const [edits, setEdits]               = useState({});
   const [saving, setSaving]             = useState(false);
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
 
   const allTechs = Object.entries(categories).flatMap(([cat, arr]) => arr.map(t => ({...t, category: cat})));
-  const readOnlyYears = years.filter(y => !TECH_EDITABLE_YEARS.includes(y)).sort((a, b) => a - b);
-  const colCount = readOnlyYears.length + TECH_EDITABLE_YEARS.length + 1;
+  const readOnlyYears = years.filter(y => !editableYears.includes(y)).sort((a, b) => a - b);
+  const colCount = readOnlyYears.length + editableYears.length + 1;
 
   const fetchData = async (cabType) => {
     try {
@@ -133,7 +132,7 @@ function TechAdoptionCard({ token, onSave }) {
       setTechData(t.data || {});
       setCategories(t.categories || {});
       setYearMeta(t.meta || {});
-      const known = new Set([...Object.keys(t.data || {}).map(Number), ...TECH_EDITABLE_YEARS]);
+      const known = new Set([...Object.keys(t.data || {}).map(Number), ...editableYears]);
       const sorted = [...known].sort((a, b) => b - a).slice(0, TECH_NUM_YEARS);
       setYears(sorted);
       setOpenCats(prev => {
@@ -144,7 +143,7 @@ function TechAdoptionCard({ token, onSave }) {
       // init edits from existing data for this cab type
       setEdits(prev => {
         const newEdits = { ...prev };
-        TECH_EDITABLE_YEARS.forEach(yr => {
+        editableYears.forEach(yr => {
           // Build a normalized lookup: number-keyed data → string-keyed for safety
           const yrData = t.data?.[yr] ?? t.data?.[String(yr)] ?? null;
           if (!yrData) return; // no saved data for this year — keep existing edits
@@ -203,7 +202,7 @@ function TechAdoptionCard({ token, onSave }) {
     setSaving(true); setSaveMsg('');
     try {
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      const results = await Promise.all(TECH_EDITABLE_YEARS.map(yr =>
+      const results = await Promise.all(editableYears.map(yr =>
         fetch(`/api/techs/${yr}`, {
           method: 'PUT', headers,
           body: JSON.stringify({ cab_type: selectedCabType, techs: edits[yr] }),
@@ -244,12 +243,12 @@ function TechAdoptionCard({ token, onSave }) {
       </div>
 
       <div style={{overflowX:'auto'}}>
-        <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + TECH_EDITABLE_YEARS.length * 130}}>
+        <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + editableYears.length * 130}}>
           <thead>
             <tr>
               <th style={{...styles.heatTh, minWidth:220}}>Technology</th>
               {readOnlyYears.map(y => <th key={y} style={styles.heatThYear}>{y}</th>)}
-              {TECH_EDITABLE_YEARS.map(y => (
+              {editableYears.map(y => (
                 <th key={y} style={{...styles.heatThYear, background:'#EFF6FF', minWidth:120}}>
                   <div>{y} ✎</div>
                   <button onClick={() => handleCopy(y)} style={{marginTop:4, padding:'2px 7px', borderRadius:4, border:'1px solid #D1D5DB', background:'#fff', color:'#374151', fontSize:10, cursor:'pointer', fontWeight:400}}>
@@ -266,7 +265,7 @@ function TechAdoptionCard({ token, onSave }) {
                   {yearMeta[y]?.cab_type || '—'}
                 </td>
               ))}
-              {TECH_EDITABLE_YEARS.map(y => (
+              {editableYears.map(y => (
                 <td key={y} style={{...styles.heatCell, fontSize:12, color:'#374151', background:'#EFF6FF', fontWeight:500}}>
                   {yearMeta[y]?.cab_type || selectedCabType}
                 </td>
@@ -295,7 +294,7 @@ function TechAdoptionCard({ token, onSave }) {
                           <HeatCell value={(techData[y] || {})[tech.label]} />
                         </td>
                       ))}
-                      {TECH_EDITABLE_YEARS.map(y => (
+                      {editableYears.map(y => (
                         <td key={y} style={{...styles.heatCell, background:'#F0F7FF', padding:'4px 8px'}}>
                           <div style={styles.pctInputWrap}>
                             <input
@@ -674,7 +673,7 @@ function FleetDetailsTable({ token, onSave, submittedYears = [] }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{[2024,2025].includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
+            }}>{yr}{editableYears.includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -776,10 +775,10 @@ function FleetDetailsTable({ token, onSave, submittedYears = [] }) {
 
 // ─── Fuel Table ──────────────────────────────────────────────────────────────
 const FUEL_OPTIONS    = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
-const EDITABLE_YEARS  = [2024, 2025];
+
 const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: '' });
 
-function FuelTable({ token, onSave, submittedYears = [] }) {
+function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
   const NUM_YEARS = 5;
 
   const [rows,         setRows]         = useState([]);   // flat array from API
@@ -795,12 +794,12 @@ function FuelTable({ token, onSave, submittedYears = [] }) {
     const data = await r.json();
     setRows(data);
     const dbYears = [...new Set(data.map(r => r.year))];
-    const yrList  = [...new Set([...dbYears, ...EDITABLE_YEARS])].sort((a, b) => b - a).slice(0, NUM_YEARS);
+    const yrList  = [...new Set([...dbYears, ...editableYears])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, editableYears.length + 3));
     setYears(yrList);
-    setSelectedYear(prev => prev ?? Math.min(...EDITABLE_YEARS));
+    setSelectedYear(prev => prev ?? Math.min(...editableYears));
     // Seed edits for editable years from existing data
     const init = {};
-    EDITABLE_YEARS.forEach(yr => {
+    editableYears.forEach(yr => {
       const yrRows = data.filter(r => r.year === yr);
       init[yr] = yrRows.length
         ? yrRows.map(r => ({
@@ -816,7 +815,7 @@ function FuelTable({ token, onSave, submittedYears = [] }) {
 
   useEffect(() => { if (token) loadData(); }, [token]);
 
-  const isEditable = EDITABLE_YEARS.includes(selectedYear);
+  const isEditable = editableYears.includes(selectedYear);
 
   const setCell = (yr, idx, field, val) =>
     setEdits(prev => {
@@ -880,7 +879,7 @@ function FuelTable({ token, onSave, submittedYears = [] }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{[2024,2025].includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
+            }}>{yr}{editableYears.includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -1486,16 +1485,29 @@ export default function App() {
   const [mpg, setMpg] = useState({});
   const [saveCount, setSaveCount] = useState(0);
   const notifySave = () => setSaveCount(n => n + 1);
-  const [submittedYears, setSubmittedYears] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('submittedYears') || '[]'); }
-    catch { return []; }
-  });
-  const onSubmit = (yr) => {
-    setSubmittedYears(prev => {
-      const next = prev.includes(yr) ? prev : [...prev, yr];
-      localStorage.setItem('submittedYears', JSON.stringify(next));
-      return next;
-    });
+  const [submittedYears, setSubmittedYears] = useState([]);
+  const [editableYears,  setEditableYears]  = useState([2024, 2025]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/submission-status', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d) {
+          setSubmittedYears(d.submittedYears || []);
+          setEditableYears(d.editableYears  || [2024, 2025]);
+        }
+      })
+      .catch(console.error);
+  }, [token, saveCount]);
+
+  const onSubmit = async (yr) => {
+    try {
+      await fetch(`/api/submit/${yr}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch (err) { console.error(err); }
     setSaveCount(n => n + 1);
   };
 
@@ -1606,21 +1618,21 @@ export default function App() {
             <MpgChart mpg={mpg} techData={tech} years={fleet?.submissionYears} />
           </div>
           <div style={{flex:"0 0 320px"}}>
-            <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} />
+            <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} />
           </div>
         </div>
 
         {/* Fleet Details Table */}
-        <FleetDetailsTable token={token} onSave={notifySave} submittedYears={submittedYears} />
+        <FleetDetailsTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
 
         {/* Fleet Equipment Table */}
-        <FleetEquipTable token={token} onSave={notifySave} submittedYears={submittedYears} />
+        <FleetEquipTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
 
         {/* Fuel Table */}
-        <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} />
+        <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
 
         {/* Tech Adoption Card */}
-        <TechAdoptionCard token={token} onSave={notifySave} />
+        <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} />
       </main>
 
       {/* Data Entry Modal */}
