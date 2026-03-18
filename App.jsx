@@ -764,15 +764,19 @@ function FuelTable({ token }) {
             <tr>
               {isEditable && <th style={{...styles.detailTh, minWidth:70}}></th>}
               <th style={{...styles.detailTh, minWidth:130}}>Fuel Type</th>
-              <th style={{...styles.detailTh, minWidth:150}}>IFTA Miles</th>
-              <th style={{...styles.detailTh, minWidth:150}}>IFTA Gallons / DGE</th>
+              <th style={{...styles.detailTh, minWidth:110}}>IFTA Miles</th>
+              <th style={{...styles.detailTh, minWidth:110}}>IFTA Gallons / DGE</th>
+              <th style={{...styles.detailTh, minWidth:80}}>MPG</th>
             </tr>
           </thead>
           <tbody>
             {displayRows.length === 0
-              ? <tr><td colSpan={isEditable ? 4 : 3} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data for this year</td></tr>
+              ? <tr><td colSpan={isEditable ? 5 : 4} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data for this year</td></tr>
               : displayRows.map((row, idx) => {
                   const isCng = ['CNG','LNG'].includes(row.fuel_type);
+                  const vol = row.volume != null ? row.volume : (isCng ? row.nat_gas_dge : row.ifta_fuel);
+                  const miles = parseFloat(row.ifta_miles), galDge = parseFloat(vol);
+                  const mpgVal = miles > 0 && galDge > 0 ? (miles / galDge).toFixed(2) : null;
                   return (
                     <tr key={idx}>
                       {isEditable && (
@@ -802,8 +806,8 @@ function FuelTable({ token }) {
                       </td>
                       <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
                         {isEditable ? (
-                          <div style={{display:'flex', alignItems:'center', gap:6}}>
-                            <input style={styles.detailInput} type="number"
+                          <div style={{display:'flex', alignItems:'center', gap:4}}>
+                            <input style={{...styles.detailInput, width:80}} type="number"
                               value={row.volume ?? ''}
                               onChange={e => setCell(selectedYear, idx, 'volume', e.target.value)}
                               placeholder="—" />
@@ -813,6 +817,9 @@ function FuelTable({ token }) {
                           const v = isCng ? row.nat_gas_dge : row.ifta_fuel;
                           return v != null ? `${fmt(v)} ${isCng ? 'DGE' : 'gal'}` : '—';
                         })()}
+                      </td>
+                      <td style={{...styles.detailTd, textAlign:'center', fontWeight: mpgVal ? 600 : 400, color: mpgVal ? '#1c3660' : '#9CA3AF', fontSize:13}}>
+                        {mpgVal ?? '—'}
                       </td>
                     </tr>
                   );
