@@ -106,6 +106,7 @@ function MpgChart({ mpg = {}, techData = {}, years = [] }) {
 
 const TECH_EDITABLE_YEARS = [2024, 2025];
 const TECH_NUM_YEARS = 5;
+const DAYCAB_IDLE_REDUCTION_IDS = new Set([2, 10, 13]);
 
 function TechAdoptionCard({ token }) {
   const [techData, setTechData]         = useState({});
@@ -265,6 +266,9 @@ function TechAdoptionCard({ token }) {
           <tbody>
             {Object.entries(categories).flatMap(([cat, techs_]) => {
               const isOpen = openCats[cat] !== false;
+              const visibleTechs = (cat === 'Idle Reduction' && selectedCabType === 'Day Cab')
+                ? techs_.filter(t => DAYCAB_IDLE_REDUCTION_IDS.has(t.tech_id))
+                : techs_;
               const rows = [];
               rows.push(
                 <tr key={`cat-${cat}`} style={{cursor:'pointer'}} onClick={() => setOpenCats(p => ({...p, [cat]: !isOpen}))}>
@@ -272,7 +276,7 @@ function TechAdoptionCard({ token }) {
                 </tr>
               );
               if (isOpen) {
-                techs_.forEach(tech => {
+                visibleTechs.forEach(tech => {
                   rows.push(
                     <tr key={tech.label} style={styles.heatRow}>
                       <td style={styles.heatTechLabel} title={tech.desc}>{tech.label}</td>
