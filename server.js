@@ -76,7 +76,7 @@ app.post("/api/auth/login", async (req, res) => {
 
   try {
     const [rows] = await db.query(
-      `SELECT f.*, c.first_name, c.last_name, c.email
+      `SELECT f.*, c.contact_id, c.first_name, c.last_name, c.email
        FROM ffs_contact c
        JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
        WHERE c.email = ? LIMIT 1`,
@@ -86,7 +86,7 @@ app.post("/api/auth/login", async (req, res) => {
     if (!row) return res.status(401).json({ error: "Fleet not found for that email" });
 
     const token = jwt.sign(
-      { fleet_id: row.fleet_id, fleet_name: row.fleet_name },
+      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.contact_id },
       JWT_SECRET,
       { expiresIn: "8h" }
     );
@@ -325,7 +325,7 @@ app.get("/api/techs", requireAuth, async (req, res) => {
  * Body: { cab_type: 'Sleeper'|'Day Cab', techs: { 'Technology Label': '85', ... } }
  */
 app.put("/api/techs/:year", requireAuth, async (req, res) => {
-  const { fleet_id } = req.user;
+  const { fleet_id, contact_id } = req.user;
   const year = parseInt(req.params.year);
   const { cab_type, techs } = req.body;
   if (!cab_type) return res.status(400).json({ error: "cab_type is required" });
@@ -362,10 +362,10 @@ app.put("/api/techs/:year", requireAuth, async (req, res) => {
       const tech_id = labelToId[label];
       if (!tech_id) continue;
       await db.query(
-        `INSERT INTO ffs_adoption (fleet_id, tech_id, adoption_year, config, adoption_percent, cab_type)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE adoption_percent = VALUES(adoption_percent), cab_type = VALUES(cab_type)`,
-        [fleet_id, tech_id, year, config, parseFloat(pct) / 100, cab_type]
+        `INSERT INTO ffs_adoption (fleet_id, tech_id, adoption_year, config, adoption_percent, cab_type, contact_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE adoption_percent = VALUES(adoption_percent), cab_type = VALUES(cab_type), contact_id = VALUES(contact_id)`,
+        [fleet_id, tech_id, year, config, parseFloat(pct) / 100, cab_type, contact_id ?? null]
       );
     }
     res.json({ ok: true });
@@ -436,8 +436,24 @@ app.get("/api/fleet-details", requireAuth, async (req, res) => {
  * Upserts one year's per-application utilization rows and mpg data.
  * Body: { utilization: [{ application, tractors, trailers, grossed_out_perc, cubed_out_perc, ave_length_haul, empty_miles_perc }], ifta_miles, ifta_fuel }
  */
-app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
+app.delete("/api/fleet-details/:year/:application", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
+  const year = parseInt(req.params.year);
+  const application = decodeURIComponent(req.params.application);
+  try {
+    await db.query(
+      "DELETE FROM ffs_equip_utilization WHERE fleet_id = ? AND utilization_year = ? AND application = ?",
+      [fleet_id, year, application]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete row" });
+  }
+});
+
+app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
+  const { fleet_id, contact_id } = req.user;
   const year = parseInt(req.params.year);
   if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
 
@@ -452,19 +468,20 @@ app.put("/api/fleet-details/:year", requireAuth, async (req, res) => {
           `INSERT INTO ffs_equip_utilization
              (fleet_id, utilization_year, application,
               utliz_tractor_qty, utliz_trailer_qty,
-              grossed_out_perc, cubed_out_perc, ave_length_haul, empty_miles_perc)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              grossed_out_perc, cubed_out_perc, ave_length_haul, empty_miles_perc, contact_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
            ON DUPLICATE KEY UPDATE
              utliz_tractor_qty = VALUES(utliz_tractor_qty),
              utliz_trailer_qty = VALUES(utliz_trailer_qty),
              grossed_out_perc  = VALUES(grossed_out_perc),
              cubed_out_perc    = VALUES(cubed_out_perc),
              ave_length_haul   = VALUES(ave_length_haul),
-             empty_miles_perc  = VALUES(empty_miles_perc)`,
+             empty_miles_perc  = VALUES(empty_miles_perc),
+             contact_id        = VALUES(contact_id)`,
           [fleet_id, year, row.application ?? null,
            row.tractors ?? null, row.trailers ?? null,
            row.grossed_out_perc ?? null, row.cubed_out_perc ?? null,
-           row.ave_length_haul ?? null, row.empty_miles_perc ?? null]
+           row.ave_length_haul ?? null, row.empty_miles_perc ?? null, contact_id ?? null]
         );
       }
     }
@@ -522,13 +539,25 @@ app.get("/api/fuel", requireAuth, async (req, res) => {
   }
 });
 
+app.delete("/api/fuel/row/:id", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const id = parseInt(req.params.id);
+  try {
+    await db.query("DELETE FROM ffs_mpg WHERE mpg_id = ? AND fleet_id = ?", [id, fleet_id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete row" });
+  }
+});
+
 /**
  * PUT /api/fuel/:year
  * Replaces all fuel rows for this fleet and year.
  * Body: { rows: [{ fuel_type, ifta_miles, ifta_fuel, nat_gas_dge }] }
  */
 app.put("/api/fuel/:year", requireAuth, async (req, res) => {
-  const { fleet_id } = req.user;
+  const { fleet_id, contact_id } = req.user;
   const year = parseInt(req.params.year);
   if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
 
@@ -542,13 +571,14 @@ app.put("/api/fuel/:year", requireAuth, async (req, res) => {
     for (const r of rows) {
       const isCng = ['CNG', 'LNG'].includes(r.fuel_type);
       await conn.query(
-        `INSERT INTO ffs_mpg (fleet_id, mpg_year, fuel_type, ifta_miles, ifta_fuel, nat_gas_dge)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ffs_mpg (fleet_id, mpg_year, fuel_type, ifta_miles, ifta_fuel, nat_gas_dge, contact_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [fleet_id, year,
          r.fuel_type   || null,
          r.ifta_miles  != null && r.ifta_miles  !== '' ? parseFloat(r.ifta_miles)  : null,
          isCng ? null : (r.volume != null && r.volume !== '' ? parseFloat(r.volume) : null),
-         isCng ? (r.volume != null && r.volume !== '' ? parseFloat(r.volume) : null) : null]
+         isCng ? (r.volume != null && r.volume !== '' ? parseFloat(r.volume) : null) : null,
+         contact_id ?? null]
       );
     }
     await conn.commit();
@@ -623,13 +653,25 @@ app.get("/api/fleet-equip", requireAuth, async (req, res) => {
   }
 });
 
+app.delete("/api/fleet-equip/row/:id", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const id = parseInt(req.params.id);
+  try {
+    await db.query("DELETE FROM ffs_fleet_equip WHERE fleet_equip_id = ? AND fleet_id = ?", [id, fleet_id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete row" });
+  }
+});
+
 /**
  * PUT /api/fleet-equip/:year
  * Replaces all equipment rows for this fleet and equip_year.
  * Body: { rows: [{ qty, cab_type, tractor_make, ... }] }
  */
 app.put("/api/fleet-equip/:year", requireAuth, async (req, res) => {
-  const { fleet_id } = req.user;
+  const { fleet_id, contact_id } = req.user;
   const year = parseInt(req.params.year);
   if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
 
@@ -650,8 +692,8 @@ app.put("/api/fleet-equip/:year", requireAuth, async (req, res) => {
             tractor_make, tractor_model,
             engine_make, engine_model, engine_rating,
             transmission_make, transmission_model,
-            axle_make, axle_model, axle_ratio)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            axle_make, axle_model, axle_ratio, contact_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [fleet_id, year,
          r.qty               || null, r.cab_type          || null,
          r.tractor_make      || null, r.tractor_model     || null,
@@ -659,7 +701,8 @@ app.put("/api/fleet-equip/:year", requireAuth, async (req, res) => {
          r.engine_rating     || null,
          r.transmission_make  || null, r.transmission_model || null,
          r.axle_make         || null, r.axle_model        || null,
-         r.axle_ratio != null && r.axle_ratio !== '' ? parseFloat(r.axle_ratio) : null]
+         r.axle_ratio != null && r.axle_ratio !== '' ? parseFloat(r.axle_ratio) : null,
+         contact_id ?? null]
       );
     }
     await conn.commit();

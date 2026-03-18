@@ -464,11 +464,19 @@ function FleetDetailsTable({ token }) {
       [yr]: { ...prev[yr], utilization: [...(prev[yr]?.utilization || []), template ? { ...template } : EMPTY_UTIL_ROW()] },
     }));
 
-  const removeRow = (yr, idx) =>
+  const removeRow = (yr, idx) => {
+    const row = (edits[yr]?.utilization || [])[idx];
+    const isSaved = row?.application && (data[yr]?.utilization || []).some(r => r.application === row.application);
+    if (isSaved) {
+      fetch(`/api/fleet-details/${yr}/${encodeURIComponent(row.application)}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      }).catch(console.error);
+    }
     setEdits(prev => {
       const rows = (prev[yr]?.utilization || []).filter((_, i) => i !== idx);
       return { ...prev, [yr]: { ...prev[yr], utilization: rows.length ? rows : [EMPTY_UTIL_ROW()] } };
     });
+  };
 
   const handleSave = async () => {
     if (selectedYear == null) return;
@@ -559,10 +567,12 @@ function FleetDetailsTable({ token }) {
               : utilRows.map((row, idx) => (
                 <tr key={idx}>
                   <td style={{...styles.detailTd, textAlign:'center'}}>
-                    <button onClick={() => removeRow(selectedYear, idx)} style={{
-                      background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
-                      borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
-                    }}>Remove</button>
+                    {selectedYear >= 2024 && (
+                      <button onClick={() => removeRow(selectedYear, idx)} style={{
+                        background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                        borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
+                      }}>Remove</button>
+                    )}
                   </td>
                   <td style={{...styles.detailTdLabel, ...styles.detailTdEditable}}>
                     <select style={{...styles.detailInput, textAlign:'left'}}
@@ -683,10 +693,18 @@ function FuelTable({ token }) {
     });
 
   const addRow    = (yr) => setEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_FUEL_ROW()] }));
-  const removeRow = (yr, idx) => setEdits(prev => {
-    const r = (prev[yr] || []).filter((_, i) => i !== idx);
-    return { ...prev, [yr]: r.length ? r : [EMPTY_FUEL_ROW()] };
-  });
+  const removeRow = (yr, idx) => {
+    const row = (edits[yr] || [])[idx];
+    if (row?.mpg_id) {
+      fetch(`/api/fuel/row/${row.mpg_id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      }).catch(console.error);
+    }
+    setEdits(prev => {
+      const r = (prev[yr] || []).filter((_, i) => i !== idx);
+      return { ...prev, [yr]: r.length ? r : [EMPTY_FUEL_ROW()] };
+    });
+  };
 
   const handleSave = async () => {
     if (!isEditable) return;
@@ -973,10 +991,18 @@ function FleetEquipTable({ token }) {
       [yr]: [...(prev[yr] || []), template ? { ...template, fleet_equip_id: undefined } : EMPTY_EQUIP_ROW()],
     }));
 
-  const removeRow = (yr, idx) => setEdits(prev => {
-    const rows = (prev[yr] || []).filter((_, i) => i !== idx);
-    return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
-  });
+  const removeRow = (yr, idx) => {
+    const row = (edits[yr] || [])[idx];
+    if (row?.fleet_equip_id) {
+      fetch(`/api/fleet-equip/row/${row.fleet_equip_id}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      }).catch(console.error);
+    }
+    setEdits(prev => {
+      const rows = (prev[yr] || []).filter((_, i) => i !== idx);
+      return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
+    });
+  };
 
   const handleSave = async () => {
     if (selectedYear == null) return;
@@ -1054,10 +1080,12 @@ function FleetEquipTable({ token }) {
               : displayRows.map((row, idx) => (
                 <tr key={idx}>
                   <td style={{...styles.detailTd, textAlign:'center'}}>
-                    <button onClick={() => removeRow(selectedYear, idx)} style={{
-                      background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
-                      borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
-                    }}>Remove</button>
+                    {selectedYear >= 2024 && (
+                      <button onClick={() => removeRow(selectedYear, idx)} style={{
+                        background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                        borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
+                      }}>Remove</button>
+                    )}
                   </td>
                   {EQUIP_COLS.map(col => (
                     <td key={col.key} style={{...styles.detailTd, ...styles.detailTdEditable, verticalAlign:'top'}}>
