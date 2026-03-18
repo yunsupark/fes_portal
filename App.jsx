@@ -508,7 +508,7 @@ function FleetDetailsTable({ token }) {
     <div style={styles.chartCard}>
       {/* Header */}
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
-        <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Details</h3>
+        <h3 style={{...styles.chartTitle, marginBottom:0}}>Equipment Utilization</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           {[...years].sort((a, b) => a - b).map(yr => (
             <button key={yr} onClick={() => setSelectedYear(yr)} style={{
@@ -527,8 +527,6 @@ function FleetDetailsTable({ token }) {
         </div>
       </div>
 
-      {/* Equipment Utilization */}
-      <div style={styles.detailSectionRow}>Equipment Utilization</div>
       <div style={{overflowX:'auto', marginBottom:12}}>
         <table style={styles.detailTable}>
           <thead>
