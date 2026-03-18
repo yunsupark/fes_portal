@@ -105,232 +105,204 @@ function MpgChart({ mpg = {}, techData = {}, years = [] }) {
 }
 
 const TECH_EDITABLE_YEARS = [2024, 2025];
+const TECH_NUM_YEARS = 5;
 
 function TechAdoptionCard({ token }) {
-  const NUM_YEARS = 5;
-
-  const [techData, setTechData]           = useState({});
-  const [categories, setCategories]       = useState({});
-  const [availableConfigs, setAvailableConfigs] = useState([]);
-  const [selectedConfig, setSelectedConfig]     = useState(1);
-  const [yearMeta, setYearMeta]           = useState({});
-  const [years, setYears]                 = useState([]);
-  const [selectedYear, setSelectedYear]   = useState(2025);
-  const [edits, setEdits]                 = useState({});
-  const [cabType, setCabType]             = useState('');
-  const [saving, setSaving]               = useState(false);
-  const [saveMsg, setSaveMsg]             = useState('');
-  const [openCats, setOpenCats]           = useState({});
+  const [techData, setTechData]     = useState({});
+  const [categories, setCategories] = useState({});
+  const [yearMeta, setYearMeta]     = useState({});
+  const [years, setYears]           = useState([]);
+  // edits[year][techLabel] = pctString
+  const [edits, setEdits]           = useState({ 2024: {}, 2025: {} });
+  // cabType[year] = 'Sleeper' | 'Day Cab' | ''
+  const [cabType, setCabType]       = useState({ 2024: '', 2025: '' });
+  const [saving, setSaving]         = useState(false);
+  const [saveMsg, setSaveMsg]       = useState('');
+  const [openCats, setOpenCats]     = useState({});
 
   const allTechs = Object.entries(categories).flatMap(([cat, arr]) => arr.map(t => ({...t, category: cat})));
+  const readOnlyYears = years.filter(y => !TECH_EDITABLE_YEARS.includes(y));
 
   const fetchData = async () => {
     try {
       const headers = { Authorization: `Bearer ${token}` };
-      const res = await fetch(`/api/techs?config=${selectedConfig}`, { headers });
+      const res = await fetch(`/api/techs?config=1`, { headers });
       if (!res.ok) return;
       const t = await res.json();
       setTechData(t.data || {});
       setCategories(t.categories || {});
       setYearMeta(t.meta || {});
-      if (t.configs?.length) {
-        setAvailableConfigs(t.configs);
-        const has = t.configs.some(c => (typeof c === 'object' ? c.config : c) === selectedConfig);
-        if (!has) {
-          const first = t.configs[0];
-          setSelectedConfig(typeof first === 'object' ? first.config : first);
-        }
-      }
       const known = new Set([...Object.keys(t.data || {}).map(Number), ...TECH_EDITABLE_YEARS]);
-      const sorted = [...known].sort((a, b) => b - a).slice(0, NUM_YEARS);
+      const sorted = [...known].sort((a, b) => b - a).slice(0, TECH_NUM_YEARS);
       setYears(sorted);
-      // init open state for categories (all closed)
       setOpenCats(prev => {
         const next = {...prev};
-        Object.keys(t.categories || {}).forEach(cat => { if (!(cat in next)) next[cat] = false; });
+        Object.keys(t.categories || {}).forEach(cat => { if (!(cat in next)) next[cat] = true; });
         return next;
       });
+      // init edits from existing data
+      const newEdits = { 2024: {}, 2025: {} };
+      const newCabType = { 2024: '', 2025: '' };
+      TECH_EDITABLE_YEARS.forEach(yr => {
+        const yrData = t.data?.[yr] || {};
+        Object.entries(t.categories || {}).forEach(([, techs_]) => {
+          techs_.forEach(tech => {
+            const v = yrData[tech.label];
+            newEdits[yr][tech.label] = v != null ? String(Math.round(v * 100)) : '';
+          });
+        });
+        newCabType[yr] = t.meta?.[yr]?.cab_type || '';
+      });
+      setEdits(newEdits);
+      setCabType(newCabType);
     } catch (err) { console.error(err); }
   };
 
-  useEffect(() => { if (token) fetchData(); }, [token, selectedConfig]);
+  useEffect(() => { if (token) fetchData(); }, [token]);
 
-  // When editable year or data changes, reset edits
-  useEffect(() => {
-    if (!TECH_EDITABLE_YEARS.includes(selectedYear)) return;
-    const yrData = techData[selectedYear] || {};
-    const init = {};
-    allTechs.forEach(tech => {
-      const v = yrData[tech.label];
-      init[tech.label] = v != null ? String(Math.round(v * 100)) : '';
-    });
-    setEdits(init);
-    setCabType(yearMeta[selectedYear]?.cab_type || '');
-    setSaveMsg('');
-  }, [selectedYear, techData, yearMeta]);
-
-  const handleCopyFromPrior = () => {
-    const priorYear = selectedYear - 1;
-    const priorData = techData[priorYear] || {};
-    const copied = {};
-    allTechs.forEach(tech => {
-      const v = priorData[tech.label];
-      copied[tech.label] = v != null ? String(Math.round(v * 100)) : '';
-    });
-    setEdits(copied);
-    if (!cabType && yearMeta[priorYear]?.cab_type) setCabType(yearMeta[priorYear].cab_type);
+  const handleCopy = (yr) => {
+    const priorData = techData[yr - 1] || {};
+    setEdits(prev => ({
+      ...prev,
+      [yr]: Object.fromEntries(allTechs.map(tech => {
+        const v = priorData[tech.label];
+        return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
+      }))
+    }));
+    if (!cabType[yr] && yearMeta[yr - 1]?.cab_type) {
+      setCabType(prev => ({ ...prev, [yr]: yearMeta[yr - 1].cab_type }));
+    }
   };
 
   const handleSave = async () => {
-    if (!cabType) { setSaveMsg('Please select a cab type before saving.'); return; }
+    const missing = TECH_EDITABLE_YEARS.filter(yr => !cabType[yr]);
+    if (missing.length) { setSaveMsg(`Select cab type for ${missing.join(' and ')} before saving.`); return; }
     setSaving(true); setSaveMsg('');
     try {
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      const res = await fetch(`/api/techs/${selectedYear}?config=${selectedConfig}`, {
-        method: 'PUT', headers,
-        body: JSON.stringify({ cab_type: cabType, techs: edits }),
-      });
-      if (res.ok) { setSaveMsg('Saved!'); fetchData(); }
-      else { const e = await res.json(); setSaveMsg(e.error || 'Error saving.'); }
+      await Promise.all(TECH_EDITABLE_YEARS.map(yr =>
+        fetch(`/api/techs/${yr}?config=1`, {
+          method: 'PUT', headers,
+          body: JSON.stringify({ cab_type: cabType[yr], techs: edits[yr] }),
+        })
+      ));
+      setSaveMsg('Saved!');
+      fetchData();
     } catch (err) { setSaveMsg('Error: ' + err.message); }
     finally { setSaving(false); }
   };
 
-  const isEditable = TECH_EDITABLE_YEARS.includes(selectedYear);
-  const selectStyle = { padding:'6px 10px', borderRadius:8, background:'#F9FAFB', color:'#111827', border:'1px solid #D1D5DB', fontSize:13 };
+  const selectSm = { padding:'4px 8px', borderRadius:6, background:'#F9FAFB', color:'#111827', border:'1px solid #D1D5DB', fontSize:12 };
+  const colCount = readOnlyYears.length + TECH_EDITABLE_YEARS.length + 1;
 
   return (
     <div style={styles.chartCard}>
-      {/* Header */}
+      {/* Header with save button */}
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Technology Adoption</h3>
-        {availableConfigs.length > 0 && (
-          <select value={selectedConfig} onChange={e => setSelectedConfig(Number(e.target.value))} style={selectStyle}>
-            {availableConfigs.map(c => {
-              const v = typeof c === 'object' ? c.config : c;
-              const l = typeof c === 'object' ? (c.label || `Config ${v}`) : `Config ${v}`;
-              return <option key={v} value={v}>{l}</option>;
-            })}
-          </select>
-        )}
-      </div>
-
-      {/* Year Tabs */}
-      <div style={{display:'flex', gap:4, marginBottom:16, flexWrap:'wrap', borderBottom:'1px solid #E5E7EB', paddingBottom:8}}>
-        {years.map(y => (
-          <button key={y} onClick={() => setSelectedYear(y)} style={{
-            padding:'6px 14px', borderRadius:6, border:'none', cursor:'pointer', fontSize:13, fontWeight:600,
-            background: y === selectedYear ? '#1c3660' : '#F3F4F6',
-            color: y === selectedYear ? '#fff' : '#374151',
-          }}>
-            {y}{TECH_EDITABLE_YEARS.includes(y) ? ' ✎' : ''}
+        <div style={{display:'flex', alignItems:'center', gap:10}}>
+          {saveMsg && <span style={{fontSize:13, color: saveMsg === 'Saved!' ? '#16A34A' : '#DC2626'}}>{saveMsg}</span>}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            style={{padding:'7px 18px', borderRadius:8, border:'none', cursor: saving ? 'not-allowed' : 'pointer',
+                    background: saving ? '#9CA3AF' : '#1c3660', color:'#fff', fontWeight:600, fontSize:13}}>
+            {saving ? 'Saving…' : 'Save'}
           </button>
-        ))}
+        </div>
       </div>
 
-      {isEditable ? (
-        <div>
-          {/* Controls: cab type + copy from prior */}
-          <div style={{display:'flex', alignItems:'center', gap:16, marginBottom:16, flexWrap:'wrap'}}>
-            <div style={{display:'flex', alignItems:'center', gap:8}}>
-              <label style={{fontSize:13, fontWeight:600, color:'#374151'}}>Cab Type <span style={{color:'#A41C24'}}>*</span></label>
-              <select value={cabType} onChange={e => setCabType(e.target.value)} style={{...selectStyle, border: !cabType ? '1px solid #A41C24' : '1px solid #D1D5DB'}}>
-                <option value=''>— select —</option>
-                <option value='Sleeper'>Sleeper</option>
-                <option value='Day Cab'>Day Cab</option>
-              </select>
-            </div>
-            <button onClick={handleCopyFromPrior} style={{padding:'6px 12px', borderRadius:6, border:'1px solid #D1D5DB', background:'#F9FAFB', color:'#374151', fontSize:13, cursor:'pointer'}}>
-              Copy from {selectedYear - 1}
-            </button>
-          </div>
-
-          {/* Editable tech grid by category */}
-          {Object.entries(categories).map(([cat, techs_]) => {
-            const isOpen = openCats[cat] !== false; // default open
-            return (
-              <div key={cat} style={styles.techSection}>
-                <h4 style={{...styles.techCatHead, cursor:'pointer', display:'flex', alignItems:'center', gap:6}}
-                    onClick={() => setOpenCats(p => ({...p, [cat]: !isOpen}))}>
-                  {isOpen ? '▼' : '▶'} {cat}
-                </h4>
-                {isOpen && (
-                  <div style={styles.techGrid}>
-                    {techs_.map(tech => (
-                      <div key={tech.label} style={styles.techField}>
-                        <label style={styles.techLabel} title={tech.desc}>{tech.label}</label>
-                        <div style={{display:'flex', alignItems:'center', gap:6}}>
-                          <span style={{color:'#9CA3AF', fontSize:12, minWidth:34, textAlign:'right'}}>
-                            {pct(techData[selectedYear - 1]?.[tech.label])}
-                          </span>
-                          <span style={{color:'#9CA3AF', fontSize:12}}>→</span>
+      <div style={{overflowX:'auto'}}>
+        <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 280 + TECH_EDITABLE_YEARS.length * 140}}>
+          <thead>
+            {/* Year header row */}
+            <tr>
+              <th style={{...styles.heatTh, minWidth:220}}>Technology</th>
+              {readOnlyYears.map(y => <th key={y} style={styles.heatThYear}>{y}</th>)}
+              {TECH_EDITABLE_YEARS.map(y => (
+                <th key={y} style={{...styles.heatThYear, background:'#EFF6FF', minWidth:130}}>
+                  {y} ✎
+                </th>
+              ))}
+            </tr>
+            {/* Cab type row */}
+            <tr style={{background:'#F9FAFB'}}>
+              <td style={{padding:'6px 12px', fontSize:12, fontWeight:600, color:'#374151'}}>
+                Cab Type <span style={{color:'#A41C24'}}>*</span>
+              </td>
+              {readOnlyYears.map(y => (
+                <td key={y} style={{...styles.heatCell, fontSize:12, color:'#9CA3AF'}}>
+                  {yearMeta[y]?.cab_type || '—'}
+                </td>
+              ))}
+              {TECH_EDITABLE_YEARS.map(y => (
+                <td key={y} style={{...styles.heatCell, background:'#EFF6FF'}}>
+                  <select
+                    value={cabType[y]}
+                    onChange={e => setCabType(prev => ({...prev, [y]: e.target.value}))}
+                    style={{...selectSm, border: !cabType[y] ? '1px solid #A41C24' : '1px solid #D1D5DB', width:'100%'}}>
+                    <option value=''>— select —</option>
+                    <option value='Sleeper'>Sleeper</option>
+                    <option value='Day Cab'>Day Cab</option>
+                  </select>
+                </td>
+              ))}
+            </tr>
+            {/* Copy row */}
+            <tr style={{background:'#F9FAFB'}}>
+              <td style={{padding:'4px 12px'}} />
+              {readOnlyYears.map(y => <td key={y} />)}
+              {TECH_EDITABLE_YEARS.map(y => (
+                <td key={y} style={{...styles.heatCell, background:'#EFF6FF', paddingTop:4, paddingBottom:6}}>
+                  <button onClick={() => handleCopy(y)} style={{padding:'3px 8px', borderRadius:5, border:'1px solid #D1D5DB', background:'#fff', color:'#374151', fontSize:11, cursor:'pointer'}}>
+                    Copy from {y - 1}
+                  </button>
+                </td>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(categories).flatMap(([cat, techs_]) => {
+              const isOpen = openCats[cat] !== false;
+              const rows = [];
+              rows.push(
+                <tr key={`cat-${cat}`} style={{cursor:'pointer'}} onClick={() => setOpenCats(p => ({...p, [cat]: !isOpen}))}>
+                  <td colSpan={colCount} style={styles.heatCatRow}>{isOpen ? '▼' : '▶'} {cat}</td>
+                </tr>
+              );
+              if (isOpen) {
+                techs_.forEach(tech => {
+                  rows.push(
+                    <tr key={tech.label} style={styles.heatRow}>
+                      <td style={styles.heatTechLabel} title={tech.desc}>{tech.label}</td>
+                      {readOnlyYears.map(y => (
+                        <td key={y} style={styles.heatCell}>
+                          <HeatCell value={(techData[y] || {})[tech.label]} />
+                        </td>
+                      ))}
+                      {TECH_EDITABLE_YEARS.map(y => (
+                        <td key={y} style={{...styles.heatCell, background:'#F0F7FF', padding:'4px 8px'}}>
                           <div style={styles.pctInputWrap}>
                             <input
-                              style={styles.techInput}
+                              style={{...styles.techInput, fontSize:12, padding:'4px 24px 4px 6px'}}
                               type="number" min="0" max="100"
-                              value={edits[tech.label] ?? ''}
-                              onChange={e => setEdits(p => ({...p, [tech.label]: e.target.value}))}
-                              placeholder="0–100"
+                              value={edits[y]?.[tech.label] ?? ''}
+                              onChange={e => setEdits(prev => ({...prev, [y]: {...prev[y], [tech.label]: e.target.value}}))}
+                              placeholder="—"
                             />
                             <span style={styles.pctSign}>%</span>
                           </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Save row */}
-          <div style={{display:'flex', alignItems:'center', gap:12, marginTop:16, paddingTop:12, borderTop:'1px solid #E5E7EB'}}>
-            <button
-              onClick={handleSave}
-              disabled={saving || !cabType}
-              style={{padding:'8px 20px', borderRadius:8, border:'none', cursor: (!cabType || saving) ? 'not-allowed' : 'pointer',
-                      background: (!cabType || saving) ? '#9CA3AF' : '#1c3660', color:'#fff', fontWeight:600, fontSize:13}}>
-              {saving ? 'Saving…' : `Save ${selectedYear}`}
-            </button>
-            {saveMsg && <span style={{fontSize:13, color: saveMsg === 'Saved!' ? '#16A34A' : '#DC2626'}}>{saveMsg}</span>}
-          </div>
-        </div>
-      ) : (
-        /* Read-only heatmap for prior years */
-        <div style={{overflowX:'auto'}}>
-          <table style={styles.heatTable}>
-            <thead>
-              <tr>
-                <th style={styles.heatTh}>Technology</th>
-                <th style={styles.heatThYear}>{selectedYear}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {Object.entries(categories).flatMap(([cat, techs_]) => {
-                const isOpen = openCats[cat] !== false;
-                const rows = [];
-                rows.push(
-                  <tr key={`cat-${cat}`} style={{cursor:'pointer'}} onClick={() => setOpenCats(p => ({...p, [cat]: !isOpen}))}>
-                    <td colSpan={2} style={styles.heatCatRow}>{isOpen ? '▼' : '▶'} {cat}</td>
-                  </tr>
-                );
-                if (isOpen) {
-                  techs_.forEach(tech => {
-                    const v = (techData[selectedYear] || {})[tech.label];
-                    rows.push(
-                      <tr key={tech.label} style={styles.heatRow}>
-                        <td style={styles.heatTechLabel} title={tech.desc}>{tech.label}</td>
-                        <td style={styles.heatCell}><HeatCell value={v} /></td>
-                      </tr>
-                    );
-                  });
-                }
-                return rows;
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                });
+              }
+              return rows;
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
