@@ -334,9 +334,9 @@ function HeatCell({ value }) {
   );
 }
 
-function SubmissionHistory({ token, saveCount }) {
+function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) {
   const [status, setStatus]           = useState(null);
-  const [submitModal, setSubmitModal] = useState(null); // year number or null
+  const [submitModal, setSubmitModal] = useState(null);
   const YEARS = [2024, 2025];
 
   const loadStatus = () => {
@@ -348,42 +348,47 @@ function SubmissionHistory({ token, saveCount }) {
   };
   useEffect(loadStatus, [token, saveCount]);
 
-  const totalTechs = status?.totalTechs || 0;
+  const totalTechs    = status?.totalTechs    || 0;
+  const techCountDayCab = status?.techCountDayCab || totalTechs;
 
-  // Green (ready): all sections have at least 1 entry AND at least one cab_type has all N techs
-  const isReady = (yr) => {
+  const techThreshold = (cabType) => cabType === 'Day Cab' ? techCountDayCab : totalTechs;
+
+  // Yellow: fuel >= 1 AND at least one cab_type meets its tech threshold
+  const isYellow = (yr) => {
     if (!status) return false;
-    const hasFuel  = (status.fuel?.[yr]       || 0) >= 1;
-    const hasUtil  = (status.utilization?.[yr] || 0) >= 1;
-    const hasEquip = (status.fleetEquip?.[yr]  || 0) >= 1;
+    const hasFuel = (status.fuel?.[yr] || 0) >= 1;
     const techByType = status.tech?.[yr] || {};
-    const hasTech = totalTechs > 0 && Object.values(techByType).some(n => n >= totalTechs);
-    return hasFuel && hasUtil && hasEquip && hasTech;
+    const hasTech = totalTechs > 0 && Object.entries(techByType).some(([ct, n]) => n >= techThreshold(ct));
+    return hasFuel && hasTech;
   };
 
-  // Incomplete items to list in the modal
+  // Green: all sections have entries AND at least one cab_type meets tech threshold
+  const isGreen = (yr) => {
+    if (!isYellow(yr)) return false;
+    return (status.utilization?.[yr] || 0) >= 1 && (status.fleetEquip?.[yr] || 0) >= 1;
+  };
+
   const getIncomplete = (yr) => {
     if (!status) return [];
     const items = [];
-    if ((status.utilization?.[yr] || 0) === 0)
-      items.push('Equipment Utilization: no rows entered');
-    if ((status.fleetEquip?.[yr] || 0) === 0)
-      items.push('Fleet Equipment: no rows entered');
+    if ((status.utilization?.[yr] || 0) === 0) items.push('Equipment Utilization: no rows entered');
+    if ((status.fleetEquip?.[yr]  || 0) === 0) items.push('Fleet Equipment: no rows entered');
+    if ((status.fuel?.[yr]        || 0) === 0) items.push('Fuel (IFTA): no rows entered');
     const techByType = status.tech?.[yr] || {};
     if (Object.keys(techByType).length === 0) {
       items.push('Tech Adoption: no data entered');
     } else {
       Object.entries(techByType).forEach(([ct, n]) => {
-        if (n < totalTechs)
-          items.push(`Tech Adoption (${ct}): ${n} of ${totalTechs} technologies entered`);
+        const threshold = techThreshold(ct);
+        if (n < threshold) items.push(`Tech Adoption (${ct}): ${n} of ${threshold} technologies entered`);
       });
     }
     return items;
   };
 
-  const handleSubmitConfirm = async (yr) => {
+  const handleSubmitConfirm = (yr) => {
     setSubmitModal(null);
-    // Future: call POST /api/submit/:year to lock the year
+    onSubmit?.(yr);
   };
 
   const cellStyle  = { padding:'8px 16px', textAlign:'center', fontSize:13, borderBottom:'1px solid #F3F4F6', color:'#374151' };
@@ -401,15 +406,19 @@ function SubmissionHistory({ token, saveCount }) {
   };
 
   const SubmitBtn = ({ yr }) => {
-    const ready = isReady(yr);
+    if (submittedYears.includes(yr)) {
+      return <span style={{color:'#16A34A', fontWeight:700, fontSize:13}}>✓ Submitted</span>;
+    }
+    const yellow = isYellow(yr);
+    const green  = isGreen(yr);
     return (
       <button
-        onClick={() => ready && setSubmitModal(yr)}
+        onClick={() => yellow && setSubmitModal(yr)}
         style={{
           padding:'5px 14px', borderRadius:6, border:'none', fontSize:12, fontWeight:700,
-          cursor: ready ? 'pointer' : 'not-allowed',
-          background: ready ? '#16A34A' : '#D1D5DB',
-          color: ready ? '#fff' : '#9CA3AF',
+          cursor: yellow ? 'pointer' : 'not-allowed',
+          background: green ? '#16A34A' : yellow ? '#F59E0B' : '#D1D5DB',
+          color:      green ? '#fff'    : yellow ? '#1c3660' : '#9CA3AF',
           whiteSpace:'nowrap',
         }}
       >
@@ -452,14 +461,18 @@ function SubmissionHistory({ token, saveCount }) {
             ))}
           </tr>
         </tbody>
+        <tfoot>
+          <tr>
+            <td />
+            {YEARS.map(y => (
+              <td key={y} style={{padding:'10px 16px', textAlign:'center'}}>
+                <SubmitBtn yr={y} />
+              </td>
+            ))}
+          </tr>
+        </tfoot>
       </table>
 
-      {/* Submit buttons below table */}
-      <div style={{display:'flex', justifyContent:'flex-end', gap:12, marginTop:12}}>
-        {YEARS.map(y => <SubmitBtn key={y} yr={y} />)}
-      </div>
-
-      {/* Submit confirmation modal */}
       {submitModal != null && (() => {
         const yr = submitModal;
         const incomplete = getIncomplete(yr);
@@ -467,7 +480,6 @@ function SubmissionHistory({ token, saveCount }) {
           <div style={{position:'fixed', inset:0, background:'rgba(0,0,0,0.45)', display:'flex', alignItems:'center', justifyContent:'center', zIndex:1000}}>
             <div style={{background:'#fff', borderRadius:12, padding:32, maxWidth:480, width:'90%', boxShadow:'0 8px 40px rgba(0,0,0,0.25)'}}>
               <h3 style={{margin:'0 0 16px', color:'#1c3660', fontSize:17}}>Submit {yr} Data</h3>
-
               {incomplete.length > 0 && (
                 <div style={{marginBottom:16}}>
                   <p style={{margin:'0 0 8px', fontSize:13, fontWeight:600, color:'#374151'}}>The following entries are incomplete:</p>
@@ -478,13 +490,11 @@ function SubmissionHistory({ token, saveCount }) {
                   </ul>
                 </div>
               )}
-
               <div style={{background:'#FEF2F2', border:'1px solid #FECACA', borderRadius:8, padding:'10px 14px', marginBottom:20}}>
                 <p style={{margin:0, fontSize:13, color:'#991B1B', fontWeight:600}}>
                   Warning: Once submitted, {yr} data cannot be changed.
                 </p>
               </div>
-
               <div style={{display:'flex', justifyContent:'flex-end', gap:10}}>
                 <button
                   onClick={() => setSubmitModal(null)}
@@ -516,7 +526,7 @@ const EMPTY_UTIL_ROW = () => ({
   grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
 });
 
-function FleetDetailsTable({ token, onSave }) {
+function FleetDetailsTable({ token, onSave, submittedYears = [] }) {
   const NUM_YEARS = 5;
 
   const [data,            setData]           = useState({});
@@ -664,7 +674,7 @@ function FleetDetailsTable({ token, onSave }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{[2024,2025].includes(yr) ? ' ✎' : ''}</button>
+            }}>{yr}{[2024,2025].includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -769,7 +779,7 @@ const FUEL_OPTIONS    = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
 const EDITABLE_YEARS  = [2024, 2025];
 const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: '' });
 
-function FuelTable({ token, onSave }) {
+function FuelTable({ token, onSave, submittedYears = [] }) {
   const NUM_YEARS = 5;
 
   const [rows,         setRows]         = useState([]);   // flat array from API
@@ -870,7 +880,7 @@ function FuelTable({ token, onSave }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{[2024,2025].includes(yr) ? ' ✎' : ''}</button>
+            }}>{yr}{[2024,2025].includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -1065,7 +1075,7 @@ function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
     placeholder="—" style={inputStyle} />;
 }
 
-function FleetEquipTable({ token, onSave }) {
+function FleetEquipTable({ token, onSave, submittedYears = [] }) {
   const [data,         setData]         = useState({});
   const [edits,        setEdits]        = useState({});
   const [years,        setYears]        = useState([]);
@@ -1188,7 +1198,7 @@ function FleetEquipTable({ token, onSave }) {
               borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
               background:  yr === selectedYear ? '#1c3660' : '#fff',
               color:       yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{yr >= 2024 ? ' ✎' : ''}</button>
+            }}>{yr}{yr >= 2024 && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
           ))}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
@@ -1476,6 +1486,18 @@ export default function App() {
   const [mpg, setMpg] = useState({});
   const [saveCount, setSaveCount] = useState(0);
   const notifySave = () => setSaveCount(n => n + 1);
+  const [submittedYears, setSubmittedYears] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('submittedYears') || '[]'); }
+    catch { return []; }
+  });
+  const onSubmit = (yr) => {
+    setSubmittedYears(prev => {
+      const next = prev.includes(yr) ? prev : [...prev, yr];
+      localStorage.setItem('submittedYears', JSON.stringify(next));
+      return next;
+    });
+    setSaveCount(n => n + 1);
+  };
 
   const fleet = fleetState;
   const latestYear = fleet?.submissionYears?.length ? Math.max(...fleet.submissionYears) : (Object.keys(general).length ? Math.max(...Object.keys(general).map(Number)) : null);
@@ -1584,18 +1606,18 @@ export default function App() {
             <MpgChart mpg={mpg} techData={tech} years={fleet?.submissionYears} />
           </div>
           <div style={{flex:"0 0 320px"}}>
-            <SubmissionHistory token={token} saveCount={saveCount} />
+            <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} />
           </div>
         </div>
 
         {/* Fleet Details Table */}
-        <FleetDetailsTable token={token} onSave={notifySave} />
+        <FleetDetailsTable token={token} onSave={notifySave} submittedYears={submittedYears} />
 
         {/* Fleet Equipment Table */}
-        <FleetEquipTable token={token} onSave={notifySave} />
+        <FleetEquipTable token={token} onSave={notifySave} submittedYears={submittedYears} />
 
         {/* Fuel Table */}
-        <FuelTable token={token} onSave={notifySave} />
+        <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} />
 
         {/* Tech Adoption Card */}
         <TechAdoptionCard token={token} onSave={notifySave} />

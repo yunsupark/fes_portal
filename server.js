@@ -248,7 +248,12 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     const [techTotalRow] = await db.query('SELECT COUNT(*) AS cnt FROM ffs_tech');
     const totalTechs = Number(techTotalRow[0].cnt);
 
-    res.json({ years, utilization, fleetEquip, fuel, tech, totalTechs });
+    const [dayCabTechRow] = await db.query(
+      `SELECT COUNT(*) AS cnt FROM ffs_tech WHERE NOT (tech_group = 'Idle Reduction' AND tech_id NOT IN (2, 10, 13))`
+    );
+    const techCountDayCab = Number(dayCabTechRow[0].cnt);
+
+    res.json({ years, utilization, fleetEquip, fuel, tech, totalTechs, techCountDayCab });
   } catch (err) {
     console.error("Error fetching submission status:", err.message);
     res.status(500).json({ error: "Failed to fetch status" });
