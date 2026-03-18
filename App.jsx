@@ -257,7 +257,7 @@ function TechAdoptionCard({ token }) {
               ))}
               {TECH_EDITABLE_YEARS.map(y => (
                 <td key={y} style={{...styles.heatCell, fontSize:12, color:'#374151', background:'#EFF6FF', fontWeight:500}}>
-                  {yearMeta[y]?.cab_type || '—'}
+                  {yearMeta[y]?.cab_type || selectedCabType}
                 </td>
               ))}
             </tr>
