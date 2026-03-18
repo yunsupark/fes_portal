@@ -408,10 +408,8 @@ function SubmissionHistory({ token }) {
       <table style={{width:'100%', borderCollapse:'collapse'}}>
         <thead>
           {/* Submit button row */}
-          <tr style={{background:'#FFFBEB'}}>
-            <td style={{padding:'8px 12px', fontSize:12, color:'#6B7280'}}>
-              Ready to submit when Fuel + Tech Adoption complete
-            </td>
+          <tr>
+            <td />
             {YEARS.map(y => (
               <td key={y} style={{padding:'8px 16px', textAlign:'center'}}>
                 <SubmitBtn yr={y} />
