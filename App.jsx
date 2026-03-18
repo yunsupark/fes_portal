@@ -525,7 +525,7 @@ const EMPTY_UTIL_ROW = () => ({
   grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
 });
 
-function FleetDetailsTable({ token, onSave, submittedYears = [] }) {
+function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
   const NUM_YEARS = 5;
 
   const [data,            setData]           = useState({});
@@ -556,9 +556,9 @@ function FleetDetailsTable({ token, onSave, submittedYears = [] }) {
     setData(d);
     // Build year list: DB years + 2024/2025, sorted descending, take NUM_YEARS
     const dbYears = Object.keys(d).map(Number);
-    const yrList  = [...new Set([...dbYears, 2024, 2025])].sort((a, b) => b - a).slice(0, NUM_YEARS);
+    const yrList  = [...new Set([...dbYears, ...editableYears])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, editableYears.length + 3));
     setYears(yrList);
-    const editableInList = yrList.filter(y => [2024, 2025].includes(y));
+    const editableInList = yrList.filter(y => editableYears.includes(y));
     setSelectedYear(prev => prev ?? (editableInList.length ? Math.min(...editableInList) : yrList[0]));
     // Seed edits for all displayed years
     const init = {};
@@ -1074,7 +1074,7 @@ function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
     placeholder="—" style={inputStyle} />;
 }
 
-function FleetEquipTable({ token, onSave, submittedYears = [] }) {
+function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
   const [data,         setData]         = useState({});
   const [edits,        setEdits]        = useState({});
   const [years,        setYears]        = useState([]);
@@ -1100,11 +1100,10 @@ function FleetEquipTable({ token, onSave, submittedYears = [] }) {
     setData(d);
     const yrList = Object.keys(d).map(Number).sort((a, b) => b - a);
     setYears(yrList);
-    // Default to earliest editable year (2024)
-    setSelectedYear(prev => prev ?? 2024);
+    setSelectedYear(prev => prev ?? Math.min(...editableYears));
     const init = {};
     yrList.forEach(yr => { init[yr] = (d[yr] || []).map(row => ({ ...row })); });
-    [2024, 2025].forEach(yr => { if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()]; });
+    editableYears.forEach(yr => { if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()]; });
     setEdits(init);
   };
 
@@ -1183,7 +1182,7 @@ function FleetEquipTable({ token, onSave, submittedYears = [] }) {
   };
 
   const displayRows     = edits[selectedYear] || data[selectedYear] || [];
-  const allYearsForTabs = [...new Set([...years, 2024, 2025])].sort((a, b) => a - b);
+  const allYearsForTabs = [...new Set([...years, ...editableYears])].sort((a, b) => a - b);
 
   return (
     <div style={styles.chartCard}>
