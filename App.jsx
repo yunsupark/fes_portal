@@ -595,16 +595,10 @@ function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears =
     }));
 
   const removeRow = (yr, idx) => {
-    const row = (edits[yr]?.utilization || [])[idx];
-    const isSaved = row?.application && (data[yr]?.utilization || []).some(r => r.application === row.application);
-    if (isSaved) {
-      fetch(`/api/fleet-details/${yr}/${encodeURIComponent(row.application)}`, {
-        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
-      }).catch(console.error);
-    }
     setEdits(prev => {
-      const rows = (prev[yr]?.utilization || []).filter((_, i) => i !== idx);
-      return { ...prev, [yr]: { ...prev[yr], utilization: rows.length ? rows : [EMPTY_UTIL_ROW()] } };
+      const rows = [...(prev[yr]?.utilization || [])];
+      rows[idx] = { ...rows[idx], _remove: !rows[idx]._remove };
+      return { ...prev, [yr]: { ...prev[yr], utilization: rows } };
     });
   };
 
@@ -613,11 +607,20 @@ function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears =
     setSaving(true); setStatus(null);
     try {
       const e = edits[selectedYear] || {};
+      const allRows = e.utilization || [];
+      // Delete rows marked for removal that exist in DB
+      await Promise.all(
+        allRows
+          .filter(r => r._remove && r.application && (data[selectedYear]?.utilization || []).some(s => s.application === r.application))
+          .map(r => fetch(`/api/fleet-details/${selectedYear}/${encodeURIComponent(r.application)}`, {
+            method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+          }))
+      );
       await fetch(`/api/fleet-details/${selectedYear}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({
-          utilization: (e.utilization || []).filter(r => r.application).map(r => ({
+          utilization: allRows.filter(r => !r._remove && r.application).map(r => ({
             application:      r.application,
             tractors:         r.tractors       !== '' ? parseInt(r.tractors)        : null,
             trailers:         r.trailers        !== '' ? parseInt(r.trailers)        : null,
@@ -696,13 +699,15 @@ function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears =
             {utilRows.length === 0
               ? <tr><td colSpan={UTIL_COLS.length + 2} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data</td></tr>
               : utilRows.map((row, idx) => (
-                <tr key={idx}>
+                <tr key={idx} style={row._remove ? {opacity:0.45} : {}}>
                   <td style={{...styles.detailTd, textAlign:'center'}}>
                     {selectedYear >= 2024 && (
                       <button onClick={() => removeRow(selectedYear, idx)} style={{
-                        background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                        background: row._remove ? '#FEF3C7' : '#FEE2E2',
+                        border: `1px solid ${row._remove ? '#FCD34D' : '#FECACA'}`,
+                        color: row._remove ? '#92400E' : '#DC2626',
                         borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
-                      }}>Remove</button>
+                      }}>{row._remove ? 'Undo' : 'Remove'}</button>
                     )}
                   </td>
                   <td style={{...styles.detailTdLabel, ...styles.detailTdEditable}}>
@@ -826,15 +831,10 @@ function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 
 
   const addRow    = (yr) => setEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_FUEL_ROW()] }));
   const removeRow = (yr, idx) => {
-    const row = (edits[yr] || [])[idx];
-    if (row?.mpg_id) {
-      fetch(`/api/fuel/row/${row.mpg_id}`, {
-        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
-      }).catch(console.error);
-    }
     setEdits(prev => {
-      const r = (prev[yr] || []).filter((_, i) => i !== idx);
-      return { ...prev, [yr]: r.length ? r : [EMPTY_FUEL_ROW()] };
+      const r = [...(prev[yr] || [])];
+      r[idx] = { ...r[idx], _remove: !r[idx]._remove };
+      return { ...prev, [yr]: r };
     });
   };
 
@@ -842,7 +842,16 @@ function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 
     if (!isEditable) return;
     setSaving(true); setStatus(null);
     try {
-      const saveRows = (edits[selectedYear] || []).filter(r => r.fuel_type);
+      const allRows = edits[selectedYear] || [];
+      // Delete rows marked for removal that exist in DB
+      await Promise.all(
+        allRows
+          .filter(r => r._remove && r.mpg_id)
+          .map(r => fetch(`/api/fuel/row/${r.mpg_id}`, {
+            method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+          }))
+      );
+      const saveRows = allRows.filter(r => !r._remove && r.fuel_type);
       await fetch(`/api/fuel/${selectedYear}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -911,13 +920,15 @@ function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 
                   const miles = parseFloat(row.ifta_miles), galDge = parseFloat(vol);
                   const mpgVal = miles > 0 && galDge > 0 ? (miles / galDge).toFixed(2) : null;
                   return (
-                    <tr key={idx}>
+                    <tr key={idx} style={row._remove ? {opacity:0.45} : {}}>
                       {isEditable && (
                         <td style={{...styles.detailTd, textAlign:'center'}}>
                           <button onClick={() => removeRow(selectedYear, idx)} style={{
-                            background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                            background: row._remove ? '#FEF3C7' : '#FEE2E2',
+                            border: `1px solid ${row._remove ? '#FCD34D' : '#FECACA'}`,
+                            color: row._remove ? '#92400E' : '#DC2626',
                             borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer',
-                          }}>Remove</button>
+                          }}>{row._remove ? 'Undo' : 'Remove'}</button>
                         </td>
                       )}
                       <td style={{...styles.detailTd, ...(isEditable ? styles.detailTdEditable : {})}}>
@@ -1131,15 +1142,10 @@ function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [
     }));
 
   const removeRow = (yr, idx) => {
-    const row = (edits[yr] || [])[idx];
-    if (row?.fleet_equip_id) {
-      fetch(`/api/fleet-equip/row/${row.fleet_equip_id}`, {
-        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
-      }).catch(console.error);
-    }
     setEdits(prev => {
-      const rows = (prev[yr] || []).filter((_, i) => i !== idx);
-      return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
+      const rows = [...(prev[yr] || [])];
+      rows[idx] = { ...rows[idx], _remove: !rows[idx]._remove };
+      return { ...prev, [yr]: rows };
     });
   };
 
@@ -1147,7 +1153,16 @@ function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [
     if (selectedYear == null) return;
     setSaving(true); setStatus(null);
     try {
-      const rows = (edits[selectedYear] || []).filter(r => r.qty || r.tractor_make || r.cab_type);
+      const allRows = edits[selectedYear] || [];
+      // Delete rows marked for removal that exist in DB
+      await Promise.all(
+        allRows
+          .filter(r => r._remove && r.fleet_equip_id)
+          .map(r => fetch(`/api/fleet-equip/row/${r.fleet_equip_id}`, {
+            method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+          }))
+      );
+      const rows = allRows.filter(r => !r._remove && (r.qty || r.tractor_make || r.cab_type));
       await fetch(`/api/fleet-equip/${selectedYear}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -1170,7 +1185,7 @@ function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [
     .sort(([a], [b]) => b - a)
     .flatMap(([yr, rows]) =>
       rows
-        .filter(r => r.tractor_make || r.cab_type || r.qty)
+        .filter(r => !r._remove && (r.tractor_make || r.cab_type || r.qty))
         .map(r => ({ year: parseInt(yr), row: r }))
     );
 
@@ -1218,13 +1233,15 @@ function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [
             {displayRows.length === 0
               ? <tr><td colSpan={EQUIP_COLS.length + 1} style={{...styles.detailTd, color:'#9CA3AF', textAlign:'center'}}>No data for this year</td></tr>
               : displayRows.map((row, idx) => (
-                <tr key={idx}>
+                <tr key={idx} style={row._remove ? {opacity:0.45} : {}}>
                   <td style={{...styles.detailTd, textAlign:'center'}}>
                     {selectedYear >= 2024 && (
                       <button onClick={() => removeRow(selectedYear, idx)} style={{
-                        background:'#FEE2E2', border:'1px solid #FECACA', color:'#DC2626',
+                        background: row._remove ? '#FEF3C7' : '#FEE2E2',
+                        border: `1px solid ${row._remove ? '#FCD34D' : '#FECACA'}`,
+                        color: row._remove ? '#92400E' : '#DC2626',
                         borderRadius:4, padding:'2px 8px', fontSize:12, cursor:'pointer', whiteSpace:'nowrap',
-                      }}>Remove</button>
+                      }}>{row._remove ? 'Undo' : 'Remove'}</button>
                     )}
                   </td>
                   {EQUIP_COLS.map(col => (
