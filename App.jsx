@@ -352,10 +352,12 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
 
   const techThreshold = (cabType) => cabType === 'Day Cab' ? techCountDayCab : totalTechs;
 
+  const fuelCnt = (yr) => status?.fuel?.[yr]?.cnt ?? 0;
+
   // Yellow: fuel >= 1 AND at least one cab_type meets its tech threshold
   const isYellow = (yr) => {
     if (!status) return false;
-    const hasFuel = (status.fuel?.[yr] || 0) >= 1;
+    const hasFuel = fuelCnt(yr) >= 1;
     const techByType = status.tech?.[yr] || {};
     const hasTech = totalTechs > 0 && Object.entries(techByType).some(([ct, n]) => n >= techThreshold(ct));
     return hasFuel && hasTech;
@@ -367,12 +369,21 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
     return (status.utilization?.[yr] || 0) >= 1 && (status.fleetEquip?.[yr] || 0) >= 1;
   };
 
+  // All 4 sections have at least one entry (for cell coloring)
+  const allFilled = (yr) => {
+    if (!status) return false;
+    return fuelCnt(yr) >= 1
+      && (status.utilization?.[yr] ?? 0) >= 1
+      && (status.fleetEquip?.[yr]  ?? 0) >= 1
+      && Object.keys(status.tech?.[yr] || {}).length > 0;
+  };
+
   const getIncomplete = (yr) => {
     if (!status) return [];
     const items = [];
     if ((status.utilization?.[yr] || 0) === 0) items.push('Equipment Utilization: no rows entered');
     if ((status.fleetEquip?.[yr]  || 0) === 0) items.push('Fleet Equipment: no rows entered');
-    if ((status.fuel?.[yr]        || 0) === 0) items.push('Fuel (IFTA): no rows entered');
+    if (fuelCnt(yr) === 0) items.push('Fuel (IFTA): no rows entered');
     const techByType = status.tech?.[yr] || {};
     if (Object.keys(techByType).length === 0) {
       items.push('Tech Adoption: no data entered');
@@ -385,6 +396,33 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
     return items;
   };
 
+  // Cell display helpers
+  const sectionCell = (key, yr) => {
+    if (!status) return { text: '—', color: '#374151' };
+    const cnt = status[key]?.[yr] ?? 0;
+    if (cnt === 0) return { text: 'Not Started', color: '#DC2626' };
+    const color = allFilled(yr) ? '#16A34A' : '#D97706';
+    return { text: cnt === 1 ? '1 entry' : `${cnt} entries`, color };
+  };
+
+  const fuelCellDisplay = (yr) => {
+    if (!status) return { text: '—', color: '#374151' };
+    const cnt = fuelCnt(yr);
+    if (cnt === 0) return { text: 'Not Started', color: '#DC2626' };
+    const color = allFilled(yr) ? '#16A34A' : '#D97706';
+    return { text: status.fuel[yr].fuel_types || (cnt === 1 ? '1 entry' : `${cnt} entries`), color };
+  };
+
+  const techCellDisplay = (yr) => {
+    if (!status) return { text: '—', color: '#374151' };
+    const byType = status.tech?.[yr];
+    const hasAny = byType && Object.keys(byType).length > 0;
+    if (!hasAny) return { text: '—', color: '#374151' };
+    const text = Object.entries(byType).sort(([a],[b]) => a.localeCompare(b)).map(([ct, n]) => `${ct}: ${n}`).join(', ');
+    const color = allFilled(yr) ? '#16A34A' : '#D97706';
+    return { text, color };
+  };
+
   const handleSubmitConfirm = (yr) => {
     setSubmitModal(null);
     onSubmit?.(yr);
@@ -393,16 +431,6 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
   const cellStyle  = { padding:'8px 16px', textAlign:'center', fontSize:13, borderBottom:'1px solid #F3F4F6', color:'#374151' };
   const headStyle  = { padding:'8px 16px', textAlign:'center', fontWeight:700, fontSize:13, color:'#1c3660', borderBottom:'2px solid #E5E7EB', background:'#F9FAFB' };
   const labelStyle = { padding:'8px 12px', fontSize:13, fontWeight:600, color:'#374151', borderBottom:'1px solid #F3F4F6' };
-
-  const techCell = (yr) => {
-    if (!status) return '—';
-    const byType = status.tech?.[yr];
-    if (!byType || !Object.keys(byType).length) return '—';
-    return Object.entries(byType)
-      .sort(([a],[b]) => a.localeCompare(b))
-      .map(([ct, n]) => `${ct}: ${n}`)
-      .join(', ');
-  };
 
   const SubmitBtn = ({ yr }) => {
     if (submittedYears.includes(yr)) {
@@ -440,24 +468,28 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
           {[
             { label: 'Equipment Utilization', key: 'utilization' },
             { label: 'Fleet Equipment',       key: 'fleetEquip'  },
-            { label: 'Fuel (IFTA)',           key: 'fuel'        },
           ].map(({ label, key }) => (
             <tr key={key}>
               <td style={labelStyle}>{label}</td>
-              {YEARS.map(y => (
-                <td key={y} style={cellStyle}>
-                  {status ? (status[key]?.[y] ?? 0) : '—'}
-                </td>
-              ))}
+              {YEARS.map(y => {
+                const { text, color } = sectionCell(key, y);
+                return <td key={y} style={{...cellStyle, color, fontWeight: color === '#DC2626' ? 400 : 600}}>{text}</td>;
+              })}
             </tr>
           ))}
           <tr>
+            <td style={labelStyle}>Fuel (IFTA)</td>
+            {YEARS.map(y => {
+              const { text, color } = fuelCellDisplay(y);
+              return <td key={y} style={{...cellStyle, color, fontWeight: color === '#DC2626' ? 400 : 600}}>{text}</td>;
+            })}
+          </tr>
+          <tr>
             <td style={{...labelStyle, borderBottom:'none'}}>Tech Adoption</td>
-            {YEARS.map(y => (
-              <td key={y} style={{...cellStyle, borderBottom:'none', fontSize:12}}>
-                {techCell(y)}
-              </td>
-            ))}
+            {YEARS.map(y => {
+              const { text, color } = techCellDisplay(y);
+              return <td key={y} style={{...cellStyle, borderBottom:'none', fontSize:12, color, fontWeight: color === '#DC2626' ? 400 : 600}}>{text}</td>;
+            })}
           </tr>
         </tbody>
         <tfoot>

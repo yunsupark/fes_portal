@@ -257,8 +257,9 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       [fleet_id, years]
     );
     const [fuelRows] = await db.query(
-      `SELECT mpg_year AS yr, COUNT(*) AS cnt FROM ffs_mpg
-       WHERE fleet_id = ? AND mpg_year IN (?) GROUP BY mpg_year`,
+      `SELECT mpg_year AS yr, COUNT(*) AS cnt,
+              GROUP_CONCAT(DISTINCT fuel_type ORDER BY fuel_type SEPARATOR ', ') AS fuel_types
+       FROM ffs_mpg WHERE fleet_id = ? AND mpg_year IN (?) GROUP BY mpg_year`,
       [fleet_id, years]
     );
     const [techRows] = await db.query(
@@ -271,7 +272,7 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     const toMap = (rows) => Object.fromEntries(rows.map(r => [r.yr, Number(r.cnt)]));
     const utilization = toMap(utilRows);
     const fleetEquip  = toMap(equipRows);
-    const fuel        = toMap(fuelRows);
+    const fuel        = Object.fromEntries(fuelRows.map(r => [r.yr, { cnt: Number(r.cnt), fuel_types: r.fuel_types || '' }]));
 
     const tech = {};
     techRows.forEach(r => {
