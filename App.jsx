@@ -417,7 +417,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
     if (!status) return { text: '—', color: '#374151' };
     const byType = status.tech?.[yr];
     const hasAny = byType && Object.keys(byType).length > 0;
-    if (!hasAny) return { text: '—', color: '#374151' };
+    if (!hasAny) return { text: 'Not Started', color: '#DC2626' };
     const text = Object.entries(byType).sort(([a],[b]) => a.localeCompare(b)).map(([ct, n]) => `${ct}: ${n}`).join(', ');
     const color = allFilled(yr) ? '#16A34A' : '#D97706';
     return { text, color };
