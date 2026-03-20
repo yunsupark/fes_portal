@@ -868,6 +868,12 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+/*
+  Run once to add new columns:
+  ALTER TABLE ffs_contact ADD COLUMN IF NOT EXISTS active TINYINT(1) NOT NULL DEFAULT 1;
+  ALTER TABLE ffs_fleet   ADD COLUMN IF NOT EXISTS default_duty_cycle VARCHAR(50) NULL;
+*/
+
 /**
  * GET /api/admin/fleets
  * Returns all fleets with their contacts and last submission year.
@@ -876,15 +882,17 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
   try {
     const [fleetRows] = await db.query(
       `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
+              f.default_duty_cycle,
               MAX(s.survey_year) AS last_submitted_year
        FROM ffs_fleet f
        LEFT JOIN ffs_submission s ON s.fleet_id = f.fleet_id
        WHERE f.fleet_id NOT IN (0, 45, 46)
-       GROUP BY f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state
+       GROUP BY f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state, f.default_duty_cycle
        ORDER BY f.fleet_name`
     );
     const [contactRows] = await db.query(
-      `SELECT contact_id, fleet_id, first_name, last_name, email, phone
+      `SELECT contact_id, fleet_id, first_name, last_name, email, phone,
+              COALESCE(active, 1) AS active
        FROM ffs_contact
        WHERE fleet_id NOT IN (0, 45, 46)
        ORDER BY fleet_id, last_name, first_name`
@@ -892,7 +900,7 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
     const contactsByFleet = {};
     contactRows.forEach(c => {
       if (!contactsByFleet[c.fleet_id]) contactsByFleet[c.fleet_id] = [];
-      contactsByFleet[c.fleet_id].push(c);
+      contactsByFleet[c.fleet_id].push({ ...c, active: Number(c.active) });
     });
     const fleets = fleetRows.map(f => ({
       ...f,
@@ -908,20 +916,41 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
 /**
  * POST /api/admin/fleets
  * Creates a new fleet.
- * Body: { fleet_name, fleet_city, fleet_state }
+ * Body: { fleet_name, fleet_city, fleet_state, default_duty_cycle }
  */
 app.post("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
-  const { fleet_name, fleet_city, fleet_state } = req.body;
+  const { fleet_name, fleet_city, fleet_state, default_duty_cycle } = req.body;
   if (!fleet_name) return res.status(400).json({ error: "fleet_name required" });
   try {
     const [result] = await db.query(
-      `INSERT INTO ffs_fleet (fleet_name, fleet_city, fleet_state) VALUES (?, ?, ?)`,
-      [fleet_name, fleet_city || null, fleet_state || null]
+      `INSERT INTO ffs_fleet (fleet_name, fleet_city, fleet_state, default_duty_cycle) VALUES (?, ?, ?, ?)`,
+      [fleet_name, fleet_city || null, fleet_state || null, default_duty_cycle || null]
     );
     res.json({ ok: true, fleet_id: result.insertId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to create fleet" });
+  }
+});
+
+/**
+ * PUT /api/admin/fleets/:id
+ * Updates an existing fleet.
+ * Body: { fleet_name, fleet_city, fleet_state, default_duty_cycle }
+ */
+app.put("/api/admin/fleets/:id", requireAuth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { fleet_name, fleet_city, fleet_state, default_duty_cycle } = req.body;
+  if (!fleet_name) return res.status(400).json({ error: "fleet_name required" });
+  try {
+    await db.query(
+      `UPDATE ffs_fleet SET fleet_name=?, fleet_city=?, fleet_state=?, default_duty_cycle=? WHERE fleet_id=?`,
+      [fleet_name, fleet_city || null, fleet_state || null, default_duty_cycle || null, id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update fleet" });
   }
 });
 
@@ -935,13 +964,34 @@ app.post("/api/admin/contacts", requireAuth, requireAdmin, async (req, res) => {
   if (!fleet_id || !email) return res.status(400).json({ error: "fleet_id and email required" });
   try {
     const [result] = await db.query(
-      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active) VALUES (?, ?, ?, ?, ?, 1)`,
       [fleet_id, first_name || null, last_name || null, email, phone || null]
     );
     res.json({ ok: true, contact_id: result.insertId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to create contact" });
+  }
+});
+
+/**
+ * PUT /api/admin/contacts/:id
+ * Updates an existing contact.
+ * Body: { first_name, last_name, email, phone, active }
+ */
+app.put("/api/admin/contacts/:id", requireAuth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { first_name, last_name, email, phone, active } = req.body;
+  if (!email) return res.status(400).json({ error: "email required" });
+  try {
+    await db.query(
+      `UPDATE ffs_contact SET first_name=?, last_name=?, email=?, phone=?, active=? WHERE contact_id=?`,
+      [first_name || null, last_name || null, email, phone || null, active ? 1 : 0, id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update contact" });
   }
 });
 
