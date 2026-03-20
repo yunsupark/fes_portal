@@ -1520,6 +1520,241 @@ function DataEntryForm({ fleet, categories = {}, prevTech = {}, generalData = {}
   );
 }
 
+// ─── Admin View ──────────────────────────────────────────────────────────────
+
+function AdminView({ token, onSignOut }) {
+  const [fleets, setFleets] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedFleet, setExpandedFleet] = useState(null);
+
+  // New Fleet modal state
+  const [showFleetForm, setShowFleetForm] = useState(false);
+  const [fleetForm, setFleetForm] = useState({ fleet_name: '', fleet_city: '', fleet_state: '' });
+  const [fleetSaving, setFleetSaving] = useState(false);
+
+  // New Contact modal state
+  const [contactFleetId, setContactFleetId] = useState(null);
+  const [contactForm, setContactForm] = useState({ first_name: '', last_name: '', email: '', phone: '' });
+  const [contactSaving, setContactSaving] = useState(false);
+
+  const fetchFleets = () => {
+    setLoading(true);
+    fetch('/api/admin/fleets', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setFleets(d.fleets || []); })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { fetchFleets(); }, [token]);
+
+  const handleCreateFleet = async (e) => {
+    e.preventDefault();
+    setFleetSaving(true);
+    try {
+      const res = await fetch('/api/admin/fleets', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(fleetForm),
+      });
+      if (res.ok) {
+        setShowFleetForm(false);
+        setFleetForm({ fleet_name: '', fleet_city: '', fleet_state: '' });
+        fetchFleets();
+      }
+    } finally { setFleetSaving(false); }
+  };
+
+  const handleCreateContact = async (e) => {
+    e.preventDefault();
+    setContactSaving(true);
+    try {
+      const res = await fetch('/api/admin/contacts', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fleet_id: contactFleetId, ...contactForm }),
+      });
+      if (res.ok) {
+        setContactFleetId(null);
+        setContactForm({ first_name: '', last_name: '', email: '', phone: '' });
+        fetchFleets();
+      }
+    } finally { setContactSaving(false); }
+  };
+
+  const inputStyle = {
+    background: '#F9FAFB', border: '1px solid #D1D5DB', borderRadius: 6,
+    padding: '8px 10px', fontSize: 13, width: '100%', boxSizing: 'border-box',
+  };
+  const labelStyle = { fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 2, display: 'block' };
+  const modalOverlay = {
+    position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex',
+    alignItems: 'center', justifyContent: 'center', zIndex: 1000,
+  };
+  const modalBox = {
+    background: '#fff', borderRadius: 10, padding: 28, width: 380,
+    boxShadow: '0 8px 40px rgba(0,0,0,0.2)',
+  };
+
+  return (
+    <div style={{ minHeight: '100vh', background: '#F3F4F6', fontFamily: 'Arial, sans-serif' }}>
+      {/* Top bar */}
+      <div style={{ background: '#1c3660', padding: '0 32px', display: 'flex', alignItems: 'center', height: 56, gap: 16 }}>
+        <img src="/nacfe-logo.png" alt="NACFE" style={{ height: 32, objectFit: 'contain' }} />
+        <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, flex: 1 }}>Admin Panel</span>
+        <button onClick={onSignOut} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 }}>
+          Sign out
+        </button>
+      </div>
+
+      <div style={{ maxWidth: 900, margin: '32px auto', padding: '0 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
+          <h2 style={{ margin: 0, fontSize: 20, color: '#111827', flex: 1 }}>Fleets</h2>
+          <button
+            onClick={() => setShowFleetForm(true)}
+            style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 7, padding: '8px 16px', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
+          >
+            + New Fleet
+          </button>
+        </div>
+
+        {loading ? (
+          <div style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Loading…</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {fleets.map(f => (
+              <div key={f.fleet_id} style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', overflow: 'hidden' }}>
+                {/* Fleet header row */}
+                <div
+                  style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', gap: 12 }}
+                  onClick={() => setExpandedFleet(expandedFleet === f.fleet_id ? null : f.fleet_id)}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, color: '#111827', fontSize: 14 }}>{f.fleet_name}</div>
+                    {(f.fleet_city || f.fleet_state) && (
+                      <div style={{ color: '#6B7280', fontSize: 12 }}>{[f.fleet_city, f.fleet_state].filter(Boolean).join(', ')}</div>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6B7280', minWidth: 120, textAlign: 'right' }}>
+                    {f.last_submitted_year
+                      ? <span>Last submitted: <strong style={{ color: '#374151' }}>{f.last_submitted_year}</strong></span>
+                      : <span style={{ color: '#EF4444' }}>No submissions</span>}
+                  </div>
+                  <div style={{ fontSize: 12, color: '#6B7280', minWidth: 80, textAlign: 'right' }}>
+                    {f.contacts.length} contact{f.contacts.length !== 1 ? 's' : ''}
+                  </div>
+                  <span style={{ color: '#9CA3AF', fontSize: 12 }}>{expandedFleet === f.fleet_id ? '▲' : '▼'}</span>
+                </div>
+
+                {/* Expanded contacts */}
+                {expandedFleet === f.fleet_id && (
+                  <div style={{ borderTop: '1px solid #F3F4F6', padding: '12px 16px', background: '#FAFAFA' }}>
+                    {f.contacts.length === 0 ? (
+                      <div style={{ color: '#9CA3AF', fontSize: 13, marginBottom: 10 }}>No contacts yet.</div>
+                    ) : (
+                      <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 10 }}>
+                        <thead>
+                          <tr style={{ color: '#6B7280', textAlign: 'left' }}>
+                            <th style={{ fontWeight: 600, paddingBottom: 6, paddingRight: 16 }}>Name</th>
+                            <th style={{ fontWeight: 600, paddingBottom: 6, paddingRight: 16 }}>Email</th>
+                            <th style={{ fontWeight: 600, paddingBottom: 6 }}>Phone</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {f.contacts.map(c => (
+                            <tr key={c.contact_id} style={{ borderTop: '1px solid #E5E7EB' }}>
+                              <td style={{ padding: '6px 16px 6px 0', color: '#111827' }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
+                              <td style={{ padding: '6px 16px 6px 0', color: '#374151' }}>{c.email}</td>
+                              <td style={{ padding: '6px 0', color: '#374151' }}>{c.phone || '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                    <button
+                      onClick={() => { setContactFleetId(f.fleet_id); setContactForm({ first_name: '', last_name: '', email: '', phone: '' }); }}
+                      style={{ background: '#F9FAFB', border: '1px solid #D1D5DB', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer', color: '#374151' }}
+                    >
+                      + Add Contact
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* New Fleet Modal */}
+      {showFleetForm && (
+        <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowFleetForm(false); }}>
+          <div style={modalBox}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 16, color: '#111827' }}>New Fleet</h3>
+            <form onSubmit={handleCreateFleet} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={labelStyle}>Fleet Name *</label>
+                <input style={inputStyle} value={fleetForm.fleet_name} onChange={e => setFleetForm(p => ({ ...p, fleet_name: e.target.value }))} required autoFocus />
+              </div>
+              <div>
+                <label style={labelStyle}>City</label>
+                <input style={inputStyle} value={fleetForm.fleet_city} onChange={e => setFleetForm(p => ({ ...p, fleet_city: e.target.value }))} />
+              </div>
+              <div>
+                <label style={labelStyle}>State</label>
+                <input style={inputStyle} value={fleetForm.fleet_state} onChange={e => setFleetForm(p => ({ ...p, fleet_state: e.target.value }))} maxLength={2} placeholder="e.g. TX" />
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button type="button" onClick={() => setShowFleetForm(false)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                <button type="submit" disabled={fleetSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  {fleetSaving ? 'Creating…' : 'Create Fleet'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* New Contact Modal */}
+      {contactFleetId !== null && (
+        <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setContactFleetId(null); }}>
+          <div style={modalBox}>
+            <h3 style={{ margin: '0 0 4px', fontSize: 16, color: '#111827' }}>Add Contact</h3>
+            <div style={{ color: '#6B7280', fontSize: 12, marginBottom: 18 }}>
+              {fleets.find(f => f.fleet_id === contactFleetId)?.fleet_name}
+            </div>
+            <form onSubmit={handleCreateContact} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>First Name</label>
+                  <input style={inputStyle} value={contactForm.first_name} onChange={e => setContactForm(p => ({ ...p, first_name: e.target.value }))} autoFocus />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Last Name</label>
+                  <input style={inputStyle} value={contactForm.last_name} onChange={e => setContactForm(p => ({ ...p, last_name: e.target.value }))} />
+                </div>
+              </div>
+              <div>
+                <label style={labelStyle}>Email *</label>
+                <input style={inputStyle} type="email" value={contactForm.email} onChange={e => setContactForm(p => ({ ...p, email: e.target.value }))} required />
+              </div>
+              <div>
+                <label style={labelStyle}>Phone</label>
+                <input style={inputStyle} value={contactForm.phone} onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))} placeholder="Optional" />
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+                <button type="button" onClick={() => setContactFleetId(null)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                <button type="submit" disabled={contactSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  {contactSaving ? 'Adding…' : 'Add Contact'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Main App ────────────────────────────────────────────────────────────────
 export default function App() {
   const [authed, setAuthed] = useState(!!localStorage.getItem('token'));
@@ -1619,18 +1854,31 @@ export default function App() {
     })();
   }, [token, selectedConfig]);
 
+  // Decode fleet_id from JWT without a library (payload is base64 JSON)
+  const isAdmin = (() => {
+    if (!token) return false;
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      return payload.fleet_id === 0;
+    } catch { return false; }
+  })();
+
   const handleLogin = (tok, fleetObj) => {
-    // store token first so restart will pick it up
     localStorage.setItem('token', tok);
     setToken(tok);
     if (fleetObj) setFleetState(fleetObj);
     setAuthed(true);
-    // sometimes the screen stays blank after login; force a reload to ensure
-    // state is fully consistent with localStorage.
     setTimeout(() => window.location.reload(), 0);
   };
 
+  const handleSignOut = () => {
+    localStorage.removeItem('token');
+    setAuthed(false);
+    setToken(null);
+  };
+
   if (!authed) return <LoginScreen onLogin={handleLogin} />;
+  if (isAdmin) return <AdminView token={token} onSignOut={handleSignOut} />;
 
   return (
     <div style={styles.app}>

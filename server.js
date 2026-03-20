@@ -861,6 +861,90 @@ app.get("/api/submissions/:year", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Admin Routes ─────────────────────────────────────────────────────────────
+
+function requireAdmin(req, res, next) {
+  if (req.user?.fleet_id !== 0) return res.status(403).json({ error: "Admin access required" });
+  next();
+}
+
+/**
+ * GET /api/admin/fleets
+ * Returns all fleets with their contacts and last submission year.
+ */
+app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [fleetRows] = await db.query(
+      `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
+              MAX(s.survey_year) AS last_submitted_year
+       FROM ffs_fleet f
+       LEFT JOIN ffs_submission s ON s.fleet_id = f.fleet_id
+       WHERE f.fleet_id != 0
+       GROUP BY f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state
+       ORDER BY f.fleet_name`
+    );
+    const [contactRows] = await db.query(
+      `SELECT contact_id, fleet_id, first_name, last_name, email, phone
+       FROM ffs_contact
+       WHERE fleet_id != 0
+       ORDER BY fleet_id, last_name, first_name`
+    );
+    const contactsByFleet = {};
+    contactRows.forEach(c => {
+      if (!contactsByFleet[c.fleet_id]) contactsByFleet[c.fleet_id] = [];
+      contactsByFleet[c.fleet_id].push(c);
+    });
+    const fleets = fleetRows.map(f => ({
+      ...f,
+      contacts: contactsByFleet[f.fleet_id] || [],
+    }));
+    res.json({ fleets });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * POST /api/admin/fleets
+ * Creates a new fleet.
+ * Body: { fleet_name, fleet_city, fleet_state }
+ */
+app.post("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
+  const { fleet_name, fleet_city, fleet_state } = req.body;
+  if (!fleet_name) return res.status(400).json({ error: "fleet_name required" });
+  try {
+    const [result] = await db.query(
+      `INSERT INTO ffs_fleet (fleet_name, fleet_city, fleet_state) VALUES (?, ?, ?)`,
+      [fleet_name, fleet_city || null, fleet_state || null]
+    );
+    res.json({ ok: true, fleet_id: result.insertId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to create fleet" });
+  }
+});
+
+/**
+ * POST /api/admin/contacts
+ * Creates a new contact for a fleet.
+ * Body: { fleet_id, first_name, last_name, email, phone }
+ */
+app.post("/api/admin/contacts", requireAuth, requireAdmin, async (req, res) => {
+  const { fleet_id, first_name, last_name, email, phone } = req.body;
+  if (!fleet_id || !email) return res.status(400).json({ error: "fleet_id and email required" });
+  try {
+    const [result] = await db.query(
+      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone) VALUES (?, ?, ?, ?, ?)`,
+      [fleet_id, first_name || null, last_name || null, email, phone || null]
+    );
+    res.json({ ok: true, contact_id: result.insertId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to create contact" });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {
