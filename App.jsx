@@ -1739,22 +1739,26 @@ function AdminView({ token, onSignOut }) {
             <div style={{ overflowY: 'auto', maxHeight: 420 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                  <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-                    <th style={{ ...thBase, padding: '8px 8px 8px 16px' }}>
+                  <tr style={{ background: '#F9FAFB' }}>
+                    <th style={{ ...thBase, padding: '8px 8px 8px 16px' }} rowSpan={2}>
                       <span onClick={() => setFleetSort(s => ({ field: 'fleet_name', dir: s.field === 'fleet_name' && s.dir === 'asc' ? 'desc' : 'asc' }))}
                         style={{ cursor: 'pointer', userSelect: 'none', color: fleetSort.field === 'fleet_name' ? '#1c3660' : '#6B7280' }}>
                         Fleet {fleetSort.field === 'fleet_name' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
                       </span>
                     </th>
-                    <th style={{ ...thBase, padding: '8px' }}>Location</th>
-                    <th style={{ ...thBase, padding: '8px' }}>Duty Cycle</th>
-                    <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>
+                    <th style={{ ...thBase, padding: '8px' }} rowSpan={2}>Location</th>
+                    <th style={{ ...thBase, padding: '8px' }} rowSpan={2}>Duty Cycle</th>
+                    <th colSpan={2} style={{ ...thBase, padding: '6px 8px 2px', textAlign: 'center', borderBottom: '1px solid #E5E7EB' }}>Submission</th>
+                    <th style={{ ...thBase, padding: '8px 12px 8px 0', textAlign: 'right' }} rowSpan={2}>✎</th>
+                  </tr>
+                  <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                    <th style={{ ...thBase, padding: '2px 8px 8px', textAlign: 'center' }}>
                       <span onClick={() => setFleetSort(s => ({ field: 'last_submitted_year', dir: s.field === 'last_submitted_year' && s.dir === 'asc' ? 'desc' : 'asc' }))}
                         style={{ cursor: 'pointer', userSelect: 'none', color: fleetSort.field === 'last_submitted_year' ? '#1c3660' : '#6B7280' }}>
-                        Last Sub. {fleetSort.field === 'last_submitted_year' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
+                        Last {fleetSort.field === 'last_submitted_year' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
                       </span>
                     </th>
-                    <th style={{ ...thBase, padding: '8px 12px 8px 0', textAlign: 'right' }}>✎</th>
+                    <th style={{ ...thBase, padding: '2px 8px 8px', textAlign: 'center' }}>View</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1772,10 +1776,10 @@ function AdminView({ token, onSignOut }) {
                             ? <span style={{ color: '#374151', fontWeight: 600 }}>{f.last_submitted_year}</span>
                             : <span style={{ color: '#EF4444' }}>None</span>}
                         </td>
-                        <td style={{ padding: '9px 12px 9px 0', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                        <td style={{ padding: '9px 8px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
                           <button
                             title="Open submission screen"
-                            style={{ ...editBtn, marginRight: 6, fontSize: 13 }}
+                            style={{ ...editBtn, fontSize: 13 }}
                             onClick={async () => {
                               const res = await fetch(`/api/admin/preview-token/${f.fleet_id}`, { headers: { Authorization: `Bearer ${token}` } });
                               if (!res.ok) return;
@@ -1783,12 +1787,14 @@ function AdminView({ token, onSignOut }) {
                               window.open(`${window.location.origin}${window.location.pathname}?preview=${pt}`, '_blank');
                             }}
                           >⧉</button>
+                        </td>
+                        <td style={{ padding: '9px 12px 9px 0', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                           <button style={editBtn} onClick={() => { setEditFleet(f); setEditFleetForm({ fleet_name: f.fleet_name, fleet_city: f.fleet_city || '', fleet_state: f.fleet_state || '', default_duty_cycle: f.default_duty_cycle || '' }); }}>✎</button>
                         </td>
                       </tr>
                       {expandedFleet === f.fleet_id && (
                         <tr style={{ borderBottom: '1px solid #F3F4F6' }}>
-                          <td colSpan={5} style={{ padding: '0 16px 12px', background: '#F9FAFB' }}>
+                          <td colSpan={6} style={{ padding: '0 16px 12px', background: '#F9FAFB' }}>
                             {f.contacts.length === 0 ? (
                               <div style={{ color: '#9CA3AF', fontSize: 12, paddingTop: 10 }}>No contacts yet.</div>
                             ) : (

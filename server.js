@@ -1005,7 +1005,7 @@ app.get("/api/admin/preview-token/:fleet_id", requireAuth, requireAdmin, async (
   try {
     const [[fleet]] = await db.query("SELECT fleet_name FROM ffs_fleet WHERE fleet_id = ?", [fleetId]);
     if (!fleet) return res.status(404).json({ error: "Fleet not found" });
-    const previewToken = jwt.sign({ fleet_id: fleetId }, JWT_SECRET, { expiresIn: "1h" });
+    const previewToken = jwt.sign({ fleet_id: fleetId, contact_id: req.user.contact_id ?? null }, JWT_SECRET, { expiresIn: "1h" });
     res.json({ token: previewToken });
   } catch (err) {
     console.error(err);
