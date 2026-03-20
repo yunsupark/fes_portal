@@ -1772,7 +1772,17 @@ function AdminView({ token, onSignOut }) {
                             ? <span style={{ color: '#374151', fontWeight: 600 }}>{f.last_submitted_year}</span>
                             : <span style={{ color: '#EF4444' }}>None</span>}
                         </td>
-                        <td style={{ padding: '9px 12px 9px 0', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                        <td style={{ padding: '9px 12px 9px 0', textAlign: 'right', whiteSpace: 'nowrap' }} onClick={e => e.stopPropagation()}>
+                          <button
+                            title="Open submission screen"
+                            style={{ ...editBtn, marginRight: 6, fontSize: 13 }}
+                            onClick={async () => {
+                              const res = await fetch(`/api/admin/preview-token/${f.fleet_id}`, { headers: { Authorization: `Bearer ${token}` } });
+                              if (!res.ok) return;
+                              const { token: pt } = await res.json();
+                              window.open(`${window.location.origin}${window.location.pathname}?preview=${pt}`, '_blank');
+                            }}
+                          >⧉</button>
                           <button style={editBtn} onClick={() => { setEditFleet(f); setEditFleetForm({ fleet_name: f.fleet_name, fleet_city: f.fleet_city || '', fleet_state: f.fleet_state || '', default_duty_cycle: f.default_duty_cycle || '' }); }}>✎</button>
                         </td>
                       </tr>
@@ -2086,9 +2096,10 @@ function AdminView({ token, onSignOut }) {
 
 // ─── Main App ────────────────────────────────────────────────────────────────
 export default function App() {
-  const [authed, setAuthed] = useState(!!localStorage.getItem('token'));
+  const previewToken = new URLSearchParams(window.location.search).get('preview');
+  const [authed, setAuthed] = useState(!!(previewToken || localStorage.getItem('token')));
   const [entering, setEntering] = useState(false);
-  const [token, setToken] = useState(localStorage.getItem('token') || null);
+  const [token, setToken] = useState(previewToken || localStorage.getItem('token') || null);
   const [fleetState, setFleetState] = useState(null);
   const [general, setGeneral] = useState({});
   const [tech, setTech] = useState({});

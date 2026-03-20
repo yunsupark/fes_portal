@@ -995,6 +995,24 @@ app.put("/api/admin/contacts/:id", requireAuth, requireAdmin, async (req, res) =
   }
 });
 
+/**
+ * GET /api/admin/preview-token/:fleet_id
+ * Returns a short-lived JWT for the given fleet so admin can preview its submission screen.
+ */
+app.get("/api/admin/preview-token/:fleet_id", requireAuth, requireAdmin, async (req, res) => {
+  const fleetId = parseInt(req.params.fleet_id);
+  if (!fleetId || fleetId <= 0) return res.status(400).json({ error: "Invalid fleet_id" });
+  try {
+    const [[fleet]] = await db.query("SELECT fleet_name FROM ffs_fleet WHERE fleet_id = ?", [fleetId]);
+    if (!fleet) return res.status(404).json({ error: "Fleet not found" });
+    const previewToken = jwt.sign({ fleet_id: fleetId }, JWT_SECRET, { expiresIn: "1h" });
+    res.json({ token: previewToken });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to generate preview token" });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {
