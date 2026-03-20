@@ -1989,9 +1989,12 @@ function AdminView({ token, onSignOut }) {
             <form onSubmit={handleCreateContact} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {contactFleetId === 'pick' && (
                 <div>
-                  <label style={labelStyle}>Fleet *</label>
+                  <label style={labelStyle}>
+                    Fleet * <span style={{ fontWeight: 400, color: '#9CA3AF' }}>(For a contact at a new fleet, add the fleet first)</span>
+                  </label>
                   <select style={inputStyle} value={contactForm.fleet_id} onChange={e => setContactForm(p => ({ ...p, fleet_id: e.target.value }))} required autoFocus>
                     <option value="">— Select fleet —</option>
+                    <option value="0">NACFE Admin</option>
                     {[...fleets].sort((a, b) => a.fleet_name.localeCompare(b.fleet_name)).map(f => (
                       <option key={f.fleet_id} value={f.fleet_id}>{f.fleet_name}</option>
                     ))}
