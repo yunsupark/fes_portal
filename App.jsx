@@ -1619,7 +1619,7 @@ function AdminView({ token, onSignOut }) {
     try {
       const res = await fetch('/api/admin/contacts', {
         method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ fleet_id: contactFleetId, ...contactForm }),
+        body: JSON.stringify({ fleet_id: contactFleetId === 'pick' ? contactForm.fleet_id : contactFleetId, ...contactForm }),
       });
       if (res.ok) { setContactFleetId(null); setContactForm({ first_name: '', last_name: '', email: '', phone: '' }); fetchFleets(); }
     } finally { setContactSaving(false); }
@@ -1830,12 +1830,18 @@ function AdminView({ token, onSignOut }) {
             <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
               Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({sortedContacts.length})</span>
             </h2>
-            <div style={{ display: 'flex', gap: 4 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <button onClick={() => { setContactFleetId('pick'); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_id: '' }); }}
+                style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                + New Contact
+              </button>
+              <div style={{ display: 'flex', gap: 4 }}>
               {['active', 'inactive', 'all'].map(v => (
                 <button key={v} style={toggleBtn(v)} onClick={() => setContactFilter(v)}>
                   {v.charAt(0).toUpperCase() + v.slice(1)}
                 </button>
               ))}
+              </div>
             </div>
           </div>
           {loading ? (
@@ -1977,8 +1983,21 @@ function AdminView({ token, onSignOut }) {
         <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setContactFleetId(null); }}>
           <div style={modalBox}>
             <h3 style={{ margin: '0 0 4px', fontSize: 16, color: '#111827' }}>Add Contact</h3>
-            <div style={{ color: '#6B7280', fontSize: 12, marginBottom: 16 }}>{fleets.find(f => f.fleet_id === contactFleetId)?.fleet_name}</div>
+            {contactFleetId !== 'pick' && (
+              <div style={{ color: '#6B7280', fontSize: 12, marginBottom: 16 }}>{fleets.find(f => f.fleet_id === contactFleetId)?.fleet_name}</div>
+            )}
             <form onSubmit={handleCreateContact} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {contactFleetId === 'pick' && (
+                <div>
+                  <label style={labelStyle}>Fleet *</label>
+                  <select style={inputStyle} value={contactForm.fleet_id} onChange={e => setContactForm(p => ({ ...p, fleet_id: e.target.value }))} required autoFocus>
+                    <option value="">— Select fleet —</option>
+                    {[...fleets].sort((a, b) => a.fleet_name.localeCompare(b.fleet_name)).map(f => (
+                      <option key={f.fleet_id} value={f.fleet_id}>{f.fleet_name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1 }}>
                   <label style={labelStyle}>First Name</label>
