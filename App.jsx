@@ -1542,7 +1542,7 @@ function AdminView({ token, onSignOut }) {
   const [fleets, setFleets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedFleet, setExpandedFleet] = useState(null);
-  const [fleetSort, setFleetSort] = useState({ field: 'fleet_name', dir: 'asc' });
+  const [fleetSort, setFleetSort] = useState({ field: 'last_submitted_year', dir: 'desc' });
   const [contactSort, setContactSort] = useState({ field: 'last_name', dir: 'asc' });
   const [contactFilter, setContactFilter] = useState('active'); // 'active' | 'inactive' | 'all'
 
@@ -1644,7 +1644,9 @@ function AdminView({ token, onSignOut }) {
       return fleetSort.dir === 'asc' ? av - bv : bv - av;
     }
     av = (av || '').toLowerCase(); bv = (bv || '').toLowerCase();
-    return fleetSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    const primary = fleetSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    if (primary !== 0) return primary;
+    return (a.fleet_name || '').toLowerCase().localeCompare((b.fleet_name || '').toLowerCase());
   });
 
   // Flat contacts list filtered by active state
@@ -1752,7 +1754,7 @@ function AdminView({ token, onSignOut }) {
                         Last Sub. {fleetSort.field === 'last_submitted_year' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
                       </span>
                     </th>
-                    <th style={{ ...thBase, padding: '8px', textAlign: 'right' }}></th>
+                    <th style={{ ...thBase, padding: '8px 12px 8px 0', textAlign: 'right' }}>✎</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1771,9 +1773,7 @@ function AdminView({ token, onSignOut }) {
                             : <span style={{ color: '#EF4444' }}>None</span>}
                         </td>
                         <td style={{ padding: '9px 12px 9px 0', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
-                          <button style={editBtn} onClick={() => { setEditFleet(f); setEditFleetForm({ fleet_name: f.fleet_name, fleet_city: f.fleet_city || '', fleet_state: f.fleet_state || '', default_duty_cycle: f.default_duty_cycle || '' }); }}>✎ Edit</button>
-                          <span style={{ color: '#D1D5DB', margin: '0 2px' }}>|</span>
-                          <span style={{ color: '#9CA3AF', fontSize: 11, cursor: 'pointer' }}>{expandedFleet === f.fleet_id ? '▲' : '▼'}</span>
+                          <button style={editBtn} onClick={() => { setEditFleet(f); setEditFleetForm({ fleet_name: f.fleet_name, fleet_city: f.fleet_city || '', fleet_state: f.fleet_state || '', default_duty_cycle: f.default_duty_cycle || '' }); }}>✎</button>
                         </td>
                       </tr>
                       {expandedFleet === f.fleet_id && (
