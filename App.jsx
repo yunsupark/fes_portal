@@ -1536,7 +1536,7 @@ function SortHeader({ label, field, sort, setSort }) {
   );
 }
 
-const DUTY_CYCLES = ['Long Haul', 'Regional', 'Local', 'Mixed', 'Dedicated'];
+const DUTY_CYCLES = ['RH', 'LH'];
 
 function AdminView({ token, onSignOut }) {
   const [fleets, setFleets] = useState([]);
