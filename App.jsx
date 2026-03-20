@@ -1522,10 +1522,26 @@ function DataEntryForm({ fleet, categories = {}, prevTech = {}, generalData = {}
 
 // ─── Admin View ──────────────────────────────────────────────────────────────
 
+function SortHeader({ label, field, sort, setSort }) {
+  const active = sort.field === field;
+  const arrow = active ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : ' ↕';
+  return (
+    <th
+      onClick={() => setSort(s => ({ field, dir: s.field === field && s.dir === 'asc' ? 'desc' : 'asc' }))}
+      style={{ fontWeight: 600, paddingBottom: 8, paddingRight: 16, cursor: 'pointer', userSelect: 'none',
+               color: active ? '#1c3660' : '#6B7280', whiteSpace: 'nowrap', fontSize: 12 }}
+    >
+      {label}<span style={{ opacity: active ? 1 : 0.4, fontSize: 10 }}>{arrow}</span>
+    </th>
+  );
+}
+
 function AdminView({ token, onSignOut }) {
   const [fleets, setFleets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedFleet, setExpandedFleet] = useState(null);
+  const [fleetSort, setFleetSort] = useState({ field: 'fleet_name', dir: 'asc' });
+  const [contactSort, setContactSort] = useState({ field: 'last_name', dir: 'asc' });
 
   // New Fleet modal state
   const [showFleetForm, setShowFleetForm] = useState(false);
@@ -1582,6 +1598,33 @@ function AdminView({ token, onSignOut }) {
     } finally { setContactSaving(false); }
   };
 
+  // Sorted fleet list
+  const sortedFleets = [...fleets].sort((a, b) => {
+    let av = a[fleetSort.field], bv = b[fleetSort.field];
+    if (fleetSort.field === 'last_submitted_year') {
+      av = av ?? 0; bv = bv ?? 0;
+      return fleetSort.dir === 'asc' ? av - bv : bv - av;
+    }
+    av = (av || '').toLowerCase(); bv = (bv || '').toLowerCase();
+    return fleetSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+
+  // Flat contacts list for the contacts card
+  const allContacts = fleets.flatMap(f =>
+    f.contacts.map(c => ({ ...c, fleet_name: f.fleet_name }))
+  );
+  const sortedContacts = [...allContacts].sort((a, b) => {
+    const fieldMap = {
+      name: r => `${r.last_name || ''} ${r.first_name || ''}`.toLowerCase(),
+      fleet_name: r => (r.fleet_name || '').toLowerCase(),
+      email: r => (r.email || '').toLowerCase(),
+      phone: r => (r.phone || '').toLowerCase(),
+    };
+    const fn = fieldMap[contactSort.field] || (() => '');
+    const av = fn(a), bv = fn(b);
+    return contactSort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+
   const inputStyle = {
     background: '#F9FAFB', border: '1px solid #D1D5DB', borderRadius: 6,
     padding: '8px 10px', fontSize: 13, width: '100%', boxSizing: 'border-box',
@@ -1595,6 +1638,15 @@ function AdminView({ token, onSignOut }) {
     background: '#fff', borderRadius: 10, padding: 28, width: 380,
     boxShadow: '0 8px 40px rgba(0,0,0,0.2)',
   };
+  const card = {
+    background: '#fff', borderRadius: 10, border: '1px solid #E5E7EB',
+    boxShadow: '0 1px 4px rgba(0,0,0,0.06)', marginBottom: 24, overflow: 'hidden',
+  };
+  const cardHeader = {
+    display: 'flex', alignItems: 'center', padding: '16px 20px',
+    borderBottom: '1px solid #F3F4F6',
+  };
+  const thBase = { fontWeight: 600, paddingBottom: 8, paddingRight: 16, fontSize: 12, color: '#6B7280' };
 
   return (
     <div style={{ minHeight: '100vh', background: '#F3F4F6', fontFamily: 'Arial, sans-serif' }}>
@@ -1607,82 +1659,143 @@ function AdminView({ token, onSignOut }) {
         </button>
       </div>
 
-      <div style={{ maxWidth: 900, margin: '32px auto', padding: '0 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', marginBottom: 20 }}>
-          <h2 style={{ margin: 0, fontSize: 20, color: '#111827', flex: 1 }}>Fleets</h2>
-          <button
-            onClick={() => setShowFleetForm(true)}
-            style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 7, padding: '8px 16px', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}
-          >
-            + New Fleet
-          </button>
+      <div style={{ maxWidth: 960, margin: '32px auto', padding: '0 16px' }}>
+
+        {/* ── Fleets Card ── */}
+        <div style={card}>
+          <div style={cardHeader}>
+            <h2 style={{ margin: 0, fontSize: 16, color: '#111827', fontWeight: 700, flex: 1 }}>
+              Fleets <span style={{ fontWeight: 400, fontSize: 13, color: '#9CA3AF' }}>({fleets.length})</span>
+            </h2>
+            <button
+              onClick={() => setShowFleetForm(true)}
+              style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}
+            >
+              + New Fleet
+            </button>
+          </div>
+
+          {loading ? (
+            <div style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Loading…</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                  <th style={{ ...thBase, padding: '10px 20px', textAlign: 'left' }}>
+                    <span
+                      onClick={() => setFleetSort(s => ({ field: 'fleet_name', dir: s.field === 'fleet_name' && s.dir === 'asc' ? 'desc' : 'asc' }))}
+                      style={{ cursor: 'pointer', userSelect: 'none', color: fleetSort.field === 'fleet_name' ? '#1c3660' : '#6B7280' }}
+                    >
+                      Fleet Name {fleetSort.field === 'fleet_name' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
+                    </span>
+                  </th>
+                  <th style={{ ...thBase, padding: '10px 16px', textAlign: 'left' }}>Location</th>
+                  <th style={{ ...thBase, padding: '10px 16px', textAlign: 'center' }}>
+                    <span
+                      onClick={() => setFleetSort(s => ({ field: 'last_submitted_year', dir: s.field === 'last_submitted_year' && s.dir === 'asc' ? 'desc' : 'asc' }))}
+                      style={{ cursor: 'pointer', userSelect: 'none', color: fleetSort.field === 'last_submitted_year' ? '#1c3660' : '#6B7280' }}
+                    >
+                      Last Submission {fleetSort.field === 'last_submitted_year' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
+                    </span>
+                  </th>
+                  <th style={{ ...thBase, padding: '10px 16px', textAlign: 'right' }}>Contacts</th>
+                  <th style={{ ...thBase, padding: '10px 20px 10px 0', textAlign: 'right' }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {sortedFleets.map(f => (
+                  <React.Fragment key={f.fleet_id}>
+                    <tr
+                      style={{ borderBottom: expandedFleet === f.fleet_id ? 'none' : '1px solid #F3F4F6', cursor: 'pointer', background: expandedFleet === f.fleet_id ? '#F9FAFB' : '#fff' }}
+                      onClick={() => setExpandedFleet(expandedFleet === f.fleet_id ? null : f.fleet_id)}
+                    >
+                      <td style={{ padding: '11px 20px', fontWeight: 600, color: '#111827' }}>{f.fleet_name}</td>
+                      <td style={{ padding: '11px 16px', color: '#6B7280' }}>{[f.fleet_city, f.fleet_state].filter(Boolean).join(', ') || '—'}</td>
+                      <td style={{ padding: '11px 16px', textAlign: 'center' }}>
+                        {f.last_submitted_year
+                          ? <span style={{ color: '#374151', fontWeight: 600 }}>{f.last_submitted_year}</span>
+                          : <span style={{ color: '#EF4444', fontSize: 12 }}>None</span>}
+                      </td>
+                      <td style={{ padding: '11px 16px', textAlign: 'right', color: '#6B7280' }}>{f.contacts.length}</td>
+                      <td style={{ padding: '11px 20px 11px 0', textAlign: 'right', color: '#9CA3AF', fontSize: 11 }}>{expandedFleet === f.fleet_id ? '▲' : '▼'}</td>
+                    </tr>
+                    {expandedFleet === f.fleet_id && (
+                      <tr style={{ borderBottom: '1px solid #F3F4F6' }}>
+                        <td colSpan={5} style={{ padding: '0 20px 14px', background: '#F9FAFB' }}>
+                          {f.contacts.length === 0 ? (
+                            <div style={{ color: '#9CA3AF', fontSize: 12, paddingTop: 10 }}>No contacts yet.</div>
+                          ) : (
+                            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse', marginTop: 8, marginBottom: 8 }}>
+                              <thead>
+                                <tr style={{ color: '#9CA3AF' }}>
+                                  <th style={{ fontWeight: 600, paddingBottom: 4, paddingRight: 16, textAlign: 'left' }}>Name</th>
+                                  <th style={{ fontWeight: 600, paddingBottom: 4, paddingRight: 16, textAlign: 'left' }}>Email</th>
+                                  <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'left' }}>Phone</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {f.contacts.map(c => (
+                                  <tr key={c.contact_id} style={{ borderTop: '1px solid #E5E7EB' }}>
+                                    <td style={{ padding: '5px 16px 5px 0', color: '#111827' }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
+                                    <td style={{ padding: '5px 16px 5px 0', color: '#374151' }}>{c.email}</td>
+                                    <td style={{ padding: '5px 0', color: '#374151' }}>{c.phone || '—'}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                          <button
+                            onClick={e => { e.stopPropagation(); setContactFleetId(f.fleet_id); setContactForm({ first_name: '', last_name: '', email: '', phone: '' }); }}
+                            style={{ background: '#fff', border: '1px solid #D1D5DB', borderRadius: 6, padding: '4px 12px', fontSize: 12, cursor: 'pointer', color: '#374151' }}
+                          >
+                            + Add Contact
+                          </button>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
 
-        {loading ? (
-          <div style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Loading…</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {fleets.map(f => (
-              <div key={f.fleet_id} style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', overflow: 'hidden' }}>
-                {/* Fleet header row */}
-                <div
-                  style={{ display: 'flex', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', gap: 12 }}
-                  onClick={() => setExpandedFleet(expandedFleet === f.fleet_id ? null : f.fleet_id)}
-                >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, color: '#111827', fontSize: 14 }}>{f.fleet_name}</div>
-                    {(f.fleet_city || f.fleet_state) && (
-                      <div style={{ color: '#6B7280', fontSize: 12 }}>{[f.fleet_city, f.fleet_state].filter(Boolean).join(', ')}</div>
-                    )}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#6B7280', minWidth: 120, textAlign: 'right' }}>
-                    {f.last_submitted_year
-                      ? <span>Last submitted: <strong style={{ color: '#374151' }}>{f.last_submitted_year}</strong></span>
-                      : <span style={{ color: '#EF4444' }}>No submissions</span>}
-                  </div>
-                  <div style={{ fontSize: 12, color: '#6B7280', minWidth: 80, textAlign: 'right' }}>
-                    {f.contacts.length} contact{f.contacts.length !== 1 ? 's' : ''}
-                  </div>
-                  <span style={{ color: '#9CA3AF', fontSize: 12 }}>{expandedFleet === f.fleet_id ? '▲' : '▼'}</span>
-                </div>
-
-                {/* Expanded contacts */}
-                {expandedFleet === f.fleet_id && (
-                  <div style={{ borderTop: '1px solid #F3F4F6', padding: '12px 16px', background: '#FAFAFA' }}>
-                    {f.contacts.length === 0 ? (
-                      <div style={{ color: '#9CA3AF', fontSize: 13, marginBottom: 10 }}>No contacts yet.</div>
-                    ) : (
-                      <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse', marginBottom: 10 }}>
-                        <thead>
-                          <tr style={{ color: '#6B7280', textAlign: 'left' }}>
-                            <th style={{ fontWeight: 600, paddingBottom: 6, paddingRight: 16 }}>Name</th>
-                            <th style={{ fontWeight: 600, paddingBottom: 6, paddingRight: 16 }}>Email</th>
-                            <th style={{ fontWeight: 600, paddingBottom: 6 }}>Phone</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {f.contacts.map(c => (
-                            <tr key={c.contact_id} style={{ borderTop: '1px solid #E5E7EB' }}>
-                              <td style={{ padding: '6px 16px 6px 0', color: '#111827' }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
-                              <td style={{ padding: '6px 16px 6px 0', color: '#374151' }}>{c.email}</td>
-                              <td style={{ padding: '6px 0', color: '#374151' }}>{c.phone || '—'}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    )}
-                    <button
-                      onClick={() => { setContactFleetId(f.fleet_id); setContactForm({ first_name: '', last_name: '', email: '', phone: '' }); }}
-                      style={{ background: '#F9FAFB', border: '1px solid #D1D5DB', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer', color: '#374151' }}
-                    >
-                      + Add Contact
-                    </button>
-                  </div>
-                )}
-              </div>
-            ))}
+        {/* ── Contacts Card ── */}
+        <div style={card}>
+          <div style={cardHeader}>
+            <h2 style={{ margin: 0, fontSize: 16, color: '#111827', fontWeight: 700 }}>
+              All Contacts <span style={{ fontWeight: 400, fontSize: 13, color: '#9CA3AF' }}>({allContacts.length})</span>
+            </h2>
           </div>
-        )}
+          {loading ? (
+            <div style={{ textAlign: 'center', color: '#6B7280', padding: 32 }}>Loading…</div>
+          ) : (
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                  <SortHeader label="Name" field="name" sort={contactSort} setSort={setContactSort} />
+                  <SortHeader label="Fleet" field="fleet_name" sort={contactSort} setSort={setContactSort} />
+                  <SortHeader label="Email" field="email" sort={contactSort} setSort={setContactSort} />
+                  <SortHeader label="Phone" field="phone" sort={contactSort} setSort={setContactSort} />
+                </tr>
+              </thead>
+              <tbody>
+                {sortedContacts.map(c => (
+                  <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                    <td style={{ padding: '10px 16px 10px 20px', color: '#111827', fontWeight: 500 }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
+                    <td style={{ padding: '10px 16px', color: '#6B7280' }}>{c.fleet_name}</td>
+                    <td style={{ padding: '10px 16px', color: '#374151' }}>{c.email}</td>
+                    <td style={{ padding: '10px 20px 10px 0', color: '#374151' }}>{c.phone || '—'}</td>
+                  </tr>
+                ))}
+                {sortedContacts.length === 0 && (
+                  <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No contacts found.</td></tr>
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+
       </div>
 
       {/* New Fleet Modal */}

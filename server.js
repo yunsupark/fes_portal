@@ -879,14 +879,14 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
               MAX(s.survey_year) AS last_submitted_year
        FROM ffs_fleet f
        LEFT JOIN ffs_submission s ON s.fleet_id = f.fleet_id
-       WHERE f.fleet_id != 0
+       WHERE f.fleet_id NOT IN (0, 45, 46)
        GROUP BY f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state
        ORDER BY f.fleet_name`
     );
     const [contactRows] = await db.query(
       `SELECT contact_id, fleet_id, first_name, last_name, email, phone
        FROM ffs_contact
-       WHERE fleet_id != 0
+       WHERE fleet_id NOT IN (0, 45, 46)
        ORDER BY fleet_id, last_name, first_name`
     );
     const contactsByFleet = {};
