@@ -1543,9 +1543,12 @@ function AdminView({ token, onSignOut }) {
   const [fleetSort, setFleetSort] = useState({ field: 'fleet_name', dir: 'asc' });
   const [contactSort, setContactSort] = useState({ field: 'last_name', dir: 'asc' });
 
-  // New Fleet modal state
+  // New Fleet modal state (includes required first contact)
   const [showFleetForm, setShowFleetForm] = useState(false);
-  const [fleetForm, setFleetForm] = useState({ fleet_name: '', fleet_city: '', fleet_state: '' });
+  const [fleetForm, setFleetForm] = useState({
+    fleet_name: '', fleet_city: '', fleet_state: '',
+    first_name: '', last_name: '', email: '', phone: '',
+  });
   const [fleetSaving, setFleetSaving] = useState(false);
 
   // New Contact modal state
@@ -1568,16 +1571,21 @@ function AdminView({ token, onSignOut }) {
     e.preventDefault();
     setFleetSaving(true);
     try {
-      const res = await fetch('/api/admin/fleets', {
+      const fleetRes = await fetch('/api/admin/fleets', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify(fleetForm),
+        body: JSON.stringify({ fleet_name: fleetForm.fleet_name, fleet_city: fleetForm.fleet_city, fleet_state: fleetForm.fleet_state }),
       });
-      if (res.ok) {
-        setShowFleetForm(false);
-        setFleetForm({ fleet_name: '', fleet_city: '', fleet_state: '' });
-        fetchFleets();
-      }
+      if (!fleetRes.ok) return;
+      const { fleet_id } = await fleetRes.json();
+      await fetch('/api/admin/contacts', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fleet_id, first_name: fleetForm.first_name, last_name: fleetForm.last_name, email: fleetForm.email, phone: fleetForm.phone }),
+      });
+      setShowFleetForm(false);
+      setFleetForm({ fleet_name: '', fleet_city: '', fleet_state: '', first_name: '', last_name: '', email: '', phone: '' });
+      fetchFleets();
     } finally { setFleetSaving(false); }
   };
 
@@ -1635,7 +1643,7 @@ function AdminView({ token, onSignOut }) {
     alignItems: 'center', justifyContent: 'center', zIndex: 1000,
   };
   const modalBox = {
-    background: '#fff', borderRadius: 10, padding: 28, width: 380,
+    background: '#fff', borderRadius: 10, padding: 24, width: 420,
     boxShadow: '0 8px 40px rgba(0,0,0,0.2)',
   };
   const card = {
@@ -1659,10 +1667,10 @@ function AdminView({ token, onSignOut }) {
         </button>
       </div>
 
-      <div style={{ maxWidth: 960, margin: '32px auto', padding: '0 16px' }}>
+      <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
 
         {/* ── Fleets Card ── */}
-        <div style={card}>
+        <div style={{ ...card, flex: '1 1 0', minWidth: 0, marginBottom: 0 }}>
           <div style={cardHeader}>
             <h2 style={{ margin: 0, fontSize: 16, color: '#111827', fontWeight: 700, flex: 1 }}>
               Fleets <span style={{ fontWeight: 400, fontSize: 13, color: '#9CA3AF' }}>({fleets.length})</span>
@@ -1678,10 +1686,11 @@ function AdminView({ token, onSignOut }) {
           {loading ? (
             <div style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Loading…</div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
+            <div style={{ overflowY: 'auto', maxHeight: 420 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                 <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-                  <th style={{ ...thBase, padding: '10px 20px', textAlign: 'left' }}>
+                  <th style={{ ...thBase, padding: '8px 16px', textAlign: 'left' }}>
                     <span
                       onClick={() => setFleetSort(s => ({ field: 'fleet_name', dir: s.field === 'fleet_name' && s.dir === 'asc' ? 'desc' : 'asc' }))}
                       style={{ cursor: 'pointer', userSelect: 'none', color: fleetSort.field === 'fleet_name' ? '#1c3660' : '#6B7280' }}
@@ -1689,17 +1698,17 @@ function AdminView({ token, onSignOut }) {
                       Fleet Name {fleetSort.field === 'fleet_name' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
                     </span>
                   </th>
-                  <th style={{ ...thBase, padding: '10px 16px', textAlign: 'left' }}>Location</th>
-                  <th style={{ ...thBase, padding: '10px 16px', textAlign: 'center' }}>
+                  <th style={{ ...thBase, padding: '8px 12px', textAlign: 'left' }}>Location</th>
+                  <th style={{ ...thBase, padding: '8px 12px', textAlign: 'center' }}>
                     <span
                       onClick={() => setFleetSort(s => ({ field: 'last_submitted_year', dir: s.field === 'last_submitted_year' && s.dir === 'asc' ? 'desc' : 'asc' }))}
                       style={{ cursor: 'pointer', userSelect: 'none', color: fleetSort.field === 'last_submitted_year' ? '#1c3660' : '#6B7280' }}
                     >
-                      Last Submission {fleetSort.field === 'last_submitted_year' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
+                      Last Sub. {fleetSort.field === 'last_submitted_year' ? (fleetSort.dir === 'asc' ? '▲' : '▼') : <span style={{ opacity: 0.4 }}>↕</span>}
                     </span>
                   </th>
-                  <th style={{ ...thBase, padding: '10px 16px', textAlign: 'right' }}>Contacts</th>
-                  <th style={{ ...thBase, padding: '10px 20px 10px 0', textAlign: 'right' }}></th>
+                  <th style={{ ...thBase, padding: '8px 12px', textAlign: 'right' }}>#</th>
+                  <th style={{ ...thBase, padding: '8px 12px 8px 0', textAlign: 'right' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -1757,11 +1766,12 @@ function AdminView({ token, onSignOut }) {
                 ))}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 
         {/* ── Contacts Card ── */}
-        <div style={card}>
+        <div style={{ ...card, flex: '1 1 0', minWidth: 0, marginBottom: 0 }}>
           <div style={cardHeader}>
             <h2 style={{ margin: 0, fontSize: 16, color: '#111827', fontWeight: 700 }}>
               All Contacts <span style={{ fontWeight: 400, fontSize: 13, color: '#9CA3AF' }}>({allContacts.length})</span>
@@ -1770,8 +1780,9 @@ function AdminView({ token, onSignOut }) {
           {loading ? (
             <div style={{ textAlign: 'center', color: '#6B7280', padding: 32 }}>Loading…</div>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
+            <div style={{ overflowY: 'auto', maxHeight: 420 }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                 <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
                   <SortHeader label="Name" field="name" sort={contactSort} setSort={setContactSort} />
                   <SortHeader label="Fleet" field="fleet_name" sort={contactSort} setSort={setContactSort} />
@@ -1782,10 +1793,10 @@ function AdminView({ token, onSignOut }) {
               <tbody>
                 {sortedContacts.map(c => (
                   <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                    <td style={{ padding: '10px 16px 10px 20px', color: '#111827', fontWeight: 500 }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
-                    <td style={{ padding: '10px 16px', color: '#6B7280' }}>{c.fleet_name}</td>
-                    <td style={{ padding: '10px 16px', color: '#374151' }}>{c.email}</td>
-                    <td style={{ padding: '10px 20px 10px 0', color: '#374151' }}>{c.phone || '—'}</td>
+                    <td style={{ padding: '8px 12px 8px 16px', color: '#111827', fontWeight: 500 }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
+                    <td style={{ padding: '8px 12px', color: '#6B7280' }}>{c.fleet_name}</td>
+                    <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
+                    <td style={{ padding: '8px 16px 8px 0', color: '#374151' }}>{c.phone || '—'}</td>
                   </tr>
                 ))}
                 {sortedContacts.length === 0 && (
@@ -1793,6 +1804,7 @@ function AdminView({ token, onSignOut }) {
                 )}
               </tbody>
             </table>
+            </div>
           )}
         </div>
 
@@ -1802,21 +1814,44 @@ function AdminView({ token, onSignOut }) {
       {showFleetForm && (
         <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowFleetForm(false); }}>
           <div style={modalBox}>
-            <h3 style={{ margin: '0 0 20px', fontSize: 16, color: '#111827' }}>New Fleet</h3>
-            <form onSubmit={handleCreateFleet} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#111827' }}>New Fleet</h3>
+            <form onSubmit={handleCreateFleet} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
                 <label style={labelStyle}>Fleet Name *</label>
                 <input style={inputStyle} value={fleetForm.fleet_name} onChange={e => setFleetForm(p => ({ ...p, fleet_name: e.target.value }))} required autoFocus />
               </div>
-              <div>
-                <label style={labelStyle}>City</label>
-                <input style={inputStyle} value={fleetForm.fleet_city} onChange={e => setFleetForm(p => ({ ...p, fleet_city: e.target.value }))} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 2 }}>
+                  <label style={labelStyle}>City</label>
+                  <input style={inputStyle} value={fleetForm.fleet_city} onChange={e => setFleetForm(p => ({ ...p, fleet_city: e.target.value }))} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>State</label>
+                  <input style={inputStyle} value={fleetForm.fleet_state} onChange={e => setFleetForm(p => ({ ...p, fleet_state: e.target.value }))} maxLength={2} placeholder="TX" />
+                </div>
               </div>
-              <div>
-                <label style={labelStyle}>State</label>
-                <input style={inputStyle} value={fleetForm.fleet_state} onChange={e => setFleetForm(p => ({ ...p, fleet_state: e.target.value }))} maxLength={2} placeholder="e.g. TX" />
+              <div style={{ borderTop: '1px solid #E5E7EB', margin: '4px 0', paddingTop: 10 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#9CA3AF', letterSpacing: '0.05em', marginBottom: 8 }}>PRIMARY CONTACT</div>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>First Name</label>
+                    <input style={inputStyle} value={fleetForm.first_name} onChange={e => setFleetForm(p => ({ ...p, first_name: e.target.value }))} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>Last Name</label>
+                    <input style={inputStyle} value={fleetForm.last_name} onChange={e => setFleetForm(p => ({ ...p, last_name: e.target.value }))} />
+                  </div>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <label style={labelStyle}>Email *</label>
+                  <input style={inputStyle} type="email" value={fleetForm.email} onChange={e => setFleetForm(p => ({ ...p, email: e.target.value }))} required />
+                </div>
+                <div>
+                  <label style={labelStyle}>Phone</label>
+                  <input style={inputStyle} value={fleetForm.phone} onChange={e => setFleetForm(p => ({ ...p, phone: e.target.value }))} placeholder="Optional" />
+                </div>
               </div>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 8 }}>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
                 <button type="button" onClick={() => setShowFleetForm(false)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
                 <button type="submit" disabled={fleetSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                   {fleetSaving ? 'Creating…' : 'Create Fleet'}
