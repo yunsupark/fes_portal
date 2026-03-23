@@ -277,15 +277,16 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
         <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + effectiveEditableYears.length * 150}}>
           <thead>
             <tr>
-              <th style={{...styles.heatTh, minWidth:220}}>Technology</th>
+              <th style={{...styles.heatTh, minWidth:220, position:'sticky', left:0, zIndex:3, background:'#fff'}}>Technology</th>
               {readOnlyYears.map(y => <th key={y} style={styles.heatThYear}>{y}</th>)}
               {effectiveEditableYears.map(y => {
                 const otherCab = selectedCabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
-                const hasPriorSame    = Object.keys(techData[y - 1]      || {}).length > 0;
+                const hasPriorYear    = y - 1 >= 2003;
+                const hasPriorSame    = hasPriorYear && Object.keys(techData[y - 1]      || {}).length > 0;
                 const hasCurrentOther = Object.keys(otherTechData[y]      || {}).length > 0;
-                const hasPriorOther   = Object.keys(otherTechData[y - 1] || {}).length > 0;
+                const hasPriorOther   = hasPriorYear && Object.keys(otherTechData[y - 1] || {}).length > 0;
                 const anySource = hasPriorSame || hasCurrentOther || hasPriorOther;
-                const defaultSrc = hasPriorSame ? 'prior-same' : hasCurrentOther ? 'current-other' : hasPriorOther ? 'prior-other' : 'prior-same';
+                const defaultSrc = hasPriorSame ? 'prior-same' : hasCurrentOther ? 'current-other' : hasPriorOther ? 'prior-other' : 'current-other';
                 const src = copySource[y] ?? defaultSrc;
                 return (
                   <th key={y} style={{...styles.heatThYear, background:'#EFF6FF', minWidth:150}}>
@@ -297,9 +298,9 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
                         onChange={e => setCopySource(prev => ({...prev, [y]: e.target.value}))}
                         style={{fontSize:9, padding:'1px 2px', borderRadius:3, border:'1px solid #D1D5DB', maxWidth:100}}
                       >
-                        <option value="prior-same"    disabled={!hasPriorSame}    style={{color: hasPriorSame    ? 'inherit' : '#9CA3AF'}}>{y - 1} · {selectedCabType}</option>
+                        {y - 1 >= 2003 && <option value="prior-same"    disabled={!hasPriorSame}    style={{color: hasPriorSame    ? 'inherit' : '#9CA3AF'}}>{y - 1} · {selectedCabType}</option>}
                         <option value="current-other" disabled={!hasCurrentOther} style={{color: hasCurrentOther ? 'inherit' : '#9CA3AF'}}>{y} · {otherCab}</option>
-                        <option value="prior-other"   disabled={!hasPriorOther}   style={{color: hasPriorOther   ? 'inherit' : '#9CA3AF'}}>{y - 1} · {otherCab}</option>
+                        {y - 1 >= 2003 && <option value="prior-other"   disabled={!hasPriorOther}   style={{color: hasPriorOther   ? 'inherit' : '#9CA3AF'}}>{y - 1} · {otherCab}</option>}
                       </select>
                       <button
                         onClick={() => handleCopy(y, src)}
@@ -313,7 +314,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
             </tr>
             {/* Cab Type read-only row */}
             <tr style={{background:'#F9FAFB'}}>
-              <td style={{padding:'5px 12px', fontSize:12, fontWeight:600, color:'#374151'}}>Cab Type</td>
+              <td style={{padding:'5px 12px', fontSize:12, fontWeight:600, color:'#374151', position:'sticky', left:0, zIndex:2, background:'#F9FAFB'}}>Cab Type</td>
               {readOnlyYears.map(y => (
                 <td key={y} style={{...styles.heatCell, fontSize:12, color:'#6B7280'}}>
                   {yearMeta[y]?.cab_type || '—'}
@@ -341,14 +342,14 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
               const rows = [];
               rows.push(
                 <tr key={`cat-${cat}`} style={{cursor:'pointer'}} onClick={() => setOpenCats(p => ({...p, [cat]: !isOpen}))}>
-                  <td colSpan={colCount} style={styles.heatCatRow}>{isOpen ? '▼' : '▶'} {cat}</td>
+                  <td colSpan={colCount} style={{...styles.heatCatRow, position:'sticky', left:0}}>{isOpen ? '▼' : '▶'} {cat}</td>
                 </tr>
               );
               if (isOpen) {
                 visibleTechs.forEach(tech => {
                   rows.push(
                     <tr key={tech.label} style={styles.heatRow}>
-                      <td style={styles.heatTechLabel} title={tech.desc}>{tech.label}</td>
+                      <td style={{...styles.heatTechLabel, position:'sticky', left:0, zIndex:1, background:'#fff'}} title={tech.desc}>{tech.label}</td>
                       {readOnlyYears.map(y => (
                         <td key={y} style={styles.heatCell}>
                           <HeatCell value={(techData[y] || {})[tech.label]} />
