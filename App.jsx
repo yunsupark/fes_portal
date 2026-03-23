@@ -72,32 +72,47 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function MpgChart({ mpg = {}, techData = {}, years = [] }) {
-  // reuse the same year ordering as the heatmap (newest left)
-  const sortedYears = Array.isArray(years) ? [...years].map(Number).sort((a,b)=>b-a) : [];
-  const displayYears = sortedYears.slice(0,6);
+function MpgChart({ chartData: cd = {} }) {
+  const { ownMpg = {}, peerMpg = {}, sleeperAdoption = {}, dayCabAdoption = {} } = cd;
+  const allYears = [...new Set([
+    ...Object.keys(ownMpg), ...Object.keys(peerMpg),
+    ...Object.keys(sleeperAdoption), ...Object.keys(dayCabAdoption),
+  ].map(Number))].sort((a, b) => a - b);
+  const displayYears = allYears.slice(-8);
 
-  const chartData = displayYears.map(y => {
-    const mpgVal = mpg[y] ?? null;
-    const t = techData[y] || {};
-    const vals = Object.values(t).filter(v => typeof v === 'number');
-    const avg = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length)*100 : null; // percent
-    return { year: String(y), mpg: mpgVal, avgAdoption: avg };
-  });
+  const data = displayYears.map(y => ({
+    year: String(y),
+    mpg:             ownMpg[y]          ?? null,
+    peerMpg:         peerMpg[y]         ?? null,
+    sleeperAdoption: sleeperAdoption[y] ?? null,
+    dayCabAdoption:  dayCabAdoption[y]  ?? null,
+  }));
+
+  const fmtPct = v => `${Math.round(v)}%`;
+  const nameMap = { mpg: 'MPG', peerMpg: 'Peer MPG (duty cycle)', sleeperAdoption: 'Sleeper Adoption', dayCabAdoption: 'Day Cab Adoption' };
 
   return (
     <div style={styles.chartCard}>
-      <h3 style={styles.chartTitle}>IFTA MPG — recent</h3>
-      <ResponsiveContainer width="100%" height={260}>
-        <BarChart data={chartData} margin={{top:8, right:24, left:0, bottom:0}}>
+      <h3 style={styles.chartTitle}>IFTA MPG & Tech Adoption</h3>
+      <ResponsiveContainer width="100%" height={280}>
+        <BarChart data={data} margin={{top:8, right:32, left:0, bottom:0}}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
           <XAxis dataKey="year" stroke="#9CA3AF" tick={{fontSize:12}} />
           <YAxis yAxisId="left" stroke="#9CA3AF" tick={{fontSize:11}} />
-          <YAxis yAxisId="right" orientation="right" domain={[0,100]} stroke="#9CA3AF" tickFormatter={v=>`${Math.round(v)}%`} />
-          <Tooltip contentStyle={styles.tooltipStyle} labelStyle={{color:"#111827"}} formatter={(v, name) => name === 'avgAdoption' ? `${Math.round(v)}%` : v} />
-          <Legend />
-          <Bar yAxisId="left" dataKey="mpg" name="MPG" fill="#A41C24" />
-          <Line yAxisId="right" type="monotone" dataKey="avgAdoption" name="Avg Adoption" stroke="#6B7280" strokeWidth={2} dot={{r:3}} />
+          <YAxis yAxisId="right" orientation="right" domain={[0,100]} stroke="#9CA3AF" tickFormatter={fmtPct} tick={{fontSize:11}} />
+          <Tooltip
+            contentStyle={styles.tooltipStyle}
+            labelStyle={{color:"#111827"}}
+            formatter={(v, key) => [
+              key === 'sleeperAdoption' || key === 'dayCabAdoption' || key === 'peerMpg' ? (key.includes('doption') ? fmtPct(v) : v) : v,
+              nameMap[key] || key,
+            ]}
+          />
+          <Legend formatter={key => nameMap[key] || key} />
+          <Bar    yAxisId="left"  dataKey="mpg"             name="mpg"             fill="#A41C24" />
+          <Line   yAxisId="left"  dataKey="peerMpg"         name="peerMpg"         type="monotone" stroke="#F59E0B" strokeWidth={2} strokeDasharray="5 3" dot={{r:3}} connectNulls />
+          <Line   yAxisId="right" dataKey="sleeperAdoption" name="sleeperAdoption" type="monotone" stroke="#3B82F6" strokeWidth={2} dot={{r:3}} connectNulls />
+          <Line   yAxisId="right" dataKey="dayCabAdoption"  name="dayCabAdoption"  type="monotone" stroke="#10B981" strokeWidth={2} dot={{r:3}} connectNulls />
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -2396,7 +2411,7 @@ export default function App() {
   const [tech, setTech] = useState({});
   const [techCategories, setTechCategories] = useState({});
   const [selectedConfig, setSelectedConfig] = useState(1);
-  const [mpg, setMpg] = useState({});
+  const [chartData, setChartData] = useState({});
   const [saveCount, setSaveCount] = useState(0);
   const notifySave = () => setSaveCount(n => n + 1);
   const [submittedYears, setSubmittedYears] = useState([]);
@@ -2448,10 +2463,10 @@ export default function App() {
 
         // techs are fetched in a separate effect based on selected config
 
-        const mpgRes = await fetch('/api/mpg', { headers });
-        if (mpgRes.ok) {
-          const m = await mpgRes.json();
-          setMpg(m || {});
+        const chartRes = await fetch('/api/chart-data', { headers });
+        if (chartRes.ok) {
+          const c = await chartRes.json();
+          setChartData(c || {});
         }
       } catch (err) {
         console.error('Failed to fetch initial data', err);
@@ -2542,7 +2557,7 @@ export default function App() {
         {/* Charts row */}
         <div style={styles.chartsRow}>
           <div style={{flex:"1 1 400px"}}>
-            <MpgChart mpg={mpg} techData={tech} years={fleet?.submissionYears} />
+            <MpgChart chartData={chartData} />
           </div>
           <div style={{flex:"0 0 320px"}}>
             <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} />

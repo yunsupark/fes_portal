@@ -1085,6 +1085,64 @@ app.put("/api/admin/techs/:id", requireAuth, requireAdmin, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/chart-data
+ * Returns fleet's own MPG, peer MPG (same duty cycle), and avg adoption % by cab type.
+ */
+app.get("/api/chart-data", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    // Own MPG
+    const [mpgRows] = await db.query(
+      `SELECT mpg_year, IF(SUM(ifta_fuel)>0, SUM(ifta_miles)/SUM(ifta_fuel), NULL) AS mpg
+       FROM ffs_mpg WHERE fleet_id = ? GROUP BY mpg_year ORDER BY mpg_year`,
+      [fleet_id]
+    );
+    const ownMpg = {};
+    mpgRows.forEach(r => { if (r.mpg != null) ownMpg[r.mpg_year] = parseFloat(parseFloat(r.mpg).toFixed(2)); });
+
+    // Peer MPG (same default_duty_cycle)
+    const [[fleetRow]] = await db.query(
+      `SELECT default_duty_cycle FROM ffs_fleet WHERE fleet_id = ?`, [fleet_id]
+    );
+    const peerMpg = {};
+    if (fleetRow?.default_duty_cycle) {
+      const [peerRows] = await db.query(
+        `SELECT mpg_year, AVG(mpg) AS avg_mpg FROM (
+           SELECT fleet_id, mpg_year, SUM(ifta_miles)/SUM(ifta_fuel) AS mpg
+           FROM ffs_mpg
+           WHERE fleet_id IN (
+             SELECT fleet_id FROM ffs_fleet
+             WHERE default_duty_cycle = ? AND fleet_id != ? AND fleet_id NOT IN (0,45,46)
+           )
+           GROUP BY fleet_id, mpg_year HAVING SUM(ifta_fuel) > 0
+         ) sub GROUP BY mpg_year ORDER BY mpg_year`,
+        [fleetRow.default_duty_cycle, fleet_id]
+      );
+      peerRows.forEach(r => { if (r.avg_mpg != null) peerMpg[r.mpg_year] = parseFloat(parseFloat(r.avg_mpg).toFixed(2)); });
+    }
+
+    // Own adoption avg % by cab type
+    const [adoptionRows] = await db.query(
+      `SELECT adoption_year, cab_type, AVG(adoption_percent)*100 AS avg_pct
+       FROM ffs_adoption WHERE fleet_id = ? AND cab_type IN ('Sleeper','Day Cab')
+       GROUP BY adoption_year, cab_type ORDER BY adoption_year`,
+      [fleet_id]
+    );
+    const sleeperAdoption = {}, dayCabAdoption = {};
+    adoptionRows.forEach(r => {
+      const v = parseFloat(parseFloat(r.avg_pct).toFixed(1));
+      if (r.cab_type === 'Sleeper') sleeperAdoption[r.adoption_year] = v;
+      else dayCabAdoption[r.adoption_year] = v;
+    });
+
+    res.json({ ownMpg, peerMpg, sleeperAdoption, dayCabAdoption });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch chart data" });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {
