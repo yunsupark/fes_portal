@@ -280,15 +280,22 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       tech[r.yr][r.cab_type] = Number(r.cnt);
     });
 
-    const [techTotalRow] = await db.query('SELECT COUNT(*) AS cnt FROM ffs_tech');
-    const totalTechs = Number(techTotalRow[0].cnt);
+    const techTotals = {};
+    for (const yr of years) {
+      const [[sleeperRow]] = await db.query(
+        `SELECT COUNT(*) AS cnt FROM ffs_tech
+         WHERE applies_sleeper = 1 AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
+        [yr, yr]
+      );
+      const [[dayCabRow]] = await db.query(
+        `SELECT COUNT(*) AS cnt FROM ffs_tech
+         WHERE applies_daycab = 1 AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
+        [yr, yr]
+      );
+      techTotals[yr] = { 'Sleeper': Number(sleeperRow.cnt), 'Day Cab': Number(dayCabRow.cnt) };
+    }
 
-    const [dayCabTechRow] = await db.query(
-      `SELECT COUNT(*) AS cnt FROM ffs_tech WHERE NOT (tech_group = 'Idle Reduction' AND tech_id NOT IN (2, 10, 13))`
-    );
-    const techCountDayCab = Number(dayCabTechRow[0].cnt);
-
-    res.json({ years, utilization, fleetEquip, fuel, tech, totalTechs, techCountDayCab, submittedYears, editableYears });
+    res.json({ years, utilization, fleetEquip, fuel, tech, techTotals, submittedYears, editableYears });
   } catch (err) {
     console.error("Error fetching submission status:", err.message);
     res.status(500).json({ error: "Failed to fetch status" });
@@ -328,12 +335,17 @@ app.get("/api/techs", requireAuth, async (req, res) => {
     // All tech categories (for full edit form even when no data exists)
     const categories = {};
     const [allTechRows] = await db.query(
-      `SELECT tech_id, tech_group, technology, tech_expl FROM ffs_tech ORDER BY tech_group, technology`
+      `SELECT tech_id, tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to
+       FROM ffs_tech ORDER BY tech_group, technology`
     );
     allTechRows.forEach(r => {
       if (!categories[r.tech_group]) categories[r.tech_group] = [];
       if (!categories[r.tech_group].some(t => t.label === r.technology)) {
-        categories[r.tech_group].push({ label: r.technology, desc: r.tech_expl || '', tech_id: r.tech_id });
+        categories[r.tech_group].push({
+          label: r.technology, desc: r.tech_expl || '', tech_id: r.tech_id,
+          applies_sleeper: r.applies_sleeper, applies_daycab: r.applies_daycab,
+          active_from: r.active_from ?? null, active_to: r.active_to ?? null,
+        });
       }
     });
 

@@ -105,7 +105,6 @@ function MpgChart({ mpg = {}, techData = {}, years = [] }) {
 }
 
 const TECH_NUM_YEARS = 5;
-const DAYCAB_IDLE_REDUCTION_IDS = new Set([2, 10, 13]);
 
 function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [techData, setTechData]         = useState({});
@@ -275,9 +274,15 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
           <tbody>
             {Object.entries(categories).flatMap(([cat, techs_]) => {
               const isOpen = openCats[cat] !== false;
-              const visibleTechs = (cat === 'Idle Reduction' && selectedCabType === 'Day Cab')
-                ? techs_.filter(t => DAYCAB_IDLE_REDUCTION_IDS.has(t.tech_id))
-                : techs_;
+              const visibleTechs = techs_.filter(t => {
+                const cabOk = selectedCabType === 'Day Cab' ? t.applies_daycab : t.applies_sleeper;
+                if (!cabOk) return false;
+                const hasData = Object.values(techData).some(yd => yd[t.label] != null);
+                const activeInEditableYear = editableYears.some(y =>
+                  (t.active_from == null || t.active_from <= y) && (t.active_to == null || t.active_to >= y)
+                );
+                return hasData || activeInEditableYear;
+              });
               const rows = [];
               rows.push(
                 <tr key={`cat-${cat}`} style={{cursor:'pointer'}} onClick={() => setOpenCats(p => ({...p, [cat]: !isOpen}))}>
@@ -347,10 +352,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
   };
   useEffect(loadStatus, [token, saveCount]);
 
-  const totalTechs    = status?.totalTechs    || 0;
-  const techCountDayCab = status?.techCountDayCab || totalTechs;
-
-  const techThreshold = (cabType) => cabType === 'Day Cab' ? techCountDayCab : totalTechs;
+  const techThreshold = (yr, cabType) => status?.techTotals?.[yr]?.[cabType] ?? 0;
 
   const fuelCnt = (yr) => status?.fuel?.[yr]?.cnt ?? 0;
 
@@ -359,7 +361,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
     if (!status) return false;
     const hasFuel = fuelCnt(yr) >= 1;
     const techByType = status.tech?.[yr] || {};
-    const hasTech = totalTechs > 0 && Object.entries(techByType).some(([ct, n]) => n >= techThreshold(ct));
+    const hasTech = Object.entries(techByType).some(([ct, n]) => { const t = techThreshold(yr, ct); return t > 0 && n >= t; });
     return hasFuel && hasTech;
   };
 
@@ -389,7 +391,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
       items.push('Tech Adoption: no data entered');
     } else {
       Object.entries(techByType).forEach(([ct, n]) => {
-        const threshold = techThreshold(ct);
+        const threshold = techThreshold(yr, ct);
         if (n < threshold) items.push(`Tech Adoption (${ct}): ${n} of ${threshold} technologies entered`);
       });
     }
@@ -418,7 +420,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) 
     const byType = status.tech?.[yr];
     const hasAny = byType && Object.keys(byType).length > 0;
     if (!hasAny) return { text: 'Not Started', color: '#DC2626' };
-    const text = Object.entries(byType).sort(([a],[b]) => a.localeCompare(b)).map(([ct, n]) => `${ct}: ${n}/${techThreshold(ct)}`).join(', ');
+    const text = Object.entries(byType).sort(([a],[b]) => a.localeCompare(b)).map(([ct, n]) => `${ct}: ${n}/${techThreshold(yr, ct)}`).join(', ');
     const color = allFilled(yr) ? '#16A34A' : '#D97706';
     return { text, color };
   };
@@ -1406,7 +1408,7 @@ function DataEntryForm({ fleet, categories = {}, prevTech = {}, generalData = {}
                   {k:"trailers", label:"Trailers Purchased",           prev: prevGeneral.trailers, unit:""},
                   {k:"ecmMiles", label:"ECM Miles (total fleet)",      prev: prevGeneral.ecmMiles, unit:""},
                   {k:"ecmFuel",  label:"ECM Fuel (gallons)",           prev: prevGeneral.ecmFuel,  unit:""},
-                ].map(({k, label, prev, unit}) => (
+                ].map(({k, label, prev}) => (
                   <div key={k} style={styles.entryField}>
                     <label style={styles.entryLabel}>{label}</label>
                     <div style={styles.entryInputRow}>
