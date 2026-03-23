@@ -108,6 +108,7 @@ const TECH_NUM_YEARS = 5;
 
 function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [techData, setTechData]         = useState({});
+  const [otherTechData, setOtherTechData] = useState({});
   const [categories, setCategories]     = useState({});
   const [yearMeta, setYearMeta]         = useState({});
   const [years, setYears]               = useState([]);
@@ -116,10 +117,17 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [saving, setSaving]             = useState(false);
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
+  const [copySource, setCopySource]     = useState({});
+
+  const maxEditableYear = Math.max(...editableYears, 2025);
+  const hasDataForCabType = Object.keys(techData).length > 0;
+  const effectiveEditableYears = hasDataForCabType
+    ? editableYears
+    : Array.from({ length: maxEditableYear - 2003 + 1 }, (_, i) => 2003 + i);
 
   const allTechs = Object.entries(categories).flatMap(([cat, arr]) => arr.map(t => ({...t, category: cat})));
-  const readOnlyYears = years.filter(y => !editableYears.includes(y)).sort((a, b) => a - b);
-  const colCount = readOnlyYears.length + editableYears.length + 1;
+  const readOnlyYears = years.filter(y => !effectiveEditableYears.includes(y)).sort((a, b) => a - b);
+  const colCount = readOnlyYears.length + effectiveEditableYears.length + 1;
 
   const fetchData = async (cabType) => {
     try {
@@ -128,12 +136,30 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
       const res = await fetch(`/api/techs${param}`, { headers });
       if (!res.ok) return;
       const t = await res.json();
+
+      // Also fetch other cab type for copy-from options
+      const otherCab = (cabType === 'Day Cab' ? 'Sleeper' : 'Day Cab');
+      const otherRes = await fetch(`/api/techs?cab_type=${encodeURIComponent(otherCab)}`, { headers });
+      if (otherRes.ok) {
+        const ot = await otherRes.json();
+        setOtherTechData(ot.data || {});
+      }
+
       setTechData(t.data || {});
       setCategories(t.categories || {});
       setYearMeta(t.meta || {});
-      const known = new Set([...Object.keys(t.data || {}).map(Number), ...editableYears]);
-      const sorted = [...known].sort((a, b) => b - a).slice(0, TECH_NUM_YEARS);
-      setYears(sorted);
+      setCopySource({});
+
+      // If no data for this cab type, make all years 2003–max editable (no slice)
+      const hasData = Object.keys(t.data || {}).length > 0;
+      const maxYr = Math.max(...editableYears, 2025);
+      const effEditable = hasData
+        ? editableYears
+        : Array.from({ length: maxYr - 2003 + 1 }, (_, i) => 2003 + i);
+      const known = new Set([...Object.keys(t.data || {}).map(Number), ...effEditable]);
+      const sorted = [...known].sort((a, b) => b - a);
+      setYears(hasData ? sorted.slice(0, TECH_NUM_YEARS) : sorted);
+
       setOpenCats(prev => {
         const next = {...prev};
         Object.keys(t.categories || {}).forEach(cat => { if (!(cat in next)) next[cat] = true; });
@@ -142,10 +168,9 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
       // init edits from existing data for this cab type
       setEdits(prev => {
         const newEdits = { ...prev };
-        editableYears.forEach(yr => {
-          // Build a normalized lookup: number-keyed data → string-keyed for safety
+        effEditable.forEach(yr => {
           const yrData = t.data?.[yr] ?? t.data?.[String(yr)] ?? null;
-          if (!yrData) return; // no saved data for this year — keep existing edits
+          if (!yrData) return;
           const updated = { ...(newEdits[yr] || {}) };
           Object.values(t.categories || {}).forEach(techs_ => {
             techs_.forEach(tech => {
@@ -185,12 +210,15 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
     fetchData(ct);
   };
 
-  const handleCopy = (yr) => {
-    const priorData = techData[yr - 1] || {};
+  const handleCopy = (yr, src) => {
+    let sourceData = {};
+    if (src === 'prior-same')    sourceData = techData[yr - 1]      || {};
+    else if (src === 'current-other') sourceData = otherTechData[yr]      || {};
+    else if (src === 'prior-other')   sourceData = otherTechData[yr - 1]  || {};
     setEdits(prev => ({
       ...prev,
       [yr]: Object.fromEntries(allTechs.map(tech => {
-        const v = priorData[tech.label];
+        const v = sourceData[tech.label];
         return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
       }))
     }));
@@ -201,7 +229,11 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
     setSaving(true); setSaveMsg('');
     try {
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-      const results = await Promise.all(editableYears.map(yr =>
+      const yearsToSave = effectiveEditableYears.filter(yr => {
+        const e = edits[yr];
+        return e && Object.values(e).some(v => v !== '' && v !== null && v !== undefined);
+      });
+    const results = await Promise.all(yearsToSave.map(yr =>
         fetch(`/api/techs/${yr}`, {
           method: 'PUT', headers,
           body: JSON.stringify({ cab_type: selectedCabType, techs: edits[yr] }),
@@ -242,19 +274,42 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
       </div>
 
       <div style={{overflowX:'auto'}}>
-        <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + editableYears.length * 130}}>
+        <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + effectiveEditableYears.length * 150}}>
           <thead>
             <tr>
               <th style={{...styles.heatTh, minWidth:220}}>Technology</th>
               {readOnlyYears.map(y => <th key={y} style={styles.heatThYear}>{y}</th>)}
-              {editableYears.map(y => (
-                <th key={y} style={{...styles.heatThYear, background:'#EFF6FF', minWidth:120}}>
-                  <div>{y} ✎</div>
-                  <button onClick={() => handleCopy(y)} style={{marginTop:4, padding:'2px 7px', borderRadius:4, border:'1px solid #D1D5DB', background:'#fff', color:'#374151', fontSize:10, cursor:'pointer', fontWeight:400}}>
-                    Copy from {y - 1}
-                  </button>
-                </th>
-              ))}
+              {effectiveEditableYears.map(y => {
+                const otherCab = selectedCabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
+                const hasPriorSame    = Object.keys(techData[y - 1]      || {}).length > 0;
+                const hasCurrentOther = Object.keys(otherTechData[y]      || {}).length > 0;
+                const hasPriorOther   = Object.keys(otherTechData[y - 1] || {}).length > 0;
+                const anySource = hasPriorSame || hasCurrentOther || hasPriorOther;
+                const defaultSrc = hasPriorSame ? 'prior-same' : hasCurrentOther ? 'current-other' : hasPriorOther ? 'prior-other' : 'prior-same';
+                const src = copySource[y] ?? defaultSrc;
+                return (
+                  <th key={y} style={{...styles.heatThYear, background:'#EFF6FF', minWidth:150}}>
+                    <div>{y} ✎</div>
+                    <div style={{display:'flex', alignItems:'center', gap:3, marginTop:4, justifyContent:'center', flexWrap:'wrap'}}>
+                      <span style={{fontSize:9, color:'#6B7280', whiteSpace:'nowrap'}}>Copy:</span>
+                      <select
+                        value={src}
+                        onChange={e => setCopySource(prev => ({...prev, [y]: e.target.value}))}
+                        style={{fontSize:9, padding:'1px 2px', borderRadius:3, border:'1px solid #D1D5DB', maxWidth:100}}
+                      >
+                        <option value="prior-same"    disabled={!hasPriorSame}    style={{color: hasPriorSame    ? 'inherit' : '#9CA3AF'}}>{y - 1} · {selectedCabType}</option>
+                        <option value="current-other" disabled={!hasCurrentOther} style={{color: hasCurrentOther ? 'inherit' : '#9CA3AF'}}>{y} · {otherCab}</option>
+                        <option value="prior-other"   disabled={!hasPriorOther}   style={{color: hasPriorOther   ? 'inherit' : '#9CA3AF'}}>{y - 1} · {otherCab}</option>
+                      </select>
+                      <button
+                        onClick={() => handleCopy(y, src)}
+                        disabled={!anySource}
+                        style={{padding:'1px 5px', borderRadius:3, border:'1px solid #D1D5DB', background: anySource ? '#fff' : '#F3F4F6', color: anySource ? '#374151' : '#9CA3AF', fontSize:9, cursor: anySource ? 'pointer' : 'default'}}
+                      >Go</button>
+                    </div>
+                  </th>
+                );
+              })}
             </tr>
             {/* Cab Type read-only row */}
             <tr style={{background:'#F9FAFB'}}>
@@ -264,7 +319,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
                   {yearMeta[y]?.cab_type || '—'}
                 </td>
               ))}
-              {editableYears.map(y => (
+              {effectiveEditableYears.map(y => (
                 <td key={y} style={{...styles.heatCell, fontSize:12, color:'#374151', background:'#EFF6FF', fontWeight:500}}>
                   {yearMeta[y]?.cab_type || selectedCabType}
                 </td>
@@ -299,7 +354,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
                           <HeatCell value={(techData[y] || {})[tech.label]} />
                         </td>
                       ))}
-                      {editableYears.map(y => (
+                      {effectiveEditableYears.map(y => (
                         <td key={y} style={{...styles.heatCell, background:'#F0F7FF', padding:'4px 8px'}}>
                           <div style={styles.pctInputWrap}>
                             <input
