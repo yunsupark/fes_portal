@@ -115,6 +115,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [selectedCabType, setSelectedCabType]     = useState('Day Cab');
   const [edits, setEdits]               = useState({});
   const [saving, setSaving]             = useState(false);
+  const scrollRef = useRef(null);
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
   const [copySource, setCopySource]     = useState({});
@@ -205,6 +206,11 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
     })();
   }, [token]);
 
+  // Scroll to rightmost (latest years) whenever the year list changes
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+  }, [years]);
+
   const handleCabTypeChange = (ct) => {
     setSelectedCabType(ct);
     fetchData(ct);
@@ -285,7 +291,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
         </div>
       </div>
 
-      <div style={{overflowX:'auto'}}>
+      <div ref={scrollRef} style={{overflowX:'auto'}}>
         <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + effectiveEditableYears.length * 150}}>
           <thead>
             <tr>
