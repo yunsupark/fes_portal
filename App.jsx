@@ -1649,8 +1649,8 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
         <input style={inputStyle} value={form.technology} onChange={e => setForm(p => ({ ...p, technology: e.target.value }))} required />
       </div>
       <div>
-        <label style={labelStyle}>Description</label>
-        <input style={inputStyle} value={form.tech_expl} onChange={e => setForm(p => ({ ...p, tech_expl: e.target.value }))} placeholder="Optional" />
+        <label style={labelStyle}>Description *</label>
+        <input style={inputStyle} value={form.tech_expl} onChange={e => setForm(p => ({ ...p, tech_expl: e.target.value }))} required />
       </div>
       <div style={{ display: 'flex', gap: 24, alignItems: 'center', padding: '4px 0' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#374151' }}>

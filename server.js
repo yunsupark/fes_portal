@@ -1048,7 +1048,7 @@ app.get("/api/admin/techs", requireAuth, requireAdmin, async (req, res) => {
  */
 app.post("/api/admin/techs", requireAuth, requireAdmin, async (req, res) => {
   const { tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to } = req.body;
-  if (!tech_group || !technology) return res.status(400).json({ error: "tech_group and technology required" });
+  if (!tech_group || !technology || !tech_expl) return res.status(400).json({ error: "tech_group, technology, and description required" });
   try {
     const [result] = await db.query(
       `INSERT INTO ffs_tech (tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to)
