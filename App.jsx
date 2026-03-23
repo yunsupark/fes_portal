@@ -104,7 +104,7 @@ function MpgChart({ mpg = {}, techData = {}, years = [] }) {
   );
 }
 
-const TECH_NUM_YEARS = 5;
+
 
 function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [techData, setTechData]         = useState({});
@@ -158,7 +158,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
         : Array.from({ length: maxYr - 2003 + 1 }, (_, i) => 2003 + i);
       const known = new Set([...Object.keys(t.data || {}).map(Number), ...effEditable]);
       const sorted = [...known].sort((a, b) => b - a);
-      setYears(hasData ? sorted.slice(0, TECH_NUM_YEARS) : sorted);
+      setYears(sorted);
 
       setOpenCats(prev => {
         const next = {...prev};
@@ -211,17 +211,29 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   };
 
   const handleCopy = (yr, src) => {
-    let sourceData = {};
-    if (src === 'prior-same')    sourceData = techData[yr - 1]      || {};
-    else if (src === 'current-other') sourceData = otherTechData[yr]      || {};
-    else if (src === 'prior-other')   sourceData = otherTechData[yr - 1]  || {};
-    setEdits(prev => ({
-      ...prev,
-      [yr]: Object.fromEntries(allTechs.map(tech => {
-        const v = sourceData[tech.label];
-        return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
-      }))
-    }));
+    if (src === 'prior-same') {
+      // Merge server data + unsaved edits for yr-1; edits are already % strings
+      const serverData = techData[yr - 1] || {};
+      const editData   = edits[yr - 1]    || {};
+      setEdits(prev => ({
+        ...prev,
+        [yr]: Object.fromEntries(allTechs.map(tech => {
+          const editVal = editData[tech.label];
+          if (editVal !== '' && editVal != null) return [tech.label, editVal];
+          const v = serverData[tech.label];
+          return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
+        }))
+      }));
+    } else {
+      const sourceData = src === 'current-other' ? (otherTechData[yr] || {}) : (otherTechData[yr - 1] || {});
+      setEdits(prev => ({
+        ...prev,
+        [yr]: Object.fromEntries(allTechs.map(tech => {
+          const v = sourceData[tech.label];
+          return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
+        }))
+      }));
+    }
   };
 
   const handleSave = async () => {
@@ -282,7 +294,10 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
               {effectiveEditableYears.map(y => {
                 const otherCab = selectedCabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
                 const hasPriorYear    = y - 1 >= 2003;
-                const hasPriorSame    = hasPriorYear && Object.keys(techData[y - 1]      || {}).length > 0;
+                const hasPriorSame    = hasPriorYear && (
+                  Object.keys(techData[y - 1] || {}).length > 0 ||
+                  Object.values(edits[y - 1] || {}).some(v => v !== '' && v != null)
+                );
                 const hasCurrentOther = Object.keys(otherTechData[y]      || {}).length > 0;
                 const hasPriorOther   = hasPriorYear && Object.keys(otherTechData[y - 1] || {}).length > 0;
                 const anySource = hasPriorSame || hasCurrentOther || hasPriorOther;
