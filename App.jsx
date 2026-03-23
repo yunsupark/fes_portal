@@ -1617,6 +1617,65 @@ function SortHeader({ label, field, sort, setSort }) {
 
 const DUTY_CYCLES = ['RH', 'LH'];
 
+function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
+  const checkStyle = { width: 15, height: 15, cursor: 'pointer' };
+  return (
+    <>
+      <div>
+        <label style={labelStyle}>Tech Group *</label>
+        <select
+          style={inputStyle}
+          value={form.tech_group}
+          onChange={e => setForm(p => ({ ...p, tech_group: e.target.value, tech_group_new: '' }))}
+          required={form.tech_group !== '__new__'}
+        >
+          <option value="">— Select group —</option>
+          {techGroups.map(g => <option key={g} value={g}>{g}</option>)}
+          <option value="__new__">New group…</option>
+        </select>
+        {form.tech_group === '__new__' && (
+          <input
+            style={{ ...inputStyle, marginTop: 6 }}
+            placeholder="Enter new group name"
+            value={form.tech_group_new}
+            onChange={e => setForm(p => ({ ...p, tech_group_new: e.target.value }))}
+            required
+            autoFocus
+          />
+        )}
+      </div>
+      <div>
+        <label style={labelStyle}>Technology Name *</label>
+        <input style={inputStyle} value={form.technology} onChange={e => setForm(p => ({ ...p, technology: e.target.value }))} required />
+      </div>
+      <div>
+        <label style={labelStyle}>Description</label>
+        <input style={inputStyle} value={form.tech_expl} onChange={e => setForm(p => ({ ...p, tech_expl: e.target.value }))} placeholder="Optional" />
+      </div>
+      <div style={{ display: 'flex', gap: 24, alignItems: 'center', padding: '4px 0' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#374151' }}>
+          <input type="checkbox" style={checkStyle} checked={form.applies_sleeper} onChange={e => setForm(p => ({ ...p, applies_sleeper: e.target.checked }))} />
+          Applies to Sleeper
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 12, color: '#374151' }}>
+          <input type="checkbox" style={checkStyle} checked={form.applies_daycab} onChange={e => setForm(p => ({ ...p, applies_daycab: e.target.checked }))} />
+          Applies to Day Cab
+        </label>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Active From (year)</label>
+          <input style={inputStyle} type="number" min="2000" max="2100" value={form.active_from} onChange={e => setForm(p => ({ ...p, active_from: e.target.value }))} placeholder={String(new Date().getFullYear())} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={labelStyle}>Active To (year) <span style={{ fontWeight: 400, color: '#9CA3AF' }}>(blank = current)</span></label>
+          <input style={inputStyle} type="number" min="2000" max="2100" value={form.active_to} onChange={e => setForm(p => ({ ...p, active_to: e.target.value }))} placeholder="Current" />
+        </div>
+      </div>
+    </>
+  );
+}
+
 function AdminView({ token, onSignOut }) {
   const [fleets, setFleets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1648,6 +1707,16 @@ function AdminView({ token, onSignOut }) {
   const [editContactForm, setEditContactForm] = useState({});
   const [editContactSaving, setEditContactSaving] = useState(false);
 
+  // Technology card
+  const [techs, setTechs] = useState([]);
+  const [techsLoading, setTechsLoading] = useState(true);
+  const [showTechForm, setShowTechForm] = useState(false);
+  const [techForm, setTechForm] = useState({ tech_group: '', tech_group_new: '', technology: '', tech_expl: '', applies_sleeper: true, applies_daycab: true, active_from: new Date().getFullYear(), active_to: '' });
+  const [techSaving, setTechSaving] = useState(false);
+  const [editTech, setEditTech] = useState(null);
+  const [editTechForm, setEditTechForm] = useState({});
+  const [editTechSaving, setEditTechSaving] = useState(false);
+
   const fetchFleets = () => {
     setLoading(true);
     fetch('/api/admin/fleets', { headers: { Authorization: `Bearer ${token}` } })
@@ -1660,6 +1729,54 @@ function AdminView({ token, onSignOut }) {
   useEffect(() => { fetchFleets(); }, [token]);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  const fetchTechs = () => {
+    setTechsLoading(true);
+    fetch('/api/admin/techs', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setTechs(d.techs || []); })
+      .catch(console.error)
+      .finally(() => setTechsLoading(false));
+  };
+  useEffect(() => { fetchTechs(); }, [token]);
+
+  const techGroups = [...new Set(techs.map(t => t.tech_group))].sort();
+
+  const resolveTechGroup = (form) =>
+    form.tech_group === '__new__' ? form.tech_group_new.trim() : form.tech_group;
+
+  const handleCreateTech = async (e) => {
+    e.preventDefault();
+    const group = resolveTechGroup(techForm);
+    if (!group) return;
+    setTechSaving(true);
+    try {
+      const res = await fetch('/api/admin/techs', {
+        method: 'POST', headers: authHeaders,
+        body: JSON.stringify({ tech_group: group, technology: techForm.technology, tech_expl: techForm.tech_expl, applies_sleeper: techForm.applies_sleeper, applies_daycab: techForm.applies_daycab, active_from: techForm.active_from || null, active_to: techForm.active_to || null }),
+      });
+      if (res.ok) { setShowTechForm(false); setTechForm({ tech_group: '', tech_group_new: '', technology: '', tech_expl: '', applies_sleeper: true, applies_daycab: true, active_from: new Date().getFullYear(), active_to: '' }); fetchTechs(); }
+    } finally { setTechSaving(false); }
+  };
+
+  const handleEditTech = async (e) => {
+    e.preventDefault();
+    const group = resolveTechGroup(editTechForm);
+    if (!group) return;
+    setEditTechSaving(true);
+    try {
+      const res = await fetch(`/api/admin/techs/${editTech.tech_id}`, {
+        method: 'PUT', headers: authHeaders,
+        body: JSON.stringify({ tech_group: group, technology: editTechForm.technology, tech_expl: editTechForm.tech_expl, applies_sleeper: editTechForm.applies_sleeper, applies_daycab: editTechForm.applies_daycab, active_from: editTechForm.active_from || null, active_to: editTechForm.active_to || null }),
+      });
+      if (res.ok) { setEditTech(null); fetchTechs(); }
+    } finally { setEditTechSaving(false); }
+  };
+
+  const openEditTech = (t) => {
+    setEditTech(t);
+    setEditTechForm({ tech_group: t.tech_group, tech_group_new: '', technology: t.technology, tech_expl: t.tech_expl || '', applies_sleeper: !!t.applies_sleeper, applies_daycab: !!t.applies_daycab, active_from: t.active_from ?? '', active_to: t.active_to ?? '' });
+  };
 
   const handleCreateFleet = async (e) => {
     e.preventDefault();
@@ -1976,6 +2093,60 @@ function AdminView({ token, onSignOut }) {
 
       </div>
 
+      {/* ── Technology Card ── */}
+      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={cardHeader}>
+            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
+              Technologies <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({techs.length})</span>
+            </h2>
+            <button onClick={() => setShowTechForm(true)}
+              style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+              + New Technology
+            </button>
+          </div>
+          {techsLoading ? (
+            <div style={{ textAlign: 'center', color: '#6B7280', padding: 32 }}>Loading…</div>
+          ) : (
+            <div style={{ overflowY: 'auto', maxHeight: 480 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                  <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                    <th style={{ ...thBase, padding: '8px 8px 8px 16px' }}>Group</th>
+                    <th style={{ ...thBase, padding: '8px' }}>Technology</th>
+                    <th style={{ ...thBase, padding: '8px' }}>Description</th>
+                    <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Sleeper</th>
+                    <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Day Cab</th>
+                    <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Active From</th>
+                    <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Active To</th>
+                    <th style={{ ...thBase, padding: '8px 12px 8px 0', textAlign: 'right' }}>✎</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {techs.map(t => (
+                    <tr key={t.tech_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                      <td style={{ padding: '8px 8px 8px 16px', color: '#6B7280' }}>{t.tech_group}</td>
+                      <td style={{ padding: '8px', color: '#111827', fontWeight: 500 }}>{t.technology}</td>
+                      <td style={{ padding: '8px', color: '#6B7280', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={t.tech_expl || ''}>{t.tech_expl || '—'}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>{t.applies_sleeper ? '✓' : <span style={{ color: '#D1D5DB' }}>—</span>}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>{t.applies_daycab ? '✓' : <span style={{ color: '#D1D5DB' }}>—</span>}</td>
+                      <td style={{ padding: '8px', textAlign: 'center', color: '#374151' }}>{t.active_from ?? '—'}</td>
+                      <td style={{ padding: '8px', textAlign: 'center', color: t.active_to ? '#374151' : '#9CA3AF' }}>{t.active_to ?? 'Current'}</td>
+                      <td style={{ padding: '8px 12px 8px 0', textAlign: 'right' }}>
+                        <button style={editBtn} onClick={() => openEditTech(t)}>✎</button>
+                      </td>
+                    </tr>
+                  ))}
+                  {techs.length === 0 && (
+                    <tr><td colSpan={8} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No technologies found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
       {/* ── New Fleet Modal ── */}
       {showFleetForm && (
         <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowFleetForm(false); }}>
@@ -2169,6 +2340,41 @@ function AdminView({ token, onSignOut }) {
                 <button type="button" onClick={() => setEditContact(null)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
                 <button type="submit" disabled={editContactSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                   {editContactSaving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* ── New Technology Modal ── */}
+      {showTechForm && (
+        <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowTechForm(false); }}>
+          <div style={{ ...modalBox, maxWidth: 520 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#111827' }}>New Technology</h3>
+            <form onSubmit={handleCreateTech} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <TechFormFields form={techForm} setForm={setTechForm} techGroups={techGroups} labelStyle={labelStyle} inputStyle={inputStyle} />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+                <button type="button" onClick={() => setShowTechForm(false)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                <button type="submit" disabled={techSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  {techSaving ? 'Adding…' : 'Add Technology'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Technology Modal ── */}
+      {editTech && (
+        <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setEditTech(null); }}>
+          <div style={{ ...modalBox, maxWidth: 520 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#111827' }}>Edit Technology</h3>
+            <form onSubmit={handleEditTech} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <TechFormFields form={editTechForm} setForm={setEditTechForm} techGroups={techGroups} labelStyle={labelStyle} inputStyle={inputStyle} />
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+                <button type="button" onClick={() => setEditTech(null)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                <button type="submit" disabled={editTechSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  {editTechSaving ? 'Saving…' : 'Save Changes'}
                 </button>
               </div>
             </form>

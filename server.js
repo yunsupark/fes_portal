@@ -1025,6 +1025,66 @@ app.get("/api/admin/preview-token/:fleet_id", requireAuth, requireAdmin, async (
   }
 });
 
+/**
+ * GET /api/admin/techs
+ * Returns all technologies.
+ */
+app.get("/api/admin/techs", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT tech_id, tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to
+       FROM ffs_tech ORDER BY tech_group, technology`
+    );
+    res.json({ techs: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch techs" });
+  }
+});
+
+/**
+ * POST /api/admin/techs
+ * Creates a new technology.
+ */
+app.post("/api/admin/techs", requireAuth, requireAdmin, async (req, res) => {
+  const { tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to } = req.body;
+  if (!tech_group || !technology) return res.status(400).json({ error: "tech_group and technology required" });
+  try {
+    const [result] = await db.query(
+      `INSERT INTO ffs_tech (tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [tech_group, technology, tech_expl || null, applies_sleeper ? 1 : 0, applies_daycab ? 1 : 0,
+       active_from || null, active_to || null]
+    );
+    res.json({ tech_id: result.insertId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to create tech" });
+  }
+});
+
+/**
+ * PUT /api/admin/techs/:id
+ * Updates a technology.
+ */
+app.put("/api/admin/techs/:id", requireAuth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to } = req.body;
+  if (!tech_group || !technology) return res.status(400).json({ error: "tech_group and technology required" });
+  try {
+    await db.query(
+      `UPDATE ffs_tech SET tech_group=?, technology=?, tech_expl=?, applies_sleeper=?, applies_daycab=?, active_from=?, active_to=?
+       WHERE tech_id=?`,
+      [tech_group, technology, tech_expl || null, applies_sleeper ? 1 : 0, applies_daycab ? 1 : 0,
+       active_from || null, active_to || null, id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update tech" });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {
