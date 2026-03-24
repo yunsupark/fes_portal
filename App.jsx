@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-import { BarChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -72,8 +72,17 @@ function LoginScreen({ onLogin }) {
 }
 
 
-function MpgChart({ chartData: cd = {} }) {
-  const { ownMpg = {}, peerMpg = {}, sleeperAdoption = {}, dayCabAdoption = {} } = cd;
+function MpgChart({ chartData: cd = {}, fleetName }) {
+  const {
+    ownMpg = {}, peerMpg = {},
+    sleeperAdoption = {}, dayCabAdoption = {},
+    allFleetSleeperAdoption = {}, allFleetDayCabAdoption = {},
+    dutyCycle = null,
+  } = cd;
+
+  const hasSleeper = Object.keys(sleeperAdoption).length > 0;
+  const hasDayCab  = Object.keys(dayCabAdoption).length > 0;
+
   const allYears = [...new Set([
     ...Object.keys(ownMpg), ...Object.keys(peerMpg),
     ...Object.keys(sleeperAdoption), ...Object.keys(dayCabAdoption),
@@ -82,20 +91,27 @@ function MpgChart({ chartData: cd = {} }) {
 
   const data = displayYears.map(y => ({
     year: String(y),
-    mpg:             ownMpg[y]          ?? null,
-    peerMpg:         peerMpg[y]         ?? null,
-    sleeperAdoption: sleeperAdoption[y] ?? null,
-    dayCabAdoption:  dayCabAdoption[y]  ?? null,
+    mpg:                 ownMpg[y]                  ?? null,
+    peerMpg:             peerMpg[y]                 ?? null,
+    ffsSleeperAdoption:  allFleetSleeperAdoption[y] ?? null,
+    ffsDayCabAdoption:   allFleetDayCabAdoption[y]  ?? null,
   }));
 
   const fmtPct = v => `${Math.round(v)}%`;
-  const nameMap = { mpg: 'MPG', peerMpg: 'Peer MPG (duty cycle)', sleeperAdoption: 'Sleeper Adoption', dayCabAdoption: 'Day Cab Adoption' };
+  const peerLabel = dutyCycle === 'LH' ? 'LH Average' : dutyCycle === 'RH' ? 'RH Average' : 'Peer MPG';
+  const ownLabel  = fleetName ? `${fleetName} MPG` : 'Fleet MPG';
+  const nameMap = {
+    mpg:                ownLabel,
+    peerMpg:            peerLabel,
+    ffsSleeperAdoption: 'FFS Sleeper adoption',
+    ffsDayCabAdoption:  'FFS Day Cab adoption',
+  };
 
   return (
     <div style={styles.chartCard}>
       <h3 style={styles.chartTitle}>IFTA MPG & Tech Adoption</h3>
       <ResponsiveContainer width="100%" height={280}>
-        <BarChart data={data} margin={{top:8, right:32, left:0, bottom:0}}>
+        <ComposedChart data={data} margin={{top:8, right:32, left:0, bottom:0}}>
           <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
           <XAxis dataKey="year" stroke="#9CA3AF" tick={{fontSize:12}} />
           <YAxis yAxisId="left" stroke="#9CA3AF" tick={{fontSize:11}} />
@@ -104,16 +120,16 @@ function MpgChart({ chartData: cd = {} }) {
             contentStyle={styles.tooltipStyle}
             labelStyle={{color:"#111827"}}
             formatter={(v, key) => [
-              key === 'sleeperAdoption' || key === 'dayCabAdoption' || key === 'peerMpg' ? (key.includes('doption') ? fmtPct(v) : v) : v,
+              key.includes('doption') ? fmtPct(v) : v,
               nameMap[key] || key,
             ]}
           />
           <Legend formatter={key => nameMap[key] || key} />
-          <Bar    yAxisId="left"  dataKey="mpg"             name="mpg"             fill="#A41C24" />
-          <Line   yAxisId="left"  dataKey="peerMpg"         name="peerMpg"         type="monotone" stroke="#F59E0B" strokeWidth={2} strokeDasharray="5 3" dot={{r:3}} connectNulls />
-          <Line   yAxisId="right" dataKey="sleeperAdoption" name="sleeperAdoption" type="monotone" stroke="#3B82F6" strokeWidth={2} dot={{r:3}} connectNulls />
-          <Line   yAxisId="right" dataKey="dayCabAdoption"  name="dayCabAdoption"  type="monotone" stroke="#10B981" strokeWidth={2} dot={{r:3}} connectNulls />
-        </BarChart>
+          <Bar  yAxisId="left"  dataKey="mpg"     name="mpg"     fill="#A41C24" />
+          <Bar  yAxisId="left"  dataKey="peerMpg" name="peerMpg" fill="#757373" />
+          {hasSleeper && <Line yAxisId="right" dataKey="ffsSleeperAdoption" name="ffsSleeperAdoption" type="monotone" stroke="#3B82F6" strokeWidth={2} dot={{r:3}} connectNulls />}
+          {hasDayCab  && <Line yAxisId="right" dataKey="ffsDayCabAdoption"  name="ffsDayCabAdoption"  type="monotone" stroke="#10B981" strokeWidth={2} dot={{r:3}} connectNulls />}
+        </ComposedChart>
       </ResponsiveContainer>
     </div>
   );
@@ -367,7 +383,10 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
             {Object.entries(categories).flatMap(([cat, techs_]) => {
               const isOpen = openCats[cat] !== false;
               const visibleTechs = techs_.filter(t => {
-                const cabOk = selectedCabType === 'Day Cab' ? t.applies_daycab : t.applies_sleeper;
+                // null/undefined means "applies to both" (legacy rows before columns existed)
+                const cabOk = selectedCabType === 'Day Cab'
+                  ? (t.applies_daycab == null ? true : t.applies_daycab !== 0)
+                  : (t.applies_sleeper == null ? true : t.applies_sleeper !== 0);
                 if (!cabOk) return false;
                 const hasData = Object.values(techData).some(yd => yd[t.label] != null);
                 const activeInEditableYear = editableYears.some(y =>
@@ -2557,7 +2576,7 @@ export default function App() {
         {/* Charts row */}
         <div style={styles.chartsRow}>
           <div style={{flex:"1 1 400px"}}>
-            <MpgChart chartData={chartData} />
+            <MpgChart chartData={chartData} fleetName={fleetState?.name} />
           </div>
           <div style={{flex:"0 0 320px"}}>
             <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} />

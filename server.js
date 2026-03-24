@@ -284,12 +284,14 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     for (const yr of years) {
       const [[sleeperRow]] = await db.query(
         `SELECT COUNT(*) AS cnt FROM ffs_tech
-         WHERE applies_sleeper = 1 AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
+         WHERE (applies_sleeper = 1 OR applies_sleeper IS NULL)
+           AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
         [yr, yr]
       );
       const [[dayCabRow]] = await db.query(
         `SELECT COUNT(*) AS cnt FROM ffs_tech
-         WHERE applies_daycab = 1 AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
+         WHERE (applies_daycab = 1 OR applies_daycab IS NULL)
+           AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
         [yr, yr]
       );
       techTotals[yr] = { 'Sleeper': Number(sleeperRow.cnt), 'Day Cab': Number(dayCabRow.cnt) };
@@ -1136,7 +1138,23 @@ app.get("/api/chart-data", requireAuth, async (req, res) => {
       else dayCabAdoption[r.adoption_year] = v;
     });
 
-    res.json({ ownMpg, peerMpg, sleeperAdoption, dayCabAdoption });
+    // All-fleet average adoption % by cab type (all fleets, not just same duty cycle)
+    const [allAdoptionRows] = await db.query(
+      `SELECT adoption_year, cab_type, AVG(adoption_percent)*100 AS avg_pct
+       FROM ffs_adoption
+       WHERE fleet_id NOT IN (0,45,46) AND cab_type IN ('Sleeper','Day Cab')
+       GROUP BY adoption_year, cab_type ORDER BY adoption_year`
+    );
+    const allFleetSleeperAdoption = {}, allFleetDayCabAdoption = {};
+    allAdoptionRows.forEach(r => {
+      const v = parseFloat(parseFloat(r.avg_pct).toFixed(1));
+      if (r.cab_type === 'Sleeper') allFleetSleeperAdoption[r.adoption_year] = v;
+      else allFleetDayCabAdoption[r.adoption_year] = v;
+    });
+
+    const dutyCycle = fleetRow?.default_duty_cycle || null;
+
+    res.json({ ownMpg, peerMpg, sleeperAdoption, dayCabAdoption, allFleetSleeperAdoption, allFleetDayCabAdoption, dutyCycle });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch chart data" });
