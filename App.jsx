@@ -100,14 +100,13 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
   }));
 
   const fmtPct = v => `${Math.round(v)}%`;
-  const peerLabel  = dutyCycle === 'LH' ? 'LH Average' : dutyCycle === 'RH' ? 'RH Average' : 'Peer MPG';
-  const ownLabel   = fleetName ? `${fleetName} MPG` : 'Fleet MPG';
-  const fleetAdopt = fleetName ? `${fleetName} adoption` : 'Fleet adoption';
+  const peerLabel = dutyCycle === 'LH' ? 'LH Average' : dutyCycle === 'RH' ? 'RH Average' : 'Peer MPG';
+  const ownLabel  = fleetName ? `${fleetName} MPG` : 'Fleet MPG';
   const nameMap = {
     mpg:                ownLabel,
     peerMpg:            peerLabel,
-    sleeperAdoption:    fleetAdopt,
-    dayCabAdoption:     fleetAdopt,
+    sleeperAdoption:    'Sleeper adoption',
+    dayCabAdoption:     'Day Cab adoption',
     ffsSleeperAdoption: 'Ave. Sleeper adoption',
     ffsDayCabAdoption:  'Ave. Day Cab adoption',
   };
@@ -129,13 +128,13 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
               nameMap[key] || key,
             ]}
           />
-          <Legend formatter={key => nameMap[key] || key} />
-          <Bar  yAxisId="left"  dataKey="mpg"     name="mpg"     fill="#A41C24" />
-          <Bar  yAxisId="left"  dataKey="peerMpg" name="peerMpg" fill="#757373" />
-          {hasSleeper && <Line yAxisId="right" dataKey="sleeperAdoption"    name="sleeperAdoption"    type="monotone" stroke="#3B82F6" strokeWidth={2} dot={{r:3}} connectNulls />}
-          {hasDayCab  && <Line yAxisId="right" dataKey="dayCabAdoption"     name="dayCabAdoption"     type="monotone" stroke="#10B981" strokeWidth={2} dot={{r:3}} connectNulls />}
-          {hasSleeper && <Line yAxisId="right" dataKey="ffsSleeperAdoption" name="ffsSleeperAdoption" type="monotone" stroke="#93C5FD" strokeWidth={2} strokeDasharray="5 3" dot={{r:3}} connectNulls />}
-          {hasDayCab  && <Line yAxisId="right" dataKey="ffsDayCabAdoption"  name="ffsDayCabAdoption"  type="monotone" stroke="#6EE7B7" strokeWidth={2} strokeDasharray="5 3" dot={{r:3}} connectNulls />}
+          <Legend formatter={key => nameMap[key] || key} wrapperStyle={{fontSize:10}} />
+          <Line yAxisId="left"  dataKey="mpg"     name="mpg"     type="monotone" stroke="#A41C24" strokeWidth={2} dot={{r:3}} connectNulls />
+          <Line yAxisId="left"  dataKey="peerMpg" name="peerMpg" type="monotone" stroke="#757373" strokeWidth={2} strokeDasharray="5 3" dot={{r:3}} connectNulls />
+          {hasSleeper && <Bar yAxisId="right" dataKey="sleeperAdoption"    name="sleeperAdoption"    fill="#3B82F6" />}
+          {hasDayCab  && <Bar yAxisId="right" dataKey="dayCabAdoption"     name="dayCabAdoption"     fill="#10B981" />}
+          {hasSleeper && <Bar yAxisId="right" dataKey="ffsSleeperAdoption" name="ffsSleeperAdoption" fill="#93C5FD" />}
+          {hasDayCab  && <Bar yAxisId="right" dataKey="ffsDayCabAdoption"  name="ffsDayCabAdoption"  fill="#6EE7B7" />}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
