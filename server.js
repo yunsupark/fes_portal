@@ -108,6 +108,11 @@ app.post("/api/auth/login", async (req, res) => {
     const row = rows[0];
     if (!row) return res.status(401).json({ error: "Fleet not found for that email" });
 
+    const ALLOWED_EMAIL = "jarosinskis@schneider.com";
+    if (row.fleet_id !== 0 && row.email.toLowerCase() !== ALLOWED_EMAIL.toLowerCase()) {
+      return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
+    }
+
     const token = jwt.sign(
       { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id },
       JWT_SECRET,
