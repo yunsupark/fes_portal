@@ -577,8 +577,8 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
   return (
     <div style={styles.chartCard}>
       <h3 style={{...styles.chartTitle, marginBottom:16}}>Submission Status</h3>
-      <div style={{overflowX:'auto'}}>
-      <table style={{width:'100%', borderCollapse:'collapse', minWidth: YEARS.length > 3 ? `${YEARS.length * 120 + 180}px` : undefined}}>
+      <div style={{overflowX:'auto', width:'100%'}}>
+      <table style={{borderCollapse:'collapse', minWidth: `${YEARS.length * 120 + 180}px`}}>
         <thead>
           <tr>
             <th style={{...headStyle, textAlign:'left', position:'sticky', left:0, zIndex:2}}>Section</th>
@@ -2689,10 +2689,10 @@ export default function App() {
 
         {/* Charts row */}
         <div style={styles.chartsRow}>
-          <div style={{flex:"1 1 400px"}}>
+          <div style={{flex:"1 1 400px", minWidth:0}}>
             <MpgChart chartData={chartData} fleetName={fleetState?.name} />
           </div>
-          <div style={{flex:"0 0 320px"}}>
+          <div style={{flex:"1 1 320px", minWidth:0}}>
             <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} />
           </div>
         </div>
