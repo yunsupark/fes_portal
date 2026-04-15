@@ -462,8 +462,18 @@ app.put("/api/techs/:year", requireAuth, async (req, res) => {
   const year = parseInt(req.params.year);
   const { cab_type, techs } = req.body;
   if (!cab_type) return res.status(400).json({ error: "cab_type is required" });
-  if (![2024, 2025].includes(year)) return res.status(400).json({ error: "Only 2024 and 2025 are editable" });
   try {
+    // Validate year is within the admin-configured editable window
+    const [settingRows] = await db.query(
+      `SELECT setting_key, setting_value FROM ffs_settings WHERE setting_key IN ('editable_year_from','editable_year_to')`
+    );
+    const sm = Object.fromEntries(settingRows.map(r => [r.setting_key, Number(r.setting_value)]));
+    const yrFrom = sm.editable_year_from ?? 2003;
+    const yrTo   = sm.editable_year_to   ?? new Date().getFullYear();
+    if (year < yrFrom || year > yrTo) {
+      return res.status(400).json({ error: `Year ${year} is not in the editable range (${yrFrom}–${yrTo})` });
+    }
+
     // Find existing config for this fleet + cab_type, or assign next available config number
     const [existingCfg] = await db.query(
       `SELECT DISTINCT config FROM ffs_adoption WHERE fleet_id = ? AND cab_type = ? LIMIT 1`,
