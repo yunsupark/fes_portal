@@ -1801,8 +1801,8 @@ function AdminView({ token, onSignOut }) {
       .then(d => {
         if (d?.settings) {
           setSettingsForm({
-            editable_year_from: d.settings.editable_year_from ?? '',
-            editable_year_to:   d.settings.editable_year_to   ?? '',
+            editable_year_from: d.settings.editable_year_from ?? '2003',
+            editable_year_to:   d.settings.editable_year_to   ?? String(new Date().getFullYear()),
           });
         }
       })
@@ -2496,19 +2496,20 @@ function AdminView({ token, onSignOut }) {
               <div>
                 <p style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Fleet Input Years</p>
                 <p style={{ margin: '0 0 12px', fontSize: 12, color: '#6B7280' }}>
-                  Set the range of years that fleets can enter or edit data for.
+                  Set the range of years that fleets can enter or edit data for. The "From" year should generally be left at 2003. Note that fleets will only be able to update years for which they have not yet submitted data.
                 </p>
                 <div style={{ display: 'flex', gap: 12 }}>
                   <div style={{ flex: 1 }}>
                     <label style={labelStyle}>From</label>
-                    <input style={inputStyle} type="number" min="2003" max="2100"
+                    <input style={inputStyle} type="number" min="2003" max={new Date().getFullYear()}
                       value={settingsForm.editable_year_from}
                       onChange={e => setSettingsForm(p => ({ ...p, editable_year_from: e.target.value }))}
+                      placeholder="2003"
                       required />
                   </div>
                   <div style={{ flex: 1 }}>
                     <label style={labelStyle}>To</label>
-                    <input style={inputStyle} type="number" min="2003" max="2100"
+                    <input style={inputStyle} type="number" min="2003" max={new Date().getFullYear()}
                       value={settingsForm.editable_year_to}
                       onChange={e => setSettingsForm(p => ({ ...p, editable_year_to: e.target.value }))}
                       required />
