@@ -246,6 +246,27 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFl
     })();
   }, [token]);
 
+  // Re-apply 0% defaults when isNewFleet is confirmed after initial load
+  useEffect(() => {
+    if (!isNewFleet) return;
+    setEdits(prev => {
+      const newEdits = { ...prev };
+      const effEditable = Object.keys(prev).map(Number).filter(y => editableYears.includes(y));
+      effEditable.forEach(yr => {
+        const updated = { ...(newEdits[yr] || {}) };
+        Object.values(categories).forEach(techs_ => {
+          techs_.forEach(tech => {
+            if (!(tech.label in updated) || updated[tech.label] === '') {
+              updated[tech.label] = '0';
+            }
+          });
+        });
+        newEdits[yr] = updated;
+      });
+      return newEdits;
+    });
+  }, [isNewFleet]);
+
   // Scroll to rightmost (latest years) whenever the year list changes
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
