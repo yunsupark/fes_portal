@@ -2088,6 +2088,7 @@ function AdminView({ token, onSignOut }) {
                                     <th style={{ fontWeight: 600, paddingBottom: 4, paddingRight: 12, textAlign: 'left' }}>Email</th>
                                     <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'left' }}>Phone</th>
                                     <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'center' }}>Status</th>
+                                    <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'center' }}>Allow Access</th>
                                     <th></th>
                                   </tr>
                                 </thead>
@@ -2100,8 +2101,15 @@ function AdminView({ token, onSignOut }) {
                                       <td style={{ padding: '5px 0', textAlign: 'center' }}>
                                         <span style={{ fontSize: 11, color: c.active !== 0 ? '#059669' : '#9CA3AF', fontWeight: 600 }}>{c.active !== 0 ? 'Active' : 'Inactive'}</span>
                                       </td>
+                                      <td style={{ padding: '5px 0', textAlign: 'center' }}>
+                                        <input type="checkbox" checked={!!c.portal_access} onChange={async e => {
+                                          const val = e.target.checked;
+                                          await fetch(`/api/admin/contacts/${c.contact_id}/access`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ portal_access: val }) });
+                                          fetchFleets();
+                                        }} />
+                                      </td>
                                       <td style={{ padding: '5px 0', textAlign: 'right' }}>
-                                        <button style={editBtn} onClick={() => { setEditContact({ ...c, fleet_name: f.fleet_name }); setEditContactForm({ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, phone: c.phone || '', active: c.active !== 0 }); }}>✎</button>
+                                        <button style={editBtn} onClick={() => { setEditContact({ ...c, fleet_name: f.fleet_name }); setEditContactForm({ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, phone: c.phone || '', active: c.active !== 0, portal_access: !!c.portal_access }); }}>✎</button>
                                       </td>
                                     </tr>
                                   ))}
@@ -2155,6 +2163,7 @@ function AdminView({ token, onSignOut }) {
                     <SortHeader label="Fleet" field="fleet_name" sort={contactSort} setSort={setContactSort} />
                     <SortHeader label="Email" field="email" sort={contactSort} setSort={setContactSort} />
                     <SortHeader label="Phone" field="phone" sort={contactSort} setSort={setContactSort} />
+                    <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Allow Access</th>
                     <th style={{ ...thBase, padding: '8px 12px 8px 0' }}></th>
                   </tr>
                 </thead>
@@ -2165,13 +2174,20 @@ function AdminView({ token, onSignOut }) {
                       <td style={{ padding: '8px 12px', color: '#6B7280' }}>{c.fleet_name}</td>
                       <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
                       <td style={{ padding: '8px 12px', color: '#374151' }}>{c.phone || '—'}</td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                        <input type="checkbox" checked={!!c.portal_access} onChange={async e => {
+                          const val = e.target.checked;
+                          await fetch(`/api/admin/contacts/${c.contact_id}/access`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ portal_access: val }) });
+                          fetchFleets();
+                        }} />
+                      </td>
                       <td style={{ padding: '8px 12px 8px 0', textAlign: 'right' }}>
-                        <button style={editBtn} onClick={() => { setEditContact(c); setEditContactForm({ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, phone: c.phone || '', active: c.active !== 0 }); }}>✎</button>
+                        <button style={editBtn} onClick={() => { setEditContact(c); setEditContactForm({ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, phone: c.phone || '', active: c.active !== 0, portal_access: !!c.portal_access }); }}>✎</button>
                       </td>
                     </tr>
                   ))}
                   {sortedContacts.length === 0 && (
-                    <tr><td colSpan={5} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No contacts found.</td></tr>
+                    <tr><td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No contacts found.</td></tr>
                   )}
                 </tbody>
               </table>

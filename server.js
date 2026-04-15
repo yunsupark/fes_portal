@@ -84,6 +84,7 @@ const db = mysql.createPool({
         ('editable_year_from', '2003'),
         ('editable_year_to',   '${new Date().getFullYear()}')
     `);
+    await db.query(`ALTER TABLE ffs_contact ADD COLUMN IF NOT EXISTS portal_access TINYINT(1) NOT NULL DEFAULT 0`);
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -125,7 +126,8 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
-              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email
+              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email,
+              COALESCE(c.portal_access, 0) AS portal_access
        FROM ffs_contact c
        JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
        WHERE c.email = ? LIMIT 1`,
@@ -134,8 +136,7 @@ app.post("/api/auth/login", async (req, res) => {
     const row = rows[0];
     if (!row) return res.status(401).json({ error: "Fleet not found for that email" });
 
-    const ALLOWED_EMAIL = "jarosinskis@schneider.com";
-    if (row.fleet_id !== 0 && row.email.toLowerCase() !== ALLOWED_EMAIL.toLowerCase()) {
+    if (row.fleet_id !== 0 && !row.portal_access) {
       return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
     }
 
@@ -924,6 +925,7 @@ function requireAdmin(req, res, next) {
 /*
   Run once to add new columns:
   ALTER TABLE ffs_contact ADD COLUMN IF NOT EXISTS active TINYINT(1) NOT NULL DEFAULT 1;
+  ALTER TABLE ffs_contact ADD COLUMN IF NOT EXISTS portal_access TINYINT(1) NOT NULL DEFAULT 0;
   ALTER TABLE ffs_fleet   ADD COLUMN IF NOT EXISTS default_duty_cycle VARCHAR(50) NULL;
 */
 
@@ -945,7 +947,8 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
     );
     const [contactRows] = await db.query(
       `SELECT contact_id, fleet_id, first_name, last_name, email, phone,
-              COALESCE(active, 1) AS active
+              COALESCE(active, 1) AS active,
+              COALESCE(portal_access, 0) AS portal_access
        FROM ffs_contact
        WHERE fleet_id NOT IN (0, 45, 46)
        ORDER BY fleet_id, last_name, first_name`
@@ -953,7 +956,7 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
     const contactsByFleet = {};
     contactRows.forEach(c => {
       if (!contactsByFleet[c.fleet_id]) contactsByFleet[c.fleet_id] = [];
-      contactsByFleet[c.fleet_id].push({ ...c, active: Number(c.active) });
+      contactsByFleet[c.fleet_id].push({ ...c, active: Number(c.active), portal_access: Number(c.portal_access) });
     });
     const fleets = fleetRows.map(f => ({
       ...f,
@@ -1034,17 +1037,36 @@ app.post("/api/admin/contacts", requireAuth, requireAdmin, async (req, res) => {
  */
 app.put("/api/admin/contacts/:id", requireAuth, requireAdmin, async (req, res) => {
   const id = parseInt(req.params.id);
-  const { first_name, last_name, email, phone, active } = req.body;
+  const { first_name, last_name, email, phone, active, portal_access } = req.body;
   if (!email) return res.status(400).json({ error: "email required" });
   try {
     await db.query(
-      `UPDATE ffs_contact SET first_name=?, last_name=?, email=?, phone=?, active=? WHERE contact_id=?`,
-      [first_name || null, last_name || null, email, phone || null, active ? 1 : 0, id]
+      `UPDATE ffs_contact SET first_name=?, last_name=?, email=?, phone=?, active=?, portal_access=? WHERE contact_id=?`,
+      [first_name || null, last_name || null, email, phone || null, active ? 1 : 0, portal_access ? 1 : 0, id]
     );
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to update contact" });
+  }
+});
+
+/**
+ * PATCH /api/admin/contacts/:id/access
+ * Toggles portal_access for a contact. Body: { portal_access: bool }
+ */
+app.patch("/api/admin/contacts/:id/access", requireAuth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { portal_access } = req.body;
+  try {
+    await db.query(
+      `UPDATE ffs_contact SET portal_access=? WHERE contact_id=?`,
+      [portal_access ? 1 : 0, id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update access" });
   }
 });
 
