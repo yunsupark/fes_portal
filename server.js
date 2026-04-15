@@ -263,7 +263,6 @@ app.get("/api/mpg", requireAuth, async (req, res) => {
 
 app.get("/api/submission-status", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
-  const years = [2024, 2025];
   try {
     // Submitted years for this fleet
     const [subRows] = await db.query(
@@ -282,6 +281,9 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     const editableYears = [];
     const startYear = lastSubmitted ? Math.max(lastSubmitted + 1, yrFrom) : yrFrom;
     for (let yr = startYear; yr <= yrTo; yr++) editableYears.push(yr);
+
+    // Use editableYears as the years to query for status
+    const years = editableYears.length ? editableYears : [new Date().getFullYear()];
 
     const [utilRows] = await db.query(
       `SELECT utilization_year AS yr, COUNT(*) AS cnt FROM ffs_equip_utilization

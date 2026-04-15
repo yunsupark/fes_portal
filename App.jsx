@@ -455,10 +455,10 @@ function HeatCell({ value }) {
   );
 }
 
-function SubmissionHistory({ token, saveCount, submittedYears = [], onSubmit }) {
+function SubmissionHistory({ token, saveCount, submittedYears = [], editableYears = [2024, 2025], onSubmit }) {
   const [status, setStatus]           = useState(null);
   const [submitModal, setSubmitModal] = useState(null);
-  const YEARS = [2024, 2025];
+  const YEARS = [...editableYears].sort((a, b) => a - b);
 
   const loadStatus = () => {
     if (!token) return;
@@ -1260,7 +1260,8 @@ function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [
     if (!equipRes.ok) return;
     const d = await equipRes.json();
     setData(d);
-    const yrList = Object.keys(d).map(Number).sort((a, b) => b - a);
+    const dbYears = Object.keys(d).map(Number);
+    const yrList = [...new Set([...dbYears, ...editableYears])].sort((a, b) => b - a);
     setYears(yrList);
     setSelectedYear(prev => prev ?? Math.min(...editableYears));
     const init = {};
