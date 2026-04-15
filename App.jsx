@@ -403,7 +403,8 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
               const rows = [];
               rows.push(
                 <tr key={`cat-${cat}`} style={{cursor:'pointer'}} onClick={() => setOpenCats(p => ({...p, [cat]: !isOpen}))}>
-                  <td colSpan={colCount} style={{...styles.heatCatRow, position:'sticky', left:0}}>{isOpen ? '▼' : '▶'} {cat}</td>
+                  <td style={{...styles.heatCatRow, position:'sticky', left:0, zIndex:2}}>{isOpen ? '▼' : '▶'} {cat}</td>
+                  {Array.from({length: colCount - 1}).map((_, i) => <td key={i} style={{background:'#F3F4F6'}} />)}
                 </tr>
               );
               if (isOpen) {
