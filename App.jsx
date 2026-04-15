@@ -549,7 +549,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
 
   const cellStyle  = { padding:'8px 16px', textAlign:'center', fontSize:13, borderBottom:'1px solid #F3F4F6', color:'#374151' };
   const headStyle  = { padding:'8px 16px', textAlign:'center', fontWeight:700, fontSize:13, color:'#1c3660', borderBottom:'2px solid #E5E7EB', background:'#F9FAFB' };
-  const labelStyle = { padding:'8px 12px', fontSize:13, fontWeight:600, color:'#374151', borderBottom:'1px solid #F3F4F6' };
+  const labelStyle = { padding:'8px 12px', fontSize:13, fontWeight:600, color:'#374151', borderBottom:'1px solid #F3F4F6', position:'sticky', left:0, background:'#fff', whiteSpace:'nowrap' };
 
   const SubmitBtn = ({ yr }) => {
     if (submittedYears.includes(yr)) {
@@ -576,10 +576,11 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
   return (
     <div style={styles.chartCard}>
       <h3 style={{...styles.chartTitle, marginBottom:16}}>Submission Status</h3>
-      <table style={{width:'100%', borderCollapse:'collapse'}}>
+      <div style={{overflowX:'auto'}}>
+      <table style={{width:'100%', borderCollapse:'collapse', minWidth: YEARS.length > 3 ? `${YEARS.length * 120 + 180}px` : undefined}}>
         <thead>
           <tr>
-            <th style={{...headStyle, textAlign:'left'}}>Section</th>
+            <th style={{...headStyle, textAlign:'left', position:'sticky', left:0, zIndex:2}}>Section</th>
             {YEARS.map(y => <th key={y} style={headStyle}>{y}</th>)}
           </tr>
         </thead>
@@ -622,6 +623,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
           </tr>
         </tfoot>
       </table>
+      </div>
 
       {submitModal != null && (() => {
         const yr = submitModal;
