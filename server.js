@@ -84,7 +84,15 @@ const db = mysql.createPool({
         ('editable_year_from', '2003'),
         ('editable_year_to',   '${new Date().getFullYear()}')
     `);
-    await db.query(`ALTER TABLE ffs_contact ADD COLUMN IF NOT EXISTS portal_access TINYINT(1) NOT NULL DEFAULT 0`);
+    // Use INFORMATION_SCHEMA for compatibility with MySQL < 8.0
+    const [[{ col_exists }]] = await db.query(
+      `SELECT COUNT(*) AS col_exists FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ffs_contact' AND COLUMN_NAME = 'portal_access'`
+    );
+    if (!col_exists) {
+      await db.query(`ALTER TABLE ffs_contact ADD COLUMN portal_access TINYINT(1) NOT NULL DEFAULT 0`);
+      console.log("Added portal_access column to ffs_contact");
+    }
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -126,8 +134,7 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
-              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email,
-              COALESCE(c.portal_access, 0) AS portal_access
+              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email
        FROM ffs_contact c
        JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
        WHERE c.email = ? LIMIT 1`,
@@ -136,8 +143,20 @@ app.post("/api/auth/login", async (req, res) => {
     const row = rows[0];
     if (!row) return res.status(401).json({ error: "Fleet not found for that email" });
 
-    if (row.fleet_id !== 0 && !row.portal_access) {
-      return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
+    // Admins (fleet_id=0) always have access; others must have portal_access=1
+    if (row.fleet_id !== 0) {
+      try {
+        const [[accessRow]] = await db.query(
+          `SELECT COALESCE(portal_access, 0) AS portal_access FROM ffs_contact WHERE contact_id = ?`,
+          [row.user_contact_id]
+        );
+        if (!accessRow?.portal_access) {
+          return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
+        }
+      } catch (e) {
+        // portal_access column not yet created — deny non-admin access
+        return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
+      }
     }
 
     const token = jwt.sign(
