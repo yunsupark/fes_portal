@@ -474,19 +474,24 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
 
   const fuelCnt = (yr) => status?.fuel?.[yr]?.cnt ?? 0;
 
-  // Yellow: fuel >= 1 AND at least one cab_type meets its tech threshold
+  // Yellow: at least fuel has been entered — enough to enable submission (modal shows what's incomplete)
   const isYellow = (yr) => {
     if (!status) return false;
-    const hasFuel = fuelCnt(yr) >= 1;
-    const techByType = status.tech?.[yr] || {};
-    const hasTech = Object.entries(techByType).some(([ct, n]) => { const t = techThreshold(yr, ct); return t > 0 && n >= t; });
-    return hasFuel && hasTech;
+    return fuelCnt(yr) >= 1;
   };
 
-  // Green: all sections have entries AND at least one cab_type meets tech threshold
+  // Green: all sections have entries AND at least one cab_type meets its tech threshold
   const isGreen = (yr) => {
-    if (!isYellow(yr)) return false;
-    return (status.utilization?.[yr] || 0) >= 1 && (status.fleetEquip?.[yr] || 0) >= 1;
+    if (!status) return false;
+    const hasFuel = fuelCnt(yr) >= 1;
+    const hasUtil = (status.utilization?.[yr] || 0) >= 1;
+    const hasEquip = (status.fleetEquip?.[yr] || 0) >= 1;
+    const techByType = status.tech?.[yr] || {};
+    const hasTech = Object.entries(techByType).some(([ct, n]) => {
+      const t = techThreshold(yr, ct);
+      return t === 0 || n >= t;
+    });
+    return hasFuel && hasUtil && hasEquip && hasTech;
   };
 
   // All 4 sections have at least one entry (for cell coloring)
