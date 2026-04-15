@@ -42,6 +42,15 @@ app.use(express.json());
     SELECT fleet_id, mpg_year AS yr FROM ffs_mpg WHERE mpg_year < 2024
   ) t
   GROUP BY fleet_id;
+
+  -- Settings table for admin-configurable values:
+  CREATE TABLE IF NOT EXISTS ffs_settings (
+    setting_key   VARCHAR(64) NOT NULL PRIMARY KEY,
+    setting_value TEXT
+  );
+  INSERT IGNORE INTO ffs_settings (setting_key, setting_value) VALUES
+    ('editable_year_from', '2003'),
+    ('editable_year_to',   '2026');
 */
 
 // ─── Logging Middleware ────────────────────────────────────────────────────────
@@ -60,6 +69,23 @@ const db = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
 });
+
+// ─── DB Init ────────────────────────────────────────────────────────────────
+(async () => {
+  try {
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ffs_settings (
+        setting_key   VARCHAR(64) NOT NULL PRIMARY KEY,
+        setting_value TEXT
+      )
+    `);
+    await db.query(`
+      INSERT IGNORE INTO ffs_settings (setting_key, setting_value) VALUES
+        ('editable_year_from', '2003'),
+        ('editable_year_to',   '${new Date().getFullYear()}')
+    `);
+  } catch (e) { console.error("DB init error:", e); }
+})();
 
 // ─── Auth Middleware ─────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
@@ -246,10 +272,16 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     );
     const submittedYears = subRows.map(r => Number(r.survey_year));
     const lastSubmitted  = submittedYears.length ? Math.max(...submittedYears) : null;
-    // Editable: every year after the last submission up to 2025
+    // Editable: configurable window from ffs_settings
+    const [settingRows] = await db.query(
+      `SELECT setting_key, setting_value FROM ffs_settings WHERE setting_key IN ('editable_year_from','editable_year_to')`
+    );
+    const settingsMap = Object.fromEntries(settingRows.map(r => [r.setting_key, Number(r.setting_value)]));
+    const yrFrom = settingsMap.editable_year_from ?? 2003;
+    const yrTo   = settingsMap.editable_year_to   ?? new Date().getFullYear();
     const editableYears = [];
-    const startYear = lastSubmitted ? lastSubmitted + 1 : 2003;
-    for (let yr = startYear; yr <= 2025; yr++) editableYears.push(yr);
+    const startYear = lastSubmitted ? Math.max(lastSubmitted + 1, yrFrom) : yrFrom;
+    for (let yr = startYear; yr <= yrTo; yr++) editableYears.push(yr);
 
     const [utilRows] = await db.query(
       `SELECT utilization_year AS yr, COUNT(*) AS cnt FROM ffs_equip_utilization
@@ -1089,6 +1121,42 @@ app.put("/api/admin/techs/:id", requireAuth, requireAdmin, async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to update tech" });
+  }
+});
+
+/**
+ * GET /api/admin/settings
+ * Returns all admin-configurable settings.
+ */
+app.get("/api/admin/settings", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [rows] = await db.query(`SELECT setting_key, setting_value FROM ffs_settings`);
+    const settings = Object.fromEntries(rows.map(r => [r.setting_key, r.setting_value]));
+    res.json({ settings });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch settings" });
+  }
+});
+
+/**
+ * PUT /api/admin/settings
+ * Body: { key: value, ... } — upserts each provided key.
+ */
+app.put("/api/admin/settings", requireAuth, requireAdmin, async (req, res) => {
+  const updates = req.body;
+  if (!updates || typeof updates !== 'object') return res.status(400).json({ error: "Body must be an object" });
+  try {
+    for (const [key, value] of Object.entries(updates)) {
+      await db.query(
+        `INSERT INTO ffs_settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        [key, String(value)]
+      );
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to save settings" });
   }
 });
 

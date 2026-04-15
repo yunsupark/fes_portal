@@ -1724,6 +1724,16 @@ function AdminView({ token, onSignOut }) {
   const [contactSort, setContactSort] = useState({ field: 'last_name', dir: 'asc' });
   const [contactFilter, setContactFilter] = useState('active'); // 'active' | 'inactive' | 'all'
 
+  // Card collapse state
+  const [fleetsCollapsed,    setFleetsCollapsed]    = useState(false);
+  const [contactsCollapsed,  setContactsCollapsed]  = useState(false);
+  const [techsCollapsed,     setTechsCollapsed]     = useState(false);
+
+  // Settings panel
+  const [showSettings,   setShowSettings]   = useState(false);
+  const [settingsForm,   setSettingsForm]   = useState({ editable_year_from: '', editable_year_to: '' });
+  const [settingsSaving, setSettingsSaving] = useState(false);
+
   // New Fleet modal
   const [showFleetForm, setShowFleetForm] = useState(false);
   const [fleetForm, setFleetForm] = useState({
@@ -1779,6 +1789,37 @@ function AdminView({ token, onSignOut }) {
       .finally(() => setTechsLoading(false));
   };
   useEffect(() => { fetchTechs(); }, [token]);
+
+  // Settings
+  const fetchSettings = () => {
+    fetch('/api/admin/settings', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.settings) {
+          setSettingsForm({
+            editable_year_from: d.settings.editable_year_from ?? '',
+            editable_year_to:   d.settings.editable_year_to   ?? '',
+          });
+        }
+      })
+      .catch(console.error);
+  };
+  useEffect(() => { fetchSettings(); }, [token]);
+
+  const handleSaveSettings = async (e) => {
+    e.preventDefault();
+    setSettingsSaving(true);
+    try {
+      await fetch('/api/admin/settings', {
+        method: 'PUT', headers: authHeaders,
+        body: JSON.stringify({
+          editable_year_from: settingsForm.editable_year_from,
+          editable_year_to:   settingsForm.editable_year_to,
+        }),
+      });
+      setShowSettings(false);
+    } finally { setSettingsSaving(false); }
+  };
 
   const techGroups = [...new Set(techs.map(t => t.tech_group))].sort();
 
@@ -1947,9 +1988,10 @@ function AdminView({ token, onSignOut }) {
   return (
     <div style={{ minHeight: '100vh', background: '#F3F4F6', fontFamily: 'Arial, sans-serif' }}>
       {/* Top bar */}
-      <div style={{ background: '#1c3660', padding: '0 32px', display: 'flex', alignItems: 'center', height: 56, gap: 16 }}>
+      <div style={{ background: '#1c3660', padding: '0 32px', display: 'flex', alignItems: 'center', height: 56, gap: 10 }}>
         <img src="/nacfe-logo.png" alt="NACFE" style={{ height: 32, objectFit: 'contain' }} />
         <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, flex: 1 }}>Admin Panel</span>
+        <button onClick={() => setShowSettings(true)} title="Settings" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>⚙</button>
         <button onClick={onSignOut} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 }}>
           Sign out
         </button>
@@ -1959,17 +2001,18 @@ function AdminView({ token, onSignOut }) {
 
         {/* ── Fleets Card ── */}
         <div style={{ ...card, flex: '1 1 0', minWidth: 0, marginBottom: 0 }}>
-          <div style={cardHeader}>
+          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setFleetsCollapsed(c => !c)}>
             <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
               Fleets <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({fleets.length})</span>
             </h2>
-            <button onClick={() => setShowFleetForm(true)}
-              style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+            <button onClick={e => { e.stopPropagation(); setShowFleetForm(true); }}
+              style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, marginRight: 8 }}>
               + New Fleet
             </button>
+            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{fleetsCollapsed ? '▶' : '▼'}</span>
           </div>
 
-          {loading ? (
+          {!fleetsCollapsed && (loading ? (
             <div style={{ textAlign: 'center', color: '#6B7280', padding: 40 }}>Loading…</div>
           ) : (
             <div style={{ overflowY: 'auto', maxHeight: 420 }}>
@@ -2073,16 +2116,16 @@ function AdminView({ token, onSignOut }) {
                 </tbody>
               </table>
             </div>
-          )}
+          ))}
         </div>
 
         {/* ── Contacts Card ── */}
         <div style={{ ...card, flex: '1 1 0', minWidth: 0, marginBottom: 0 }}>
-          <div style={cardHeader}>
+          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setContactsCollapsed(c => !c)}>
             <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
               Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({sortedContacts.length})</span>
             </h2>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
               <button onClick={() => { setContactFleetId('pick'); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_id: '' }); }}
                 style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
                 + New Contact
@@ -2095,8 +2138,9 @@ function AdminView({ token, onSignOut }) {
               ))}
               </div>
             </div>
+            <span style={{ color: '#9CA3AF', fontSize: 13, marginLeft: 8 }}>{contactsCollapsed ? '▶' : '▼'}</span>
           </div>
-          {loading ? (
+          {!contactsCollapsed && (loading ? (
             <div style={{ textAlign: 'center', color: '#6B7280', padding: 32 }}>Loading…</div>
           ) : (
             <div style={{ overflowY: 'auto', maxHeight: 420 }}>
@@ -2128,7 +2172,7 @@ function AdminView({ token, onSignOut }) {
                 </tbody>
               </table>
             </div>
-          )}
+          ))}
         </div>
 
       </div>
@@ -2136,16 +2180,17 @@ function AdminView({ token, onSignOut }) {
       {/* ── Technology Card ── */}
       <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
         <div style={{ ...card, marginBottom: 0 }}>
-          <div style={cardHeader}>
+          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setTechsCollapsed(c => !c)}>
             <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
               Technologies <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({techs.length})</span>
             </h2>
-            <button onClick={() => setShowTechForm(true)}
-              style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+            <button onClick={e => { e.stopPropagation(); setShowTechForm(true); }}
+              style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, marginRight: 8 }}>
               + New Technology
             </button>
+            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{techsCollapsed ? '▶' : '▼'}</span>
           </div>
-          {techsLoading ? (
+          {!techsCollapsed && (techsLoading ? (
             <div style={{ textAlign: 'center', color: '#6B7280', padding: 32 }}>Loading…</div>
           ) : (
             <div style={{ overflowY: 'auto', maxHeight: 480 }}>
@@ -2183,7 +2228,7 @@ function AdminView({ token, onSignOut }) {
                 </tbody>
               </table>
             </div>
-          )}
+          ))}
         </div>
       </div>
 
@@ -2415,6 +2460,45 @@ function AdminView({ token, onSignOut }) {
                 <button type="button" onClick={() => setEditTech(null)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
                 <button type="submit" disabled={editTechSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
                   {editTechSaving ? 'Saving…' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Settings Panel ── */}
+      {showSettings && (
+        <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowSettings(false); }}>
+          <div style={{ ...modalBox, maxWidth: 380 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#111827' }}>Settings</h3>
+            <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <p style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Fleet Input Years</p>
+                <p style={{ margin: '0 0 12px', fontSize: 12, color: '#6B7280' }}>
+                  Set the range of years that fleets can enter or edit data for.
+                </p>
+                <div style={{ display: 'flex', gap: 12 }}>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>From</label>
+                    <input style={inputStyle} type="number" min="2003" max="2100"
+                      value={settingsForm.editable_year_from}
+                      onChange={e => setSettingsForm(p => ({ ...p, editable_year_from: e.target.value }))}
+                      required />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <label style={labelStyle}>To</label>
+                    <input style={inputStyle} type="number" min="2003" max="2100"
+                      value={settingsForm.editable_year_to}
+                      onChange={e => setSettingsForm(p => ({ ...p, editable_year_to: e.target.value }))}
+                      required />
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+                <button type="button" onClick={() => setShowSettings(false)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                <button type="submit" disabled={settingsSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  {settingsSaving ? 'Saving…' : 'Save'}
                 </button>
               </div>
             </form>
