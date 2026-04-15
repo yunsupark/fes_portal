@@ -82,7 +82,8 @@ const db = mysql.createPool({
     await db.query(`
       INSERT IGNORE INTO ffs_settings (setting_key, setting_value) VALUES
         ('editable_year_from', '2003'),
-        ('editable_year_to',   '${new Date().getFullYear()}')
+        ('editable_year_to',   '${new Date().getFullYear()}'),
+        ('example_fleet_id',   '45')
     `);
     // Use INFORMATION_SCHEMA for compatibility with MySQL < 8.0
     const [[{ col_exists }]] = await db.query(
@@ -286,11 +287,13 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
   try {
     // Submitted years for this fleet
     const [subRows] = await db.query(
-      'SELECT survey_year FROM ffs_submission WHERE fleet_id = ? ORDER BY survey_year',
+      'SELECT survey_year, submitted_at FROM ffs_submission WHERE fleet_id = ? ORDER BY survey_year',
       [fleet_id]
     );
     const submittedYears = subRows.map(r => Number(r.survey_year));
     const lastSubmitted  = submittedYears.length ? Math.max(...submittedYears) : null;
+    // A fleet is "new" if it has no submissions with a submitted_at in the past (i.e. no real historical data)
+    const isNewFleet = !subRows.some(r => r.submitted_at != null);
     // Editable: configurable window from ffs_settings
     const [settingRows] = await db.query(
       `SELECT setting_key, setting_value FROM ffs_settings WHERE setting_key IN ('editable_year_from','editable_year_to')`
@@ -356,7 +359,7 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       techTotals[yr] = { 'Sleeper': Number(sleeperRow.cnt), 'Day Cab': Number(dayCabRow.cnt) };
     }
 
-    res.json({ years, utilization, fleetEquip, fuel, tech, techTotals, submittedYears, editableYears });
+    res.json({ years, utilization, fleetEquip, fuel, tech, techTotals, submittedYears, editableYears, isNewFleet });
   } catch (err) {
     console.error("Error fetching submission status:", err.message);
     res.status(500).json({ error: "Failed to fetch status" });
@@ -376,6 +379,61 @@ app.post("/api/submit/:year", requireAuth, async (req, res) => {
   } catch (err) {
     console.error("Error submitting year:", err.message);
     res.status(500).json({ error: "Failed to submit" });
+  }
+});
+
+/**
+ * POST /api/submit-all
+ * Submits all editable years at once (for initial submission by new fleets).
+ */
+app.post("/api/submit-all", requireAuth, async (req, res) => {
+  const { fleet_id, contact_id } = req.user;
+  try {
+    const [settingRows] = await db.query(
+      `SELECT setting_key, setting_value FROM ffs_settings WHERE setting_key IN ('editable_year_from','editable_year_to')`
+    );
+    const sm = Object.fromEntries(settingRows.map(r => [r.setting_key, Number(r.setting_value)]));
+    const yrFrom = sm.editable_year_from ?? 2003;
+    const yrTo   = sm.editable_year_to   ?? new Date().getFullYear();
+    const [subRows] = await db.query(
+      `SELECT survey_year FROM ffs_submission WHERE fleet_id = ? ORDER BY survey_year`, [fleet_id]
+    );
+    const submittedSet = new Set(subRows.map(r => Number(r.survey_year)));
+    for (let yr = yrFrom; yr <= yrTo; yr++) {
+      if (!submittedSet.has(yr)) {
+        await db.query(
+          `INSERT IGNORE INTO ffs_submission (fleet_id, survey_year, contact_id) VALUES (?, ?, ?)`,
+          [fleet_id, yr, contact_id ?? null]
+        );
+      }
+    }
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error submitting all years:", err.message);
+    res.status(500).json({ error: "Failed to submit" });
+  }
+});
+
+/**
+ * POST /api/admin/reset-example-fleet
+ * Deletes all input data for the example fleet (fleet_id from ffs_settings).
+ */
+app.post("/api/admin/reset-example-fleet", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [[setting]] = await db.query(
+      `SELECT setting_value FROM ffs_settings WHERE setting_key = 'example_fleet_id'`
+    );
+    const fleetId = setting ? parseInt(setting.setting_value) : null;
+    if (!fleetId) return res.status(400).json({ error: "example_fleet_id not configured in settings" });
+    await db.query(`DELETE FROM ffs_adoption          WHERE fleet_id = ?`, [fleetId]);
+    await db.query(`DELETE FROM ffs_mpg               WHERE fleet_id = ?`, [fleetId]);
+    await db.query(`DELETE FROM ffs_fleet_equip        WHERE fleet_id = ?`, [fleetId]);
+    await db.query(`DELETE FROM ffs_equip_utilization  WHERE fleet_id = ?`, [fleetId]);
+    await db.query(`DELETE FROM ffs_submission         WHERE fleet_id = ?`, [fleetId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("Error resetting example fleet:", err.message);
+    res.status(500).json({ error: "Failed to reset example fleet" });
   }
 });
 

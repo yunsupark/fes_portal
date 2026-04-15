@@ -143,7 +143,7 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
 
 
 
-function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
+function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFleet = false }) {
   const [techData, setTechData]         = useState({});
   const [otherTechData, setOtherTechData] = useState({});
   const [categories, setCategories]     = useState({});
@@ -203,17 +203,20 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
         Object.keys(t.categories || {}).forEach(cat => { if (!(cat in next)) next[cat] = true; });
         return next;
       });
-      // init edits from existing data for this cab type
+      // init edits from existing data (or 0% for new fleets with no data)
       setEdits(prev => {
         const newEdits = { ...prev };
         effEditable.forEach(yr => {
           const yrData = t.data?.[yr] ?? t.data?.[String(yr)] ?? null;
-          if (!yrData) return;
           const updated = { ...(newEdits[yr] || {}) };
           Object.values(t.categories || {}).forEach(techs_ => {
             techs_.forEach(tech => {
-              const v = yrData[tech.label];
-              updated[tech.label] = v != null ? String(Math.round(v * 100)) : '';
+              if (yrData) {
+                const v = yrData[tech.label];
+                updated[tech.label] = v != null ? String(Math.round(v * 100)) : '';
+              } else if (isNewFleet && !(tech.label in updated)) {
+                updated[tech.label] = '0';
+              }
             });
           });
           newEdits[yr] = updated;
@@ -456,9 +459,10 @@ function HeatCell({ value }) {
   );
 }
 
-function SubmissionHistory({ token, saveCount, submittedYears = [], editableYears = [2024, 2025], onSubmit }) {
+function SubmissionHistory({ token, saveCount, submittedYears = [], editableYears = [2024, 2025], isNewFleet = false, onSubmit }) {
   const [status, setStatus]           = useState(null);
   const [submitModal, setSubmitModal] = useState(null);
+  const [submittingAll, setSubmittingAll] = useState(false);
   const YEARS = [...editableYears].sort((a, b) => a - b);
 
   const loadStatus = () => {
@@ -553,6 +557,15 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
     onSubmit?.(yr);
   };
 
+  const handleSubmitAll = async () => {
+    setSubmittingAll(true);
+    try {
+      await fetch('/api/submit-all', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
+      loadStatus();
+    } catch (err) { console.error(err); }
+    finally { setSubmittingAll(false); }
+  };
+
   const cellStyle  = { padding:'8px 16px', textAlign:'center', fontSize:13, borderBottom:'1px solid #F3F4F6', color:'#374151' };
   const headStyle  = { padding:'8px 16px', textAlign:'center', fontWeight:700, fontSize:13, color:'#1c3660', borderBottom:'2px solid #E5E7EB', background:'#F9FAFB' };
   const labelStyle = { padding:'8px 12px', fontSize:13, fontWeight:600, color:'#374151', borderBottom:'1px solid #F3F4F6', position:'sticky', left:0, background:'#fff', whiteSpace:'nowrap' };
@@ -619,14 +632,33 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
           </tr>
         </tbody>
         <tfoot>
-          <tr>
-            <td />
-            {YEARS.map(y => (
-              <td key={y} style={{padding:'10px 16px', textAlign:'center'}}>
-                <SubmitBtn yr={y} />
+          {isNewFleet ? (
+            <tr>
+              <td colSpan={YEARS.length + 1} style={{padding:'12px 16px', textAlign:'center'}}>
+                <button
+                  onClick={handleSubmitAll}
+                  disabled={submittingAll || !isYellow(YEARS[0])}
+                  style={{
+                    padding:'7px 20px', borderRadius:6, border:'none', fontSize:13, fontWeight:700,
+                    cursor: isYellow(YEARS[0]) ? 'pointer' : 'not-allowed',
+                    background: isGreen(YEARS[0]) ? '#16A34A' : isYellow(YEARS[0]) ? '#F59E0B' : '#D1D5DB',
+                    color:      isGreen(YEARS[0]) ? '#fff'    : isYellow(YEARS[0]) ? '#1c3660' : '#9CA3AF',
+                  }}
+                >
+                  {submittingAll ? 'Submitting…' : 'Submit Initial Data'}
+                </button>
               </td>
-            ))}
-          </tr>
+            </tr>
+          ) : (
+            <tr>
+              <td />
+              {YEARS.map(y => (
+                <td key={y} style={{padding:'10px 16px', textAlign:'center'}}>
+                  <SubmitBtn yr={y} />
+                </td>
+              ))}
+            </tr>
+          )}
         </tfoot>
       </table>
       </div>
@@ -1742,9 +1774,11 @@ function AdminView({ token, onSignOut }) {
   const [techsCollapsed,     setTechsCollapsed]     = useState(false);
 
   // Settings panel
-  const [showSettings,   setShowSettings]   = useState(false);
-  const [settingsForm,   setSettingsForm]   = useState({ editable_year_from: '', editable_year_to: '' });
-  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [showSettings,    setShowSettings]    = useState(false);
+  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '', example_fleet_id: '' });
+  const [settingsSaving,  setSettingsSaving]  = useState(false);
+  const [resetting,       setResetting]       = useState(false);
+  const [resetMsg,        setResetMsg]        = useState('');
 
   // New Fleet modal
   const [showFleetForm, setShowFleetForm] = useState(false);
@@ -1811,6 +1845,7 @@ function AdminView({ token, onSignOut }) {
           setSettingsForm({
             editable_year_from: d.settings.editable_year_from ?? '2003',
             editable_year_to:   d.settings.editable_year_to   ?? String(new Date().getFullYear()),
+            example_fleet_id:   d.settings.example_fleet_id   ?? '',
           });
         }
       })
@@ -1827,10 +1862,21 @@ function AdminView({ token, onSignOut }) {
         body: JSON.stringify({
           editable_year_from: settingsForm.editable_year_from,
           editable_year_to:   settingsForm.editable_year_to,
+          example_fleet_id:   settingsForm.example_fleet_id,
         }),
       });
       setShowSettings(false);
     } finally { setSettingsSaving(false); }
+  };
+
+  const handleResetExampleFleet = async () => {
+    setResetting(true); setResetMsg('');
+    try {
+      const res = await fetch('/api/admin/reset-example-fleet', { method: 'POST', headers: authHeaders });
+      const d = await res.json();
+      setResetMsg(res.ok ? 'Example fleet data cleared.' : (d.error || 'Reset failed.'));
+    } catch { setResetMsg('Reset failed.'); }
+    finally { setResetting(false); }
   };
 
   const techGroups = [...new Set(techs.map(t => t.tech_group))].sort();
@@ -2502,6 +2548,25 @@ function AdminView({ token, onSignOut }) {
             <h3 style={{ margin: '0 0 16px', fontSize: 16, color: '#111827' }}>Settings</h3>
             <form onSubmit={handleSaveSettings} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
+                <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid #E5E7EB' }}>
+                  <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Example Fleet Reset</p>
+                  <p style={{ margin: '0 0 10px', fontSize: 12, color: '#6B7280' }}>
+                    Deletes all input data for the example fleet (fleet ID below). Use this to reset the demo account.
+                  </p>
+                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={labelStyle}>Example Fleet ID</label>
+                      <input style={inputStyle} type="number" min="1"
+                        value={settingsForm.example_fleet_id}
+                        onChange={e => setSettingsForm(p => ({ ...p, example_fleet_id: e.target.value }))} />
+                    </div>
+                    <button type="button" onClick={handleResetExampleFleet} disabled={resetting || !settingsForm.example_fleet_id}
+                      style={{ background: '#DC2626', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: settingsForm.example_fleet_id ? 'pointer' : 'not-allowed', opacity: settingsForm.example_fleet_id ? 1 : 0.5, whiteSpace: 'nowrap' }}>
+                      {resetting ? 'Resetting…' : 'Reset'}
+                    </button>
+                  </div>
+                  {resetMsg && <p style={{ margin: '6px 0 0', fontSize: 12, color: resetMsg.includes('cleared') ? '#059669' : '#DC2626' }}>{resetMsg}</p>}
+                </div>
                 <p style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Fleet Input Years</p>
                 <p style={{ margin: '0 0 12px', fontSize: 12, color: '#6B7280' }}>
                   Set the range of years that fleets can enter or edit data for. The "From" year should generally be left at 2003. Note that fleets will only be able to update years for which they have not yet submitted data.
@@ -2554,6 +2619,7 @@ export default function App() {
   const notifySave = () => setSaveCount(n => n + 1);
   const [submittedYears, setSubmittedYears] = useState([]);
   const [editableYears,  setEditableYears]  = useState([2024, 2025]);
+  const [isNewFleet,     setIsNewFleet]     = useState(false);
 
   useEffect(() => {
     if (!token) return;
@@ -2563,6 +2629,7 @@ export default function App() {
         if (d) {
           setSubmittedYears(d.submittedYears || []);
           setEditableYears(d.editableYears  || [2024, 2025]);
+          setIsNewFleet(!!d.isNewFleet);
         }
       })
       .catch(console.error);
@@ -2698,7 +2765,7 @@ export default function App() {
             <MpgChart chartData={chartData} fleetName={fleetState?.name} />
           </div>
           <div style={{flex:"1 1 320px", minWidth:0}}>
-            <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} />
+            <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} isNewFleet={isNewFleet} />
           </div>
         </div>
 
@@ -2712,7 +2779,7 @@ export default function App() {
         <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
 
         {/* Tech Adoption Card */}
-        <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} />
+        <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} isNewFleet={isNewFleet} />
       </main>
 
       {/* Data Entry Modal */}
