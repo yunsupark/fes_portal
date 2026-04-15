@@ -678,6 +678,7 @@ const EMPTY_UTIL_ROW = () => ({
 
 function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
   const NUM_YEARS = 5;
+  const editableYearsKey = editableYears.join(',');
 
   const [data,            setData]           = useState({});
   const [edits,           setEdits]          = useState({});
@@ -723,7 +724,7 @@ function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears =
     setEdits(init);
   };
 
-  useEffect(() => { if (token) loadData(); }, [token]);
+  useEffect(() => { if (token) loadData(); }, [token, editableYearsKey]);
 
   useEffect(() => {
     if (selectedYear == null) return;
@@ -936,6 +937,7 @@ const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: ''
 
 function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
   const NUM_YEARS = 5;
+  const editableYearsKey = editableYears.join(',');
 
   const [rows,         setRows]         = useState([]);   // flat array from API
   const [edits,        setEdits]        = useState({});   // { year: [rows] }
@@ -969,7 +971,7 @@ function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 
     setEdits(init);
   };
 
-  useEffect(() => { if (token) loadData(); }, [token]);
+  useEffect(() => { if (token) loadData(); }, [token, editableYearsKey]);
 
   const isEditable = editableYears.includes(selectedYear);
 
@@ -1237,6 +1239,7 @@ function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
 }
 
 function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
+  const editableYearsKey = editableYears.join(',');
   const [data,         setData]         = useState({});
   const [edits,        setEdits]        = useState({});
   const [years,        setYears]        = useState([]);
@@ -1270,7 +1273,7 @@ function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [
     setEdits(init);
   };
 
-  useEffect(() => { if (token) loadData(); }, [token]);
+  useEffect(() => { if (token) loadData(); }, [token, editableYearsKey]);
 
   useEffect(() => {
     if (selectedYear == null) return;
