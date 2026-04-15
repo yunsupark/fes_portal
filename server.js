@@ -419,12 +419,8 @@ app.post("/api/submit-all", requireAuth, async (req, res) => {
  * Deletes all input data for the example fleet (fleet_id from ffs_settings).
  */
 app.post("/api/admin/reset-example-fleet", requireAuth, requireAdmin, async (_req, res) => {
+  const fleetId = 51;
   try {
-    const [[setting]] = await db.query(
-      `SELECT setting_value FROM ffs_settings WHERE setting_key = 'example_fleet_id'`
-    );
-    const fleetId = setting ? parseInt(setting.setting_value) : null;
-    if (!fleetId) return res.status(400).json({ error: "example_fleet_id not configured in settings" });
     await db.query(`DELETE FROM ffs_adoption          WHERE fleet_id = ?`, [fleetId]);
     await db.query(`DELETE FROM ffs_mpg               WHERE fleet_id = ?`, [fleetId]);
     await db.query(`DELETE FROM ffs_fleet_equip        WHERE fleet_id = ?`, [fleetId]);

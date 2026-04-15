@@ -1775,7 +1775,7 @@ function AdminView({ token, onSignOut }) {
 
   // Settings panel
   const [showSettings,    setShowSettings]    = useState(false);
-  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '', example_fleet_id: '' });
+  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '' });
   const [settingsSaving,  setSettingsSaving]  = useState(false);
   const [resetting,       setResetting]       = useState(false);
   const [resetMsg,        setResetMsg]        = useState('');
@@ -1845,7 +1845,6 @@ function AdminView({ token, onSignOut }) {
           setSettingsForm({
             editable_year_from: d.settings.editable_year_from ?? '2003',
             editable_year_to:   d.settings.editable_year_to   ?? String(new Date().getFullYear()),
-            example_fleet_id:   d.settings.example_fleet_id   ?? '',
           });
         }
       })
@@ -1862,7 +1861,6 @@ function AdminView({ token, onSignOut }) {
         body: JSON.stringify({
           editable_year_from: settingsForm.editable_year_from,
           editable_year_to:   settingsForm.editable_year_to,
-          example_fleet_id:   settingsForm.example_fleet_id,
         }),
       });
       setShowSettings(false);
@@ -2553,18 +2551,10 @@ function AdminView({ token, onSignOut }) {
                   <p style={{ margin: '0 0 10px', fontSize: 12, color: '#6B7280' }}>
                     Deletes all input data for the example fleet (fleet ID below). Use this to reset the demo account.
                   </p>
-                  <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end' }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>Example Fleet ID</label>
-                      <input style={inputStyle} type="number" min="1"
-                        value={settingsForm.example_fleet_id}
-                        onChange={e => setSettingsForm(p => ({ ...p, example_fleet_id: e.target.value }))} />
-                    </div>
-                    <button type="button" onClick={handleResetExampleFleet} disabled={resetting || !settingsForm.example_fleet_id}
-                      style={{ background: '#DC2626', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: settingsForm.example_fleet_id ? 'pointer' : 'not-allowed', opacity: settingsForm.example_fleet_id ? 1 : 0.5, whiteSpace: 'nowrap' }}>
-                      {resetting ? 'Resetting…' : 'Reset'}
-                    </button>
-                  </div>
+                  <button type="button" onClick={handleResetExampleFleet} disabled={resetting}
+                    style={{ background: '#DC2626', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                    {resetting ? 'Resetting…' : 'Reset Demo Fleet'}
+                  </button>
                   {resetMsg && <p style={{ margin: '6px 0 0', fontSize: 12, color: resetMsg.includes('cleared') ? '#059669' : '#DC2626' }}>{resetMsg}</p>}
                 </div>
                 <p style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Fleet Input Years</p>
