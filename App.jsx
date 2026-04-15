@@ -214,7 +214,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFl
               if (yrData) {
                 const v = yrData[tech.label];
                 updated[tech.label] = v != null ? String(Math.round(v * 100)) : '';
-              } else if (isNewFleet && cabType === 'Sleeper' && !(tech.label in updated)) {
+              } else if (isNewFleet && !(tech.label in updated)) {
                 updated[tech.label] = '0';
               }
             });
