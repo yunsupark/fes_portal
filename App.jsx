@@ -214,7 +214,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFl
               if (yrData) {
                 const v = yrData[tech.label];
                 updated[tech.label] = v != null ? String(Math.round(v * 100)) : '';
-              } else if (isNewFleet && !(tech.label in updated)) {
+              } else if (isNewFleet && cabType === 'Sleeper' && !(tech.label in updated)) {
                 updated[tech.label] = '0';
               }
             });
@@ -632,24 +632,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
           </tr>
         </tbody>
         <tfoot>
-          {isNewFleet ? (
-            <tr>
-              <td colSpan={YEARS.length + 1} style={{padding:'12px 16px', textAlign:'center'}}>
-                <button
-                  onClick={handleSubmitAll}
-                  disabled={submittingAll || !isYellow(YEARS[0])}
-                  style={{
-                    padding:'7px 20px', borderRadius:6, border:'none', fontSize:13, fontWeight:700,
-                    cursor: isYellow(YEARS[0]) ? 'pointer' : 'not-allowed',
-                    background: isGreen(YEARS[0]) ? '#16A34A' : isYellow(YEARS[0]) ? '#F59E0B' : '#D1D5DB',
-                    color:      isGreen(YEARS[0]) ? '#fff'    : isYellow(YEARS[0]) ? '#1c3660' : '#9CA3AF',
-                  }}
-                >
-                  {submittingAll ? 'Submitting…' : 'Submit Initial Data'}
-                </button>
-              </td>
-            </tr>
-          ) : (
+          {!isNewFleet && (
             <tr>
               <td />
               {YEARS.map(y => (
@@ -662,6 +645,23 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
         </tfoot>
       </table>
       </div>
+
+      {isNewFleet && (
+        <div style={{textAlign:'center', marginTop:14}}>
+          <button
+            onClick={handleSubmitAll}
+            disabled={submittingAll || !isYellow(YEARS[0])}
+            style={{
+              padding:'8px 24px', borderRadius:6, border:'none', fontSize:13, fontWeight:700,
+              cursor: isYellow(YEARS[0]) ? 'pointer' : 'not-allowed',
+              background: isGreen(YEARS[0]) ? '#16A34A' : isYellow(YEARS[0]) ? '#F59E0B' : '#D1D5DB',
+              color:      isGreen(YEARS[0]) ? '#fff'    : isYellow(YEARS[0]) ? '#1c3660' : '#9CA3AF',
+            }}
+          >
+            {submittingAll ? 'Submitting…' : 'Submit Initial Data'}
+          </button>
+        </div>
+      )}
 
       {submitModal != null && (() => {
         const yr = submitModal;
@@ -2549,7 +2549,7 @@ function AdminView({ token, onSignOut }) {
                 <div style={{ marginBottom: 16, paddingBottom: 16, borderBottom: '1px solid #E5E7EB' }}>
                   <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Example Fleet Reset</p>
                   <p style={{ margin: '0 0 10px', fontSize: 12, color: '#6B7280' }}>
-                    Deletes all input data for the example fleet (fleet ID below). Use this to reset the demo account.
+                    Deletes all input data for the demo fleet. Use this to reset the demo account.
                   </p>
                   <button type="button" onClick={handleResetExampleFleet} disabled={resetting}
                     style={{ background: '#DC2626', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 14px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
