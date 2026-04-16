@@ -350,23 +350,19 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       tech[r.yr][r.cab_type] = Number(r.cnt);
     });
 
+    // Count all currently-active techs per cab type (no active_to).
+    // active_from is intentionally ignored so the total matches the list shown in the UI.
+    const [[sleeperTotal]] = await db.query(
+      `SELECT COUNT(*) AS cnt FROM ffs_tech
+       WHERE (applies_sleeper = 1 OR applies_sleeper IS NULL) AND active_to IS NULL`
+    );
+    const [[dayCabTotal]] = await db.query(
+      `SELECT COUNT(*) AS cnt FROM ffs_tech
+       WHERE (applies_daycab = 1 OR applies_daycab IS NULL) AND active_to IS NULL`
+    );
     const techTotals = {};
     for (const yr of years) {
-      const [[sleeperRow]] = await db.query(
-        `SELECT COUNT(*) AS cnt FROM ffs_tech
-         WHERE (applies_sleeper = 1 OR applies_sleeper IS NULL)
-           AND (active_from IS NULL OR active_from <= ?)
-           AND active_to IS NULL`,
-        [yr]
-      );
-      const [[dayCabRow]] = await db.query(
-        `SELECT COUNT(*) AS cnt FROM ffs_tech
-         WHERE (applies_daycab = 1 OR applies_daycab IS NULL)
-           AND (active_from IS NULL OR active_from <= ?)
-           AND active_to IS NULL`,
-        [yr]
-      );
-      techTotals[yr] = { 'Sleeper': Number(sleeperRow.cnt), 'Day Cab': Number(dayCabRow.cnt) };
+      techTotals[yr] = { 'Sleeper': Number(sleeperTotal.cnt), 'Day Cab': Number(dayCabTotal.cnt) };
     }
 
     res.json({ years, utilization, fleetEquip, fuel, tech, techTotals, submittedYears, editableYears, isNewFleet });
