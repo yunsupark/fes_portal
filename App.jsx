@@ -143,7 +143,7 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
 
 
 
-function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFleet = false }) {
+function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [techData, setTechData]         = useState({});
   const [otherTechData, setOtherTechData] = useState({});
   const [categories, setCategories]     = useState({});
@@ -214,8 +214,6 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFl
               if (yrData) {
                 const v = yrData[tech.label];
                 updated[tech.label] = v != null ? String(Math.round(v * 100)) : '';
-              } else if (isNewFleet && !(tech.label in updated)) {
-                updated[tech.label] = '0';
               }
             });
           });
@@ -245,27 +243,6 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFl
       await fetchData(defaultCab);
     })();
   }, [token]);
-
-  // Re-apply 0% defaults when isNewFleet is confirmed after initial load
-  useEffect(() => {
-    if (!isNewFleet) return;
-    setEdits(prev => {
-      const newEdits = { ...prev };
-      const effEditable = Object.keys(prev).map(Number).filter(y => editableYears.includes(y));
-      effEditable.forEach(yr => {
-        const updated = { ...(newEdits[yr] || {}) };
-        Object.values(categories).forEach(techs_ => {
-          techs_.forEach(tech => {
-            if (!(tech.label in updated) || updated[tech.label] === '') {
-              updated[tech.label] = '0';
-            }
-          });
-        });
-        newEdits[yr] = updated;
-      });
-      return newEdits;
-    });
-  }, [isNewFleet]);
 
   // Scroll to rightmost (latest years) whenever the year list changes
   useEffect(() => {
@@ -1339,7 +1316,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
     setSelectedYear(prev => prev ?? Math.min(...editableYears));
     const init = {};
     yrList.forEach(yr => { init[yr] = (d[yr] || []).map(row => ({ ...row })); });
-    editableYears.forEach(yr => { if (!init[yr]) init[yr] = [EMPTY_EQUIP_ROW()]; });
+    editableYears.forEach(yr => { if (!init[yr] || init[yr].length === 0) init[yr] = [EMPTY_EQUIP_ROW()]; });
     setEdits(init);
   };
 
