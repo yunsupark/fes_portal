@@ -738,7 +738,7 @@ const EMPTY_UTIL_ROW = () => ({
   grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
 });
 
-function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
+function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
@@ -883,15 +883,19 @@ function FleetDetailsTable({ token, onSave, submittedYears = [], editableYears =
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Equipment Utilization</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          {[...years].sort((a, b) => a - b).map(yr => (
-            <button key={yr} onClick={() => setSelectedYear(yr)} style={{
-              padding:'4px 14px', borderRadius:6, border:'1px solid',
-              fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
-              borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
-              background:  yr === selectedYear ? '#1c3660' : '#fff',
-              color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{editableYears.includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
-          ))}
+          {[...years].sort((a, b) => a - b).map(yr => {
+            const isEditable = editableYears.includes(yr);
+            const isSelected = yr === selectedYear;
+            return (
+              <button key={yr} onClick={() => setSelectedYear(yr)} style={{
+                padding:'4px 14px', borderRadius:6, border:'1px solid',
+                fontSize:13, cursor:'pointer', fontWeight: isSelected ? 700 : 400,
+                borderColor: isSelected ? '#1c3660' : isEditable ? '#1c3660' : '#D1D5DB',
+                background:  isSelected ? '#1c3660' : isEditable ? '#EFF6FF' : '#fff',
+                color:       isSelected ? '#fff'    : isEditable ? '#1c3660' : '#374151',
+              }}>{yr}{isEditable ? ' ✎' : ''}</button>
+            );
+          })}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
           <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
@@ -997,7 +1001,7 @@ const FUEL_OPTIONS    = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
 
 const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: '' });
 
-function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
+function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
@@ -1096,15 +1100,19 @@ function FuelTable({ token, onSave, submittedYears = [], editableYears = [2024, 
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fuel (IFTA)</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          {[...years].sort((a, b) => a - b).map(yr => (
-            <button key={yr} onClick={() => setSelectedYear(yr)} style={{
-              padding:'4px 14px', borderRadius:6, border:'1px solid',
-              fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
-              borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
-              background:  yr === selectedYear ? '#1c3660' : '#fff',
-              color:        yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{editableYears.includes(yr) && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
-          ))}
+          {[...years].sort((a, b) => a - b).map(yr => {
+            const isEditable = editableYears.includes(yr);
+            const isSelected = yr === selectedYear;
+            return (
+              <button key={yr} onClick={() => setSelectedYear(yr)} style={{
+                padding:'4px 14px', borderRadius:6, border:'1px solid',
+                fontSize:13, cursor:'pointer', fontWeight: isSelected ? 700 : 400,
+                borderColor: isSelected ? '#1c3660' : isEditable ? '#1c3660' : '#D1D5DB',
+                background:  isSelected ? '#1c3660' : isEditable ? '#EFF6FF' : '#fff',
+                color:       isSelected ? '#fff'    : isEditable ? '#1c3660' : '#374151',
+              }}>{yr}{isEditable ? ' ✎' : ''}</button>
+            );
+          })}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
           {isEditable && (
@@ -1300,7 +1308,7 @@ function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
     placeholder="—" style={inputStyle} />;
 }
 
-function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [2024, 2025] }) {
+function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
   const editableYearsKey = editableYears.join(',');
   const [data,         setData]         = useState({});
   const [edits,        setEdits]        = useState({});
@@ -1421,15 +1429,19 @@ function FleetEquipTable({ token, onSave, submittedYears = [], editableYears = [
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Equipment</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
-          {allYearsForTabs.map(yr => (
-            <button key={yr} onClick={() => setSelectedYear(yr)} style={{
-              padding:'4px 14px', borderRadius:6, border:'1px solid',
-              fontSize:13, cursor:'pointer', fontWeight: yr === selectedYear ? 700 : 400,
-              borderColor: yr === selectedYear ? '#1c3660' : '#D1D5DB',
-              background:  yr === selectedYear ? '#1c3660' : '#fff',
-              color:       yr === selectedYear ? '#fff' : '#374151',
-            }}>{yr}{yr >= 2024 && !submittedYears.includes(yr) ? ' ✎' : ''}</button>
-          ))}
+          {allYearsForTabs.map(yr => {
+            const isEditable = editableYears.includes(yr);
+            const isSelected = yr === selectedYear;
+            return (
+              <button key={yr} onClick={() => setSelectedYear(yr)} style={{
+                padding:'4px 14px', borderRadius:6, border:'1px solid',
+                fontSize:13, cursor:'pointer', fontWeight: isSelected ? 700 : 400,
+                borderColor: isSelected ? '#1c3660' : isEditable ? '#1c3660' : '#D1D5DB',
+                background:  isSelected ? '#1c3660' : isEditable ? '#EFF6FF' : '#fff',
+                color:       isSelected ? '#fff'    : isEditable ? '#1c3660' : '#374151',
+              }}>{yr}{isEditable ? ' ✎' : ''}</button>
+            );
+          })}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
           <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
