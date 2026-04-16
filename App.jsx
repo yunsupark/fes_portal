@@ -141,6 +141,349 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
   );
 }
 
+// ─── Interview Mode ───────────────────────────────────────────────────────────
+
+function computeInterviewYears(pct, startYear, ramp, allYears) {
+  if (pct === '' || pct == null) return Object.fromEntries(allYears.map(y => [y, '']));
+  const maxYear = Math.max(...allYears);
+  const numPct = Number(pct);
+  const result = {};
+  for (const yr of allYears) {
+    if (yr < startYear) {
+      result[yr] = '0';
+    } else if (yr >= maxYear) {
+      result[yr] = String(numPct);
+    } else {
+      const n = maxYear - startYear + 1;
+      const p = yr - startYear;
+      let fraction;
+      if (n <= 1) fraction = 1;
+      else if (ramp === 'quick') fraction = Math.pow((p + 1) / n, 0.3);
+      else if (ramp === 'slow')  fraction = Math.pow((p + 1) / n, 2.5);
+      else                        fraction = (p + 1) / n;
+      result[yr] = String(Math.round(numPct * Math.min(fraction, 1)));
+    }
+  }
+  return result;
+}
+
+function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) {
+  const maxYear = Math.max(...effectiveEditableYears);
+  const sortedYears = [...effectiveEditableYears].sort((a, b) => a - b);
+
+  const [step, setStep]               = useState('intro');
+  const [cabType, setCabType]         = useState('Sleeper');
+  const [categories, setCategories]   = useState({});
+  const [groupInputs, setGroupInputs] = useState({});
+  const [groupEdits, setGroupEdits]   = useState({});
+
+  useEffect(() => {
+    if (!token) return;
+    fetch(`/api/techs?cab_type=${encodeURIComponent(cabType)}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    }).then(r => r.json()).then(t => setCategories(t.categories || {})).catch(() => {});
+  }, [cabType, token]);
+
+  const getVisibleTechs = (groupName) =>
+    (categories[groupName] || []).filter(t => {
+      const cabOk = cabType === 'Day Cab'
+        ? (t.applies_daycab == null || t.applies_daycab !== 0)
+        : (t.applies_sleeper == null || t.applies_sleeper !== 0);
+      return cabOk && t.active_to == null;
+    });
+
+  const visibleGroups = Object.keys(categories).filter(g => getVisibleTechs(g).length > 0);
+
+  const computeGroupEditsFromInputs = (groupName, inputs) => {
+    const techs = getVisibleTechs(groupName);
+    const result = Object.fromEntries(sortedYears.map(yr => [yr, {}]));
+    for (const tech of techs) {
+      const inp = (inputs || {})[tech.label] || {};
+      const startYear = Number(inp.startYear) || maxYear;
+      const ramp = inp.ramp || 'steady';
+      const yearVals = computeInterviewYears(inp.pct ?? '', startYear, ramp, sortedYears);
+      for (const yr of sortedYears) result[yr][tech.label] = yearVals[yr];
+    }
+    return result;
+  };
+
+  const currentGroupIdx = typeof step === 'object' ? visibleGroups.indexOf(step.group) : -1;
+  const totalGroups = visibleGroups.length;
+  const progressPct = step === 'done' ? 100
+    : typeof step === 'object'
+      ? Math.round(((currentGroupIdx + (step.phase === 'review' ? 0.5 : 0)) / totalGroups) * 100)
+      : 0;
+
+  const mergeAllGroupEdits = () => {
+    const merged = Object.fromEntries(sortedYears.map(yr => [yr, {}]));
+    for (const g of visibleGroups) {
+      const ge = groupEdits[g] || {};
+      for (const yr of sortedYears) Object.assign(merged[yr], ge[yr] || {});
+    }
+    return merged;
+  };
+
+  const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' };
+  const card    = { background: '#fff', borderRadius: 14, padding: '28px 32px', maxWidth: 780, width: '100%', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 18 };
+  const bPrim   = { background: '#1c3660', color: '#fff', border: 'none', borderRadius: 7, padding: '9px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+  const bGhost  = { background: '#fff', color: '#374151', border: '1px solid #D1D5DB', borderRadius: 7, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
+  const h2style = { fontSize: 19, fontWeight: 700, color: '#1c3660', margin: 0 };
+
+  const ProgressBar = ({ label }) => (
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6B7280', marginBottom: 4 }}>
+        <span>{label}</span><span>{progressPct}%</span>
+      </div>
+      <div style={{ height: 4, background: '#E5E7EB', borderRadius: 2 }}>
+        <div style={{ height: 4, background: '#1c3660', borderRadius: 2, width: `${progressPct}%`, transition: 'width 0.3s' }} />
+      </div>
+    </div>
+  );
+  const CloseBtn = () => (
+    <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9CA3AF', lineHeight: 1, padding: 0 }}>×</button>
+  );
+
+  // ── Intro + cab type ──────────────────────────────────────────────
+  if (step === 'intro') {
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Technology Adoption Interview</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Introduction" />
+          <div style={{ background: '#F0F7FF', borderRadius: 8, padding: '14px 18px', fontSize: 13, color: '#374151', lineHeight: 1.65 }}>
+            <p style={{ margin: '0 0 10px', fontWeight: 700, color: '#1c3660' }}>What does adoption percent mean?</p>
+            <p style={{ margin: '0 0 10px' }}>
+              The percent of trucks or trailers <strong>purchased in the year</strong> that were equipped with the technology.
+              For example, if filling out the technology adoption for sleeper cabs and 100 sleeper tractors were purchased in {maxYear} and 50 were equipped with full side skirts, the adoption percent is <strong>50%</strong> — regardless of how many other tractors already exist in the fleet with full side skirts.
+            </p>
+            <p style={{ margin: 0, color: '#6B7280', fontSize: 12 }}>
+              For <strong>Practices</strong>, the percentage applies to the whole fleet of the cab type.
+            </p>
+          </div>
+          <div>
+            <p style={{ margin: '0 0 12px', fontWeight: 600, color: '#111827', fontSize: 14 }}>
+              Which cab type represents the greatest proportion of your fleet?
+            </p>
+            <div style={{ display: 'flex', gap: 14 }}>
+              {['Sleeper', 'Day Cab'].map(ct => (
+                <button key={ct} onClick={() => setCabType(ct)} style={{
+                  flex: 1, padding: '14px 20px', borderRadius: 10, border: '2px solid',
+                  borderColor: cabType === ct ? '#1c3660' : '#D1D5DB',
+                  background:  cabType === ct ? '#EFF6FF' : '#fff',
+                  color:       cabType === ct ? '#1c3660' : '#374151',
+                  fontSize: 15, fontWeight: cabType === ct ? 700 : 400, cursor: 'pointer',
+                }}>{ct}</button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button onClick={onClose} style={bGhost}>Cancel</button>
+            <button onClick={() => visibleGroups.length > 0 && setStep({ group: visibleGroups[0], phase: 'input' })}
+              style={{ ...bPrim, opacity: visibleGroups.length > 0 ? 1 : 0.5 }}>
+              Start →
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Group input ───────────────────────────────────────────────────
+  if (typeof step === 'object' && step.phase === 'input') {
+    const groupName = step.group;
+    const techs = getVisibleTechs(groupName);
+    const inputs = groupInputs[groupName] || {};
+    const isPractices = groupName === 'Practices';
+
+    const setInput = (techLabel, field, val) =>
+      setGroupInputs(prev => ({
+        ...prev,
+        [groupName]: {
+          ...(prev[groupName] || {}),
+          [techLabel]: { startYear: maxYear, ramp: 'steady', ...(prev[groupName]?.[techLabel] || {}), [field]: val },
+        },
+      }));
+
+    const handleBack = () =>
+      currentGroupIdx === 0
+        ? setStep('intro')
+        : setStep({ group: visibleGroups[currentGroupIdx - 1], phase: 'review' });
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>{groupName}</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label={`Group ${currentGroupIdx + 1} of ${totalGroups}: ${groupName}`} />
+          {isPractices && (
+            <p style={{ margin: 0, fontSize: 12, color: '#92400E', background: '#FFF7ED', borderRadius: 6, padding: '8px 12px' }}>
+              For Practices, the percentage applies to the whole fleet of the cab type — not just newly purchased trucks.
+            </p>
+          )}
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Enter the {isPractices ? 'fleet-wide' : `% of ${cabType.toLowerCase()} trucks purchased in ${maxYear}`} adoption rate for each technology, when you first started, and how quickly adoption ramped up.
+          </p>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: '#F3F4F6' }}>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', color: '#374151', fontWeight: 600, minWidth: 200 }}>Technology</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'center', color: '#374151', fontWeight: 600, minWidth: 85 }}>% in {maxYear}</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'center', color: '#374151', fontWeight: 600, minWidth: 130 }}>Year First Purchased</th>
+                  <th style={{ padding: '8px 12px', textAlign: 'center', color: '#374151', fontWeight: 600, minWidth: 170 }}>Adoption Trend</th>
+                </tr>
+              </thead>
+              <tbody>
+                {techs.map((tech, i) => {
+                  const inp = inputs[tech.label] || {};
+                  const hasPct = inp.pct !== '' && inp.pct != null;
+                  const singleYear = Number(inp.startYear || maxYear) >= maxYear;
+                  return (
+                    <tr key={tech.label} style={{ borderBottom: '1px solid #F3F4F6', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                      <td style={{ padding: '9px 12px', color: '#111827' }} title={tech.desc}>{tech.label}</td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
+                          <input type="number" min="0" max="100" value={inp.pct ?? ''} onChange={e => setInput(tech.label, 'pct', e.target.value)} placeholder="—"
+                            style={{ width: 50, padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, textAlign: 'center' }} />
+                          <span style={{ fontSize: 12, color: '#6B7280' }}>%</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                        <select value={inp.startYear ?? maxYear} onChange={e => setInput(tech.label, 'startYear', e.target.value)} disabled={!hasPct}
+                          style={{ padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, opacity: hasPct ? 1 : 0.35 }}>
+                          {sortedYears.map(y => <option key={y} value={y}>{y}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                        <select value={inp.ramp ?? 'steady'} onChange={e => setInput(tech.label, 'ramp', e.target.value)} disabled={!hasPct || singleYear}
+                          style={{ padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, opacity: (hasPct && !singleYear) ? 1 : 0.35 }}>
+                          <option value="steady">Increasing steadily</option>
+                          <option value="quick">Adopted quickly</option>
+                          <option value="slow">Adopting slowly</option>
+                        </select>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={handleBack} style={bGhost}>← Back</button>
+            <button onClick={() => {
+              const computed = computeGroupEditsFromInputs(groupName, inputs);
+              setGroupEdits(prev => ({ ...prev, [groupName]: computed }));
+              setStep({ group: groupName, phase: 'review' });
+            }} style={bPrim}>Review →</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Group review ──────────────────────────────────────────────────
+  if (typeof step === 'object' && step.phase === 'review') {
+    const groupName = step.group;
+    const techs = getVisibleTechs(groupName);
+    const reviewData = groupEdits[groupName] || {};
+
+    const minStart = techs.reduce((min, tech) => {
+      const inp = groupInputs[groupName]?.[tech.label];
+      if (!inp?.pct && inp?.pct !== 0) return min;
+      return Math.min(min, Number(inp.startYear || maxYear));
+    }, maxYear);
+    const displayYears = sortedYears.filter(y => y >= Math.min(minStart, maxYear - 4));
+
+    const setReviewCell = (yr, techLabel, val) =>
+      setGroupEdits(prev => ({
+        ...prev,
+        [groupName]: { ...(prev[groupName] || {}), [yr]: { ...(prev[groupName]?.[yr] || {}), [techLabel]: val } },
+      }));
+
+    const isLast = currentGroupIdx + 1 >= totalGroups;
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Review: {groupName}</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label={`Group ${currentGroupIdx + 1} of ${totalGroups}: ${groupName}`} />
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Projected adoption percentages based on your inputs. Adjust any values before continuing.
+          </p>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
+              <thead>
+                <tr style={{ background: '#F3F4F6' }}>
+                  <th style={{ padding: '7px 12px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: 200, position: 'sticky', left: 0, background: '#F3F4F6', zIndex: 1 }}>Technology</th>
+                  {displayYears.map(y => (
+                    <th key={y} style={{ padding: '7px 10px', textAlign: 'center', fontWeight: y === maxYear ? 700 : 500, color: y === maxYear ? '#1c3660' : '#6B7280', minWidth: 62 }}>{y}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {techs.map((tech, i) => {
+                  const rowBg = i % 2 === 0 ? '#fff' : '#FAFAFA';
+                  return (
+                    <tr key={tech.label} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                      <td style={{ padding: '6px 12px', color: '#111827', position: 'sticky', left: 0, background: rowBg, zIndex: 1 }} title={tech.desc}>{tech.label}</td>
+                      {displayYears.map(yr => {
+                        const val = (reviewData[yr] || {})[tech.label];
+                        return (
+                          <td key={yr} style={{ padding: '3px 5px', textAlign: 'center', background: yr === maxYear ? '#EFF6FF' : rowBg }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 1 }}>
+                              <input type="number" min="0" max="100" value={val ?? ''} onChange={e => setReviewCell(yr, tech.label, e.target.value)}
+                                style={{ width: 42, padding: '3px 4px', borderRadius: 3, border: '1px solid #D1D5DB', fontSize: 12, textAlign: 'center' }} />
+                              <span style={{ fontSize: 10, color: '#9CA3AF' }}>%</span>
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={() => setStep({ group: groupName, phase: 'input' })} style={bGhost}>← Edit</button>
+            <button onClick={() => isLast ? setStep('done') : setStep({ group: visibleGroups[currentGroupIdx + 1], phase: 'input' })} style={bPrim}>
+              {isLast ? 'Finish →' : 'Save & Continue →'}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Done ──────────────────────────────────────────────────────────
+  return (
+    <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={card}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <h2 style={h2style}>Interview Complete</h2>
+          <CloseBtn />
+        </div>
+        <ProgressBar label="Complete" />
+        <p style={{ margin: 0, fontSize: 14, color: '#374151' }}>
+          Technology adoption data for <strong>{cabType}</strong> has been filled in across all groups.
+          Click <strong>Apply to Table</strong> to load it into the adoption table for review before saving.
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button onClick={onClose} style={bGhost}>Cancel</button>
+          <button onClick={() => onComplete(cabType, mergeAllGroupEdits())} style={bPrim}>Apply to Table</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 
 function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
@@ -156,6 +499,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
   const [copySource, setCopySource]     = useState({});
+  const [showInterview, setShowInterview] = useState(false);
 
   const maxEditableYear = Math.max(...editableYears, 2025);
   const hasDataForCabType = Object.keys(techData).length > 0;
@@ -320,6 +664,9 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
             <option value='Sleeper'>Sleeper</option>
           </select>
           {saveMsg && <span style={{fontSize:13, color: saveMsg === 'Saved!' ? '#16A34A' : '#DC2626'}}>{saveMsg}</span>}
+          <button onClick={() => setShowInterview(true)} style={{...styles.btnGhost, fontSize:13}}>
+            Interview Mode
+          </button>
           <button
             onClick={handleSave}
             disabled={saving}
@@ -328,6 +675,25 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
           </button>
         </div>
       </div>
+
+      {showInterview && (
+        <InterviewModal
+          token={token}
+          effectiveEditableYears={effectiveEditableYears}
+          onComplete={(interviewCabType, newEdits) => {
+            setEdits(prev => {
+              const merged = { ...prev };
+              for (const [yr, techVals] of Object.entries(newEdits)) {
+                merged[Number(yr)] = { ...(merged[Number(yr)] || {}), ...techVals };
+              }
+              return merged;
+            });
+            handleCabTypeChange(interviewCabType);
+            setShowInterview(false);
+          }}
+          onClose={() => setShowInterview(false)}
+        />
+      )}
 
       <div ref={scrollRef} style={{overflowX:'auto'}}>
         <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + effectiveEditableYears.length * 150}}>
