@@ -325,9 +325,12 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       [fleet_id, years]
     );
     const [techRows] = await db.query(
-      `SELECT adoption_year AS yr, cab_type, COUNT(DISTINCT tech_id) AS cnt FROM ffs_adoption
-       WHERE fleet_id = ? AND adoption_year IN (?) AND cab_type IS NOT NULL
-       GROUP BY adoption_year, cab_type`,
+      `SELECT a.adoption_year AS yr, a.cab_type, COUNT(DISTINCT a.tech_id) AS cnt
+       FROM ffs_adoption a
+       JOIN ffs_tech t ON a.tech_id = t.tech_id
+       WHERE a.fleet_id = ? AND a.adoption_year IN (?) AND a.cab_type IS NOT NULL
+         AND t.active_to IS NULL
+       GROUP BY a.adoption_year, a.cab_type`,
       [fleet_id, years]
     );
 
@@ -347,14 +350,16 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       const [[sleeperRow]] = await db.query(
         `SELECT COUNT(*) AS cnt FROM ffs_tech
          WHERE (applies_sleeper = 1 OR applies_sleeper IS NULL)
-           AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
-        [yr, yr]
+           AND (active_from IS NULL OR active_from <= ?)
+           AND active_to IS NULL`,
+        [yr]
       );
       const [[dayCabRow]] = await db.query(
         `SELECT COUNT(*) AS cnt FROM ffs_tech
          WHERE (applies_daycab = 1 OR applies_daycab IS NULL)
-           AND (active_from IS NULL OR active_from <= ?) AND (active_to IS NULL OR active_to >= ?)`,
-        [yr, yr]
+           AND (active_from IS NULL OR active_from <= ?)
+           AND active_to IS NULL`,
+        [yr]
       );
       techTotals[yr] = { 'Sleeper': Number(sleeperRow.cnt), 'Day Cab': Number(dayCabRow.cnt) };
     }
