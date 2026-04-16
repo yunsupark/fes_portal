@@ -325,7 +325,7 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       [fleet_id, years]
     );
     const [techRows] = await db.query(
-      `SELECT adoption_year AS yr, cab_type, COUNT(*) AS cnt FROM ffs_adoption
+      `SELECT adoption_year AS yr, cab_type, COUNT(DISTINCT tech_id) AS cnt FROM ffs_adoption
        WHERE fleet_id = ? AND adoption_year IN (?) AND cab_type IS NOT NULL
        GROUP BY adoption_year, cab_type`,
       [fleet_id, years]
