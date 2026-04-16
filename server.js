@@ -330,6 +330,11 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
        JOIN ffs_tech t ON a.tech_id = t.tech_id
        WHERE a.fleet_id = ? AND a.adoption_year IN (?) AND a.cab_type IS NOT NULL
          AND t.active_to IS NULL
+         AND (
+           (a.cab_type = 'Sleeper'  AND (t.applies_sleeper = 1 OR t.applies_sleeper IS NULL))
+           OR
+           (a.cab_type = 'Day Cab' AND (t.applies_daycab  = 1 OR t.applies_daycab  IS NULL))
+         )
        GROUP BY a.adoption_year, a.cab_type`,
       [fleet_id, years]
     );
