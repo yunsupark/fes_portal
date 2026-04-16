@@ -167,15 +167,18 @@ function computeInterviewYears(pct, startYear, ramp, allYears) {
   return result;
 }
 
-function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) {
+function InterviewModal({ token, effectiveEditableYears, savedProgress, onComplete, onSaveAndExit, onClose }) {
   const maxYear = Math.max(...effectiveEditableYears);
   const sortedYears = [...effectiveEditableYears].sort((a, b) => a - b);
 
-  const [step, setStep]               = useState('intro');
-  const [cabType, setCabType]         = useState('Sleeper');
+  const hasResumable = savedProgress && savedProgress.step !== 'intro';
+  const [step, setStep]               = useState(hasResumable ? 'resume-prompt' : 'intro');
+  const [cabType, setCabType]         = useState(savedProgress?.cabType || 'Sleeper');
   const [categories, setCategories]   = useState({});
-  const [groupInputs, setGroupInputs] = useState({});
-  const [groupEdits, setGroupEdits]   = useState({});
+  const [groupInputs, setGroupInputs] = useState(savedProgress?.groupInputs || {});
+  const [groupEdits, setGroupEdits]   = useState(savedProgress?.groupEdits || {});
+  const [confirmExit, setConfirmExit] = useState(null); // null | 'ask' | 'sure'
+  const pctRefs = useRef([]);
 
   useEffect(() => {
     if (!token) return;
@@ -214,20 +217,37 @@ function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) 
       ? Math.round(((currentGroupIdx + (step.phase === 'review' ? 0.5 : 0)) / totalGroups) * 100)
       : 0;
 
-  const mergeAllGroupEdits = () => {
+  const mergeGroupEdits = (editsMap) => {
     const merged = Object.fromEntries(sortedYears.map(yr => [yr, {}]));
     for (const g of visibleGroups) {
-      const ge = groupEdits[g] || {};
+      const ge = editsMap[g] || {};
       for (const yr of sortedYears) Object.assign(merged[yr], ge[yr] || {});
     }
     return merged;
   };
 
-  const overlay = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' };
-  const card    = { background: '#fff', borderRadius: 14, padding: '28px 32px', maxWidth: 780, width: '100%', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 18 };
-  const bPrim   = { background: '#1c3660', color: '#fff', border: 'none', borderRadius: 7, padding: '9px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
-  const bGhost  = { background: '#fff', color: '#374151', border: '1px solid #D1D5DB', borderRadius: 7, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
-  const h2style = { fontSize: 19, fontWeight: 700, color: '#1c3660', margin: 0 };
+  // Whether there's any meaningful progress to save (past intro)
+  const hasProgress = typeof step === 'object' || step === 'done';
+
+  const handleCloseRequest = () => {
+    if (!hasProgress || step === 'intro' || step === 'resume-prompt') {
+      onClose();
+    } else {
+      setConfirmExit('ask');
+    }
+  };
+
+  const handleSaveAndExit = () => {
+    const progressState = { step, cabType, groupInputs, groupEdits };
+    onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState);
+  };
+
+  const overlay  = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' };
+  const card     = { background: '#fff', borderRadius: 14, padding: '28px 32px', maxWidth: 780, width: '100%', maxHeight: '88vh', overflowY: 'auto', boxShadow: '0 24px 80px rgba(0,0,0,0.3)', display: 'flex', flexDirection: 'column', gap: 18 };
+  const bPrim    = { background: '#1c3660', color: '#fff', border: 'none', borderRadius: 7, padding: '9px 22px', fontSize: 14, fontWeight: 600, cursor: 'pointer' };
+  const bGhost   = { background: '#fff', color: '#374151', border: '1px solid #D1D5DB', borderRadius: 7, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
+  const bDanger  = { background: '#fff', color: '#DC2626', border: '1px solid #FECACA', borderRadius: 7, padding: '9px 18px', fontSize: 14, cursor: 'pointer' };
+  const h2style  = { fontSize: 19, fontWeight: 700, color: '#1c3660', margin: 0 };
 
   const ProgressBar = ({ label }) => (
     <div>
@@ -239,9 +259,81 @@ function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) 
       </div>
     </div>
   );
+
   const CloseBtn = () => (
-    <button onClick={onClose} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9CA3AF', lineHeight: 1, padding: 0 }}>×</button>
+    <button onClick={handleCloseRequest} style={{ background: 'none', border: 'none', fontSize: 22, cursor: 'pointer', color: '#9CA3AF', lineHeight: 1, padding: 0 }}>×</button>
   );
+
+  // ── Exit confirmation overlay ────────────────────────────────────
+  const ExitConfirm = () => {
+    if (!confirmExit) return null;
+    return (
+      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', zIndex: 210, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 20 }}>
+        <div style={{ background: '#fff', borderRadius: 12, padding: '28px 32px', maxWidth: 400, width: '100%', boxShadow: '0 16px 48px rgba(0,0,0,0.25)', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {confirmExit === 'ask' ? (
+            <>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#111827' }}>Save your progress?</h3>
+              <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+                Your answers so far will be filled into the adoption table. You can resume the interview later to complete the remaining groups.
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                <button onClick={handleSaveAndExit} style={bPrim}>Save progress & exit</button>
+                <button onClick={() => setConfirmExit('sure')} style={bDanger}>Exit without saving</button>
+                <button onClick={() => setConfirmExit(null)} style={bGhost}>Cancel</button>
+              </div>
+            </>
+          ) : (
+            <>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#111827' }}>Are you sure?</h3>
+              <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+                All interview progress will be lost and the adoption table will not be updated.
+              </p>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                <button onClick={() => setConfirmExit(null)} style={bGhost}>Cancel</button>
+                <button onClick={onClose} style={bDanger}>Yes, discard</button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ── Resume prompt ────────────────────────────────────────────────
+  if (step === 'resume-prompt') {
+    const savedStep = savedProgress.step;
+    const groupLabel = typeof savedStep === 'object'
+      ? `${savedStep.group} (${savedStep.phase === 'review' ? 'reviewing' : 'entering data'})`
+      : savedStep === 'done' ? 'final review' : '';
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Technology Adoption Interview</h2>
+            <CloseBtn />
+          </div>
+          <div style={{ background: '#F0F7FF', borderRadius: 8, padding: '16px 18px', fontSize: 13, color: '#374151' }}>
+            <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#1c3660' }}>You have a saved interview in progress.</p>
+            {groupLabel && <p style={{ margin: 0, color: '#6B7280' }}>Last position: <strong>{groupLabel}</strong> · Cab type: <strong>{savedProgress.cabType}</strong></p>}
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button onClick={() => {
+              setStep(savedProgress.step);
+              setCabType(savedProgress.cabType);
+              setGroupInputs(savedProgress.groupInputs);
+              setGroupEdits(savedProgress.groupEdits);
+            }} style={{ ...bPrim, flex: 1 }}>Pick up where I left off</button>
+            <button onClick={() => {
+              setStep('intro');
+              setCabType('Sleeper');
+              setGroupInputs({});
+              setGroupEdits({});
+            }} style={{ ...bGhost, flex: 1 }}>Start over</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── Intro + cab type ──────────────────────────────────────────────
   if (step === 'intro') {
@@ -313,7 +405,8 @@ function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) 
         : setStep({ group: visibleGroups[currentGroupIdx - 1], phase: 'review' });
 
     return (
-      <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <h2 style={h2style}>{groupName}</h2>
@@ -341,27 +434,41 @@ function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) 
               <tbody>
                 {techs.map((tech, i) => {
                   const inp = inputs[tech.label] || {};
+                  const isZero = inp.pct === '0';
                   const hasPct = inp.pct !== '' && inp.pct != null;
                   const singleYear = Number(inp.startYear || maxYear) >= maxYear;
+                  const yearRampDisabled = !hasPct || isZero;
                   return (
                     <tr key={tech.label} style={{ borderBottom: '1px solid #F3F4F6', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
                       <td style={{ padding: '9px 12px', color: '#111827' }} title={tech.desc}>{tech.label}</td>
                       <td style={{ padding: '5px 8px', textAlign: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 2 }}>
-                          <input type="number" min="0" max="100" value={inp.pct ?? ''} onChange={e => setInput(tech.label, 'pct', e.target.value)} placeholder="—"
-                            style={{ width: 50, padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, textAlign: 'center' }} />
+                          <input
+                            ref={el => pctRefs.current[i] = el}
+                            type="number" min="0" max="100"
+                            value={inp.pct ?? ''}
+                            onChange={e => {
+                              const val = e.target.value;
+                              setInput(tech.label, 'pct', val);
+                              if (val === '0' && i + 1 < techs.length) {
+                                setTimeout(() => pctRefs.current[i + 1]?.focus(), 0);
+                              }
+                            }}
+                            placeholder="—"
+                            style={{ width: 50, padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, textAlign: 'center' }}
+                          />
                           <span style={{ fontSize: 12, color: '#6B7280' }}>%</span>
                         </div>
                       </td>
                       <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                        <select value={inp.startYear ?? maxYear} onChange={e => setInput(tech.label, 'startYear', e.target.value)} disabled={!hasPct}
-                          style={{ padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, opacity: hasPct ? 1 : 0.35 }}>
+                        <select value={inp.startYear ?? maxYear} onChange={e => setInput(tech.label, 'startYear', e.target.value)} disabled={yearRampDisabled}
+                          style={{ padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, opacity: yearRampDisabled ? 0.25 : 1 }}>
                           {sortedYears.map(y => <option key={y} value={y}>{y}</option>)}
                         </select>
                       </td>
                       <td style={{ padding: '5px 8px', textAlign: 'center' }}>
-                        <select value={inp.ramp ?? 'steady'} onChange={e => setInput(tech.label, 'ramp', e.target.value)} disabled={!hasPct || singleYear}
-                          style={{ padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, opacity: (hasPct && !singleYear) ? 1 : 0.35 }}>
+                        <select value={inp.ramp ?? 'steady'} onChange={e => setInput(tech.label, 'ramp', e.target.value)} disabled={yearRampDisabled || singleYear}
+                          style={{ padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 13, opacity: (yearRampDisabled || singleYear) ? 0.25 : 1 }}>
                           <option value="steady">Increasing steadily</option>
                           <option value="quick">Adopted quickly</option>
                           <option value="slow">Adopting slowly</option>
@@ -408,7 +515,8 @@ function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) 
     const isLast = currentGroupIdx + 1 >= totalGroups;
 
     return (
-      <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <h2 style={h2style}>Review: {groupName}</h2>
@@ -465,7 +573,8 @@ function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) 
 
   // ── Done ──────────────────────────────────────────────────────────
   return (
-    <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+    <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+      <ExitConfirm />
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <h2 style={h2style}>Interview Complete</h2>
@@ -477,8 +586,8 @@ function InterviewModal({ token, effectiveEditableYears, onComplete, onClose }) 
           Click <strong>Apply to Table</strong> to load it into the adoption table for review before saving.
         </p>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button onClick={onClose} style={bGhost}>Cancel</button>
-          <button onClick={() => onComplete(cabType, mergeAllGroupEdits())} style={bPrim}>Apply to Table</button>
+          <button onClick={handleCloseRequest} style={bGhost}>Cancel</button>
+          <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits))} style={bPrim}>Apply to Table</button>
         </div>
       </div>
     </div>
@@ -499,7 +608,8 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
   const [copySource, setCopySource]     = useState({});
-  const [showInterview, setShowInterview] = useState(false);
+  const [showInterview, setShowInterview]     = useState(false);
+  const [interviewProgress, setInterviewProgress] = useState(null);
 
   const maxEditableYear = Math.max(...editableYears, 2025);
   const hasDataForCabType = Object.keys(techData).length > 0;
@@ -680,6 +790,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
         <InterviewModal
           token={token}
           effectiveEditableYears={effectiveEditableYears}
+          savedProgress={interviewProgress}
           onComplete={(interviewCabType, newEdits) => {
             setEdits(prev => {
               const merged = { ...prev };
@@ -688,6 +799,19 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
               }
               return merged;
             });
+            setInterviewProgress(null);
+            handleCabTypeChange(interviewCabType);
+            setShowInterview(false);
+          }}
+          onSaveAndExit={(interviewCabType, partialEdits, progressState) => {
+            setEdits(prev => {
+              const merged = { ...prev };
+              for (const [yr, techVals] of Object.entries(partialEdits)) {
+                merged[Number(yr)] = { ...(merged[Number(yr)] || {}), ...techVals };
+              }
+              return merged;
+            });
+            setInterviewProgress(progressState);
             handleCabTypeChange(interviewCabType);
             setShowInterview(false);
           }}
