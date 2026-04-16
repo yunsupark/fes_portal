@@ -413,16 +413,17 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], isNewFl
             {Object.entries(categories).flatMap(([cat, techs_]) => {
               const isOpen = openCats[cat] !== false;
               const visibleTechs = techs_.filter(t => {
-                // null/undefined means "applies to both" (legacy rows before columns existed)
+                // Must apply to the selected cab type (null means applies to both)
                 const cabOk = selectedCabType === 'Day Cab'
                   ? (t.applies_daycab == null ? true : t.applies_daycab !== 0)
                   : (t.applies_sleeper == null ? true : t.applies_sleeper !== 0);
                 if (!cabOk) return false;
-                const hasData = Object.values(techData).some(yd => yd[t.label] != null);
-                const activeInEditableYear = editableYears.some(y =>
-                  (t.active_from == null || t.active_from <= y) && (t.active_to == null || t.active_to >= y)
+                // Only show active techs (no active_to date)
+                if (t.active_to != null) return false;
+                // Show if active in at least one editable year
+                return editableYears.some(y =>
+                  t.active_from == null || t.active_from <= y
                 );
-                return hasData || activeInEditableYear;
               });
               const rows = [];
               rows.push(
