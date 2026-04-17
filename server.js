@@ -94,6 +94,13 @@ const db = mysql.createPool({
       await db.query(`ALTER TABLE ffs_contact ADD COLUMN portal_access TINYINT(1) NOT NULL DEFAULT 0`);
       console.log("Added portal_access column to ffs_contact");
     }
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ffs_interview_progress (
+        fleet_id     INT NOT NULL PRIMARY KEY,
+        progress_json MEDIUMTEXT,
+        updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -824,6 +831,46 @@ app.get("/api/fuel/benchmarks", requireAuth, async (req, res) => {
       result[r.fuel_type] = { avg_mpg: parseFloat(r.avg_mpg), fleet_count: Number(r.fleet_count) };
     }
     res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+/**
+ * GET /api/interview/progress — load saved interview progress for this fleet
+ */
+app.get("/api/interview/progress", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [[row]] = await db.query(
+      `SELECT progress_json FROM ffs_interview_progress WHERE fleet_id = ?`, [fleet_id]
+    );
+    if (!row || !row.progress_json) return res.json({ progress: null });
+    res.json({ progress: JSON.parse(row.progress_json) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
+/**
+ * PUT /api/interview/progress — save (upsert) interview progress for this fleet
+ */
+app.put("/api/interview/progress", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  const { progress } = req.body;
+  try {
+    if (progress === null) {
+      await db.query(`DELETE FROM ffs_interview_progress WHERE fleet_id = ?`, [fleet_id]);
+    } else {
+      await db.query(
+        `INSERT INTO ffs_interview_progress (fleet_id, progress_json) VALUES (?, ?)
+         ON DUPLICATE KEY UPDATE progress_json = VALUES(progress_json)`,
+        [fleet_id, JSON.stringify(progress)]
+      );
+    }
+    res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Database error' });

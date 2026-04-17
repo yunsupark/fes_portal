@@ -187,6 +187,8 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   const [groupInputs, setGroupInputs] = useState(savedProgress?.groupInputs || {});
   const [groupEdits, setGroupEdits]   = useState(savedProgress?.groupEdits || {});
   const [confirmExit, setConfirmExit] = useState(null);
+  const [autoZero, setAutoZero]       = useState(savedProgress?.autoZero ?? false);
+  const [reviewZeroAsked, setReviewZeroAsked] = useState(savedProgress?.reviewZeroAsked || {});
   const [fuelBenchmarks, setFuelBenchmarks] = useState({});
   const pctRefs = useRef([]);
 
@@ -262,7 +264,8 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   };
 
   // Whether there's any meaningful progress to save (past intro)
-  const hasProgress = typeof step === 'object' || step === 'done';
+  const hasProgress = typeof step === 'object' || step === 'done' ||
+    step === 'fuel-setup' || step === 'fuel-entry' || step === 'fuel-done';
 
   const handleCloseRequest = () => {
     if (!hasProgress || step === 'intro' || step === 'resume-prompt') {
@@ -273,9 +276,39 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   };
 
   const handleSaveAndExit = () => {
-    const progressState = { step, cabType, groupInputs, groupEdits };
+    const progressState = { step, cabType, groupInputs, groupEdits, autoZero, reviewZeroAsked };
     const fuelRows = buildFuelRowsFromEdits(groupEdits, groupInputs);
     onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState, fuelRows);
+  };
+
+  // Returns a copy of groupInputs for `groupName` with blanks zeroed
+  const applyZeroToGroup = (groupName, inputs) => {
+    const techs = getVisibleTechs(groupName);
+    const existing = inputs[groupName] || {};
+    const updated = { ...existing };
+    for (const tech of techs) {
+      const inp = existing[tech.label];
+      if (!inp || inp.pct === '' || inp.pct == null) {
+        updated[tech.label] = { startYear: maxYear, ramp: 'steady', ...(existing[tech.label] || {}), pct: '0' };
+      }
+    }
+    return { ...inputs, [groupName]: updated };
+  };
+
+  // Fill zeros into computed groupEdits for all-blank tech values
+  const applyZeroToGroupEdits = (groupName, inputs, editsMap) => {
+    const techs = getVisibleTechs(groupName);
+    const ge = { ...(editsMap[groupName] || {}) };
+    for (const yr of sortedYears) {
+      ge[yr] = { ...(ge[yr] || {}) };
+      for (const tech of techs) {
+        const inp = (inputs[groupName] || {})[tech.label];
+        if (!inp || inp.pct === '' || inp.pct == null) {
+          if (ge[yr][tech.label] === '' || ge[yr][tech.label] == null) ge[yr][tech.label] = '0';
+        }
+      }
+    }
+    return { ...editsMap, [groupName]: ge };
   };
 
   const overlay  = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' };
@@ -377,7 +410,10 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
       <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <h2 style={h2style}>Technology Adoption Interview</h2>
+            <div>
+              <h2 style={h2style}>Fleet Fuel Study New Fleet Interview</h2>
+              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>We will start with the technology adoption section.</p>
+            </div>
             <CloseBtn />
           </div>
           <ProgressBar label="Introduction" />
@@ -407,6 +443,20 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
               ))}
             </div>
           </div>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 10, cursor: 'pointer', padding: '10px 14px', borderRadius: 8, border: '1px solid #E5E7EB', background: autoZero ? '#F0FDF4' : '#FAFAFA' }}>
+            <input
+              type="checkbox"
+              checked={autoZero}
+              onChange={e => setAutoZero(e.target.checked)}
+              style={{ marginTop: 2, accentColor: '#1c3660', width: 16, height: 16, flexShrink: 0 }}
+            />
+            <div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>Auto-fill 0% for skipped technologies</span>
+              <p style={{ margin: '3px 0 0', fontSize: 12, color: '#6B7280', lineHeight: 1.5 }}>
+                When checked, any technology you skip will automatically be recorded as 0% adoption. Leave unchecked if you prefer to decide at review time.
+              </p>
+            </div>
+          </label>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <button onClick={onClose} style={bGhost}>Cancel</button>
             <button onClick={() => {
@@ -579,7 +629,9 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={handleBack} style={bGhost}>← Back</button>
             <button onClick={() => {
-              const computed = computeGroupEditsFromInputs(groupName, inputs);
+              const allInputs = autoZero ? applyZeroToGroup(groupName, groupInputs) : groupInputs;
+              if (autoZero) setGroupInputs(allInputs);
+              const computed = computeGroupEditsFromInputs(groupName, allInputs[groupName] || {});
               setGroupEdits(prev => ({ ...prev, [groupName]: computed }));
               setStep({ group: groupName, phase: 'review' });
             }} style={bPrim}>Review →</button>
@@ -610,6 +662,23 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
 
     const isLast = currentGroupIdx + 1 >= totalGroups;
 
+    // Determine if there are skipped techs (no pct entered) for this group
+    const skippedTechs = !autoZero ? techs.filter(tech => {
+      const inp = groupInputs[groupName]?.[tech.label];
+      return !inp || inp.pct === '' || inp.pct == null;
+    }) : [];
+    const showZeroPrompt = !autoZero && skippedTechs.length > 0 && !(groupName in reviewZeroAsked);
+
+    const handleAdvance = () => {
+      // If prompt was shown and user hasn't answered yet, treat as "no" (don't zero)
+      // but we still record it as declined so we don't keep asking
+      if (showZeroPrompt) {
+        setReviewZeroAsked(prev => ({ ...prev, [groupName]: false }));
+      }
+      if (isLast) setStep('done');
+      else setStep({ group: visibleGroups[currentGroupIdx + 1], phase: 'input' });
+    };
+
     return (
       <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
         <ExitConfirm />
@@ -622,6 +691,30 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
             Projected adoption percentages based on your inputs. Adjust any values before continuing.
           </p>
+          {showZeroPrompt && (
+            <div style={{ background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 8, padding: '12px 16px', fontSize: 13 }}>
+              <p style={{ margin: '0 0 8px', fontWeight: 600, color: '#92400E' }}>
+                {skippedTechs.length} technology{skippedTechs.length !== 1 ? ' values were' : ' value was'} skipped in this group.
+                Would you like to record them as <strong>0%</strong> adoption?
+              </p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => {
+                  const zeroed = applyZeroToGroup(groupName, groupInputs);
+                  setGroupInputs(zeroed);
+                  const computed = computeGroupEditsFromInputs(groupName, zeroed[groupName] || {});
+                  setGroupEdits(prev => ({ ...prev, [groupName]: computed }));
+                  setReviewZeroAsked(prev => ({ ...prev, [groupName]: true }));
+                }} style={{ ...bPrim, padding: '6px 14px', fontSize: 12 }}>Yes, fill 0%</button>
+                <button onClick={() => setReviewZeroAsked(prev => ({ ...prev, [groupName]: false }))}
+                  style={{ ...bGhost, padding: '6px 14px', fontSize: 12 }}>No, leave blank</button>
+              </div>
+            </div>
+          )}
+          {!autoZero && !showZeroPrompt && (groupName in reviewZeroAsked) && reviewZeroAsked[groupName] === false && skippedTechs.length > 0 && (
+            <p style={{ margin: 0, fontSize: 12, color: '#6B7280', fontStyle: 'italic' }}>
+              Skipped technologies will be recorded as 0% when the interview is submitted.
+            </p>
+          )}
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', fontSize: 12 }}>
               <thead>
@@ -658,7 +751,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={() => setStep({ group: groupName, phase: 'input' })} style={bGhost}>← Edit</button>
-            <button onClick={() => isLast ? setStep('done') : setStep({ group: visibleGroups[currentGroupIdx + 1], phase: 'input' })} style={bPrim}>
+            <button onClick={handleAdvance} style={bPrim}>
               {isLast ? 'Finish →' : 'Save & Continue →'}
             </button>
           </div>
@@ -894,7 +987,22 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={() => setStep('fuel-entry')} style={bGhost}>← Back</button>
-            <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits), groupInputs, buildFuelRows())} style={bPrim}>Apply to Table</button>
+            <button onClick={() => {
+              // Apply 0% for any skipped tech in groups where user didn't explicitly decline
+              let finalInputs = groupInputs;
+              let finalEdits = groupEdits;
+              for (const grp of visibleGroups) {
+                // declined means reviewZeroAsked[grp] === false (user clicked "No, leave blank")
+                // autoZero=true groups were already zeroed at review→input transition
+                // If autoZero is false and user either accepted or never answered: zero them now
+                const declined = !autoZero && reviewZeroAsked[grp] === false;
+                if (!declined) {
+                  finalInputs = applyZeroToGroup(grp, finalInputs);
+                  finalEdits  = applyZeroToGroupEdits(grp, finalInputs, finalEdits);
+                }
+              }
+              onComplete(cabType, mergeGroupEdits(finalEdits), finalInputs, buildFuelRows());
+            }} style={bPrim}>Apply to Table</button>
           </div>
         </div>
       </div>
@@ -915,7 +1023,18 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           All technology groups are done. Next, we'll collect your IFTA fuel data so we can calculate fleet MPG.
         </p>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits), groupInputs, [])} style={bGhost}>Skip fuel, apply tech only</button>
+          <button onClick={() => {
+              let finalInputs = groupInputs;
+              let finalEdits  = groupEdits;
+              for (const grp of visibleGroups) {
+                const declined = !autoZero && reviewZeroAsked[grp] === false;
+                if (!declined) {
+                  finalInputs = applyZeroToGroup(grp, finalInputs);
+                  finalEdits  = applyZeroToGroupEdits(grp, finalInputs, finalEdits);
+                }
+              }
+              onComplete(cabType, mergeGroupEdits(finalEdits), finalInputs, []);
+            }} style={bGhost}>Skip fuel, apply tech only</button>
           <button onClick={() => setStep('fuel-setup')} style={bPrim}>Continue to Fuel →</button>
         </div>
       </div>
@@ -937,9 +1056,6 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
   const [copySource, setCopySource]     = useState({});
-  const [showInterview, setShowInterview]         = useState(false);
-  const [interviewProgress, setInterviewProgress] = useState(null);
-  const [interviewInputsByCAB, setInterviewInputsByCAB] = useState({});
 
   const maxEditableYear = Math.max(...editableYears, 2025);
   const hasDataForCabType = Object.keys(techData).length > 0;
@@ -1106,9 +1222,6 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
             <option value='Sleeper'>Sleeper</option>
           </select>
           {saveMsg && <span style={{fontSize:13, color: saveMsg === 'Saved!' ? '#16A34A' : '#DC2626'}}>{saveMsg}</span>}
-          <button onClick={() => setShowInterview(true)} style={{...styles.btnGhost, fontSize:13}}>
-            Interview Mode
-          </button>
           <button
             onClick={handleSave}
             disabled={saving}
@@ -1117,67 +1230,6 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
           </button>
         </div>
       </div>
-
-      {showInterview && (
-        <InterviewModal
-          token={token}
-          effectiveEditableYears={effectiveEditableYears}
-          savedProgress={interviewProgress}
-          interviewInputsByCAB={interviewInputsByCAB}
-          onComplete={async (interviewCabType, newEdits, rawGroupInputs, fuelRows) => {
-            setEdits(prev => {
-              const cabEdits = { ...(prev[interviewCabType] || {}) };
-              for (const [yr, techVals] of Object.entries(newEdits)) {
-                cabEdits[Number(yr)] = { ...(cabEdits[Number(yr)] || {}), ...techVals };
-              }
-              return { ...prev, [interviewCabType]: cabEdits };
-            });
-            setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: rawGroupInputs }));
-            setInterviewProgress(null);
-            // Save fuel rows by year
-            if (fuelRows && fuelRows.length > 0) {
-              const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-              const byYear = {};
-              for (const r of fuelRows) {
-                if (!byYear[r.year]) byYear[r.year] = [];
-                byYear[r.year].push(r);
-              }
-              await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
-                fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
-              ));
-              onSave?.();
-            }
-            handleCabTypeChange(interviewCabType);
-            setShowInterview(false);
-          }}
-          onSaveAndExit={async (interviewCabType, partialEdits, progressState, fuelRows) => {
-            setEdits(prev => {
-              const cabEdits = { ...(prev[interviewCabType] || {}) };
-              for (const [yr, techVals] of Object.entries(partialEdits)) {
-                cabEdits[Number(yr)] = { ...(cabEdits[Number(yr)] || {}), ...techVals };
-              }
-              return { ...prev, [interviewCabType]: cabEdits };
-            });
-            setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: progressState.groupInputs }));
-            setInterviewProgress(progressState);
-            if (fuelRows && fuelRows.length > 0) {
-              const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
-              const byYear = {};
-              for (const r of fuelRows) {
-                if (!byYear[r.year]) byYear[r.year] = [];
-                byYear[r.year].push(r);
-              }
-              await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
-                fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
-              ));
-              onSave?.();
-            }
-            handleCabTypeChange(interviewCabType);
-            setShowInterview(false);
-          }}
-          onClose={() => setShowInterview(false)}
-        />
-      )}
 
       <div ref={scrollRef} style={{overflowX:'auto'}}>
         <table style={{...styles.heatTable, minWidth: readOnlyYears.length * 72 + 260 + effectiveEditableYears.length * 150}}>
@@ -3510,6 +3562,10 @@ export default function App() {
   const [submittedYears, setSubmittedYears] = useState([]);
   const [editableYears,  setEditableYears]  = useState([2024, 2025]);
   const [isNewFleet,     setIsNewFleet]     = useState(false);
+  const [showInterview,  setShowInterview]  = useState(false);
+  const [interviewProgress, setInterviewProgress] = useState(null);
+  const [interviewProgressLoaded, setInterviewProgressLoaded] = useState(false);
+  const [interviewInputsByCAB, setInterviewInputsByCAB] = useState({});
 
   useEffect(() => {
     if (!token) return;
@@ -3524,6 +3580,27 @@ export default function App() {
       })
       .catch(console.error);
   }, [token, saveCount]);
+
+  // Load interview progress from server (shared across all fleet users)
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/interview/progress', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : {})
+      .then(d => {
+        if (d.progress) setInterviewProgress(d.progress);
+        setInterviewProgressLoaded(true);
+      })
+      .catch(() => setInterviewProgressLoaded(true));
+  }, [token]);
+
+  const saveInterviewProgress = (progress) => {
+    if (!token) return;
+    fetch('/api/interview/progress', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ progress }),
+    }).catch(console.error);
+  };
 
   const onSubmit = async (yr) => {
     try {
@@ -3649,15 +3726,102 @@ export default function App() {
             </div>
         </header>
 
-        {/* Charts row */}
-        <div style={styles.chartsRow}>
-          <div style={{flex:"1 1 400px", minWidth:0}}>
-            <MpgChart chartData={chartData} fleetName={fleetState?.name} />
+        {/* Interview modal rendered at top level */}
+        {showInterview && (
+          <InterviewModal
+            token={token}
+            effectiveEditableYears={editableYears}
+            savedProgress={interviewProgress}
+            interviewInputsByCAB={interviewInputsByCAB}
+            onComplete={async (interviewCabType, newTechEdits, rawGroupInputs, fuelRows) => {
+              setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: rawGroupInputs }));
+              // Save fuel rows to DB
+              if (fuelRows && fuelRows.length > 0) {
+                const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+                const byYear = {};
+                for (const r of fuelRows) { if (!byYear[r.year]) byYear[r.year] = []; byYear[r.year].push(r); }
+                await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
+                  fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
+                ));
+              }
+              // Clear server-side progress
+              saveInterviewProgress(null);
+              setInterviewProgress(null);
+              setShowInterview(false);
+              notifySave();
+            }}
+            onSaveAndExit={async (interviewCabType, _partialEdits, progressState, fuelRows) => {
+              setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: progressState.groupInputs }));
+              if (fuelRows && fuelRows.length > 0) {
+                const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+                const byYear = {};
+                for (const r of fuelRows) { if (!byYear[r.year]) byYear[r.year] = []; byYear[r.year].push(r); }
+                await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
+                  fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
+                ));
+              }
+              saveInterviewProgress(progressState);
+              setInterviewProgress(progressState);
+              setShowInterview(false);
+              notifySave();
+            }}
+            onClose={() => setShowInterview(false)}
+          />
+        )}
+
+        {/* Charts row — replaced with welcome card for new fleets */}
+        {isNewFleet && interviewProgressLoaded ? (
+          <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E5E7EB', padding: '32px 36px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: 20 }}>
+            <div>
+              <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#1c3660' }}>Welcome to the Fleet Fuel Study</h2>
+              <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>Let's get your fleet's data set up.</p>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
+              <div style={{ background: '#F0F7FF', borderRadius: 10, padding: '16px 20px' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 13, color: '#1c3660' }}>What you'll unlock</p>
+                <p style={{ margin: 0, fontSize: 13, color: '#374151', lineHeight: 1.65 }}>
+                  Once your data is entered, you'll be able to benchmark your fleet's technology adoption rates and fuel efficiency (MPG) against other participating study fleets.
+                </p>
+              </div>
+              <div style={{ background: '#F9FAFB', borderRadius: 10, padding: '16px 20px' }}>
+                <p style={{ margin: '0 0 6px', fontWeight: 700, fontSize: 13, color: '#1c3660' }}>How to fill it out</p>
+                <p style={{ margin: 0, fontSize: 13, color: '#374151', lineHeight: 1.65 }}>
+                  Complete the survey to the best of your ability — we're not looking for perfection, just directionally accurate data.
+                  Go back in time as far as your records allow.
+                </p>
+              </div>
+            </div>
+            <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 20, display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+              <div>
+                <p style={{ margin: '0 0 4px', fontWeight: 600, fontSize: 14, color: '#111827' }}>Ready to get started?</p>
+                <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+                  Use the guided interview to walk through each section step by step, or scroll down and fill out the forms directly.
+                </p>
+              </div>
+              {!interviewProgress ? (
+                <button onClick={() => setShowInterview(true)} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  Start New Fleet Interview →
+                </button>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>Interview in progress</span>
+                  <button onClick={() => setShowInterview(true)} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    Resume Interview →
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
-          <div style={{flex:"1 1 320px", minWidth:0}}>
-            <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} isNewFleet={isNewFleet} />
+        ) : (
+          <div style={styles.chartsRow}>
+            <div style={{flex:"1 1 400px", minWidth:0}}>
+              <MpgChart chartData={chartData} fleetName={fleetState?.name} />
+            </div>
+            <div style={{flex:"1 1 320px", minWidth:0}}>
+              <SubmissionHistory token={token} saveCount={saveCount} submittedYears={submittedYears} onSubmit={onSubmit} editableYears={editableYears} isNewFleet={isNewFleet} />
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Fleet Details Table */}
         <FleetDetailsTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
