@@ -167,7 +167,7 @@ function computeInterviewYears(pct, startYear, ramp, allYears) {
   return result;
 }
 
-function InterviewModal({ token, effectiveEditableYears, savedProgress, onComplete, onSaveAndExit, onClose }) {
+function InterviewModal({ token, effectiveEditableYears, savedProgress, interviewInputsByCAB, onComplete, onSaveAndExit, onClose }) {
   const maxYear = Math.max(...effectiveEditableYears);
   const sortedYears = [...effectiveEditableYears].sort((a, b) => a - b);
 
@@ -373,10 +373,63 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, onComple
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
             <button onClick={onClose} style={bGhost}>Cancel</button>
-            <button onClick={() => visibleGroups.length > 0 && setStep({ group: visibleGroups[0], phase: 'input' })}
-              style={{ ...bPrim, opacity: visibleGroups.length > 0 ? 1 : 0.5 }}>
+            <button onClick={() => {
+              if (!visibleGroups.length) return;
+              const otherCab = cabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
+              const otherInputs = interviewInputsByCAB?.[otherCab];
+              const hasOtherInputs = otherInputs && Object.keys(otherInputs).length > 0;
+              if (hasOtherInputs) setStep('carryover-prompt');
+              else setStep({ group: visibleGroups[0], phase: 'input' });
+            }} style={{ ...bPrim, opacity: visibleGroups.length > 0 ? 1 : 0.5 }}>
               Start →
             </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Carry-over prompt ─────────────────────────────────────────────
+  if (step === 'carryover-prompt') {
+    const otherCab = cabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
+    const otherInputs = interviewInputsByCAB?.[otherCab] || {};
+
+    const applyCarryover = () => {
+      // Pre-populate groupInputs from the other cab's answers, filtered to techs applicable to this cab
+      setGroupInputs(() => {
+        const carried = {};
+        for (const [groupName, techInputs] of Object.entries(otherInputs)) {
+          const applicableTechs = getVisibleTechs(groupName);
+          const groupCarry = {};
+          for (const tech of applicableTechs) {
+            if (techInputs[tech.label]) groupCarry[tech.label] = { ...techInputs[tech.label] };
+          }
+          if (Object.keys(groupCarry).length > 0) carried[groupName] = groupCarry;
+        }
+        return carried;
+      });
+      setStep({ group: visibleGroups[0], phase: 'input' });
+    };
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Technology Adoption Interview</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Introduction" />
+          <div style={{ background: '#F0F7FF', borderRadius: 8, padding: '16px 18px', fontSize: 13, color: '#374151' }}>
+            <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#1c3660' }}>
+              You already answered questions for {otherCab} trucks.
+            </p>
+            <p style={{ margin: 0, color: '#6B7280' }}>
+              Would you like to pre-fill your {cabType} answers using your {otherCab} responses for technologies that apply to both cab types? You can still review and change each answer.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button onClick={applyCarryover} style={{ ...bPrim, flex: 1 }}>Yes, carry over answers</button>
+            <button onClick={() => { setGroupInputs({}); setStep({ group: visibleGroups[0], phase: 'input' }); }} style={{ ...bGhost, flex: 1 }}>No, start fresh</button>
           </div>
         </div>
       </div>
@@ -419,7 +472,9 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, onComple
             </p>
           )}
           <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
-            Enter the {isPractices ? 'fleet-wide' : `% of ${cabType.toLowerCase()} trucks purchased in ${maxYear}`} adoption rate for each technology, when you first started, and how quickly adoption ramped up.
+            {isPractices
+              ? `Enter the fleet-wide % of ${cabType.toLowerCase()} trucks with each practice, when your fleet first started, and how quickly adoption ramped up.`
+              : `Enter the % of ${cabType.toLowerCase()} trucks purchased in ${maxYear} with the technology, the year your fleet first started buying that technology on ${cabType.toLowerCase()} trucks, and how quickly adoption ramped up.`}
           </p>
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
@@ -448,7 +503,12 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, onComple
                             type="number" min="0" max="100"
                             value={inp.pct ?? ''}
                             onChange={e => {
-                              const val = e.target.value;
+                              let val = e.target.value;
+                              if (val !== '' && val !== '-') {
+                                const n = Number(val);
+                                if (n < 0) val = '0';
+                                else if (n > 100) val = '100';
+                              }
                               setInput(tech.label, 'pct', val);
                               if (val === '0' && i + 1 < techs.length) {
                                 setTimeout(() => pctRefs.current[i + 1]?.focus(), 0);
@@ -587,7 +647,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, onComple
         </p>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
           <button onClick={handleCloseRequest} style={bGhost}>Cancel</button>
-          <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits))} style={bPrim}>Apply to Table</button>
+          <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits), groupInputs)} style={bPrim}>Apply to Table</button>
         </div>
       </div>
     </div>
@@ -608,8 +668,9 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
   const [copySource, setCopySource]     = useState({});
-  const [showInterview, setShowInterview]     = useState(false);
+  const [showInterview, setShowInterview]         = useState(false);
   const [interviewProgress, setInterviewProgress] = useState(null);
+  const [interviewInputsByCAB, setInterviewInputsByCAB] = useState({});
 
   const maxEditableYear = Math.max(...editableYears, 2025);
   const hasDataForCabType = Object.keys(techData).length > 0;
@@ -657,12 +718,12 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
         Object.keys(t.categories || {}).forEach(cat => { if (!(cat in next)) next[cat] = true; });
         return next;
       });
-      // init edits from existing data (or 0% for new fleets with no data)
+      // init edits from existing data, keyed by cab type
       setEdits(prev => {
-        const newEdits = { ...prev };
+        const cabEdits = { ...(prev[cabType] || {}) };
         effEditable.forEach(yr => {
           const yrData = t.data?.[yr] ?? t.data?.[String(yr)] ?? null;
-          const updated = { ...(newEdits[yr] || {}) };
+          const updated = { ...(cabEdits[yr] || {}) };
           Object.values(t.categories || {}).forEach(techs_ => {
             techs_.forEach(tech => {
               if (yrData) {
@@ -671,9 +732,9 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
               }
             });
           });
-          newEdits[yr] = updated;
+          cabEdits[yr] = updated;
         });
-        return newEdits;
+        return { ...prev, [cabType]: cabEdits };
       });
       setSaveMsg('');
     } catch (err) { console.error(err); }
@@ -710,27 +771,28 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
 
   const handleCopy = (yr, src) => {
     if (src === 'prior-same') {
-      // Merge server data + unsaved edits for yr-1; edits are already % strings
       const serverData = techData[yr - 1] || {};
-      const editData   = edits[yr - 1]    || {};
-      setEdits(prev => ({
-        ...prev,
-        [yr]: Object.fromEntries(allTechs.map(tech => {
+      const editData   = ((edits[selectedCabType] || {})[yr - 1]) || {};
+      setEdits(prev => {
+        const cabEdits = { ...(prev[selectedCabType] || {}) };
+        cabEdits[yr] = Object.fromEntries(allTechs.map(tech => {
           const editVal = editData[tech.label];
           if (editVal !== '' && editVal != null) return [tech.label, editVal];
           const v = serverData[tech.label];
           return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
-        }))
-      }));
+        }));
+        return { ...prev, [selectedCabType]: cabEdits };
+      });
     } else {
       const sourceData = src === 'current-other' ? (otherTechData[yr] || {}) : (otherTechData[yr - 1] || {});
-      setEdits(prev => ({
-        ...prev,
-        [yr]: Object.fromEntries(allTechs.map(tech => {
+      setEdits(prev => {
+        const cabEdits = { ...(prev[selectedCabType] || {}) };
+        cabEdits[yr] = Object.fromEntries(allTechs.map(tech => {
           const v = sourceData[tech.label];
           return [tech.label, v != null ? String(Math.round(v * 100)) : ''];
-        }))
-      }));
+        }));
+        return { ...prev, [selectedCabType]: cabEdits };
+      });
     }
   };
 
@@ -739,14 +801,15 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
     setSaving(true); setSaveMsg('');
     try {
       const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+      const cabEdits = edits[selectedCabType] || {};
       const yearsToSave = effectiveEditableYears.filter(yr => {
-        const e = edits[yr];
+        const e = cabEdits[yr];
         return e && Object.values(e).some(v => v !== '' && v !== null && v !== undefined);
       });
-    const results = await Promise.all(yearsToSave.map(yr =>
+      const results = await Promise.all(yearsToSave.map(yr =>
         fetch(`/api/techs/${yr}`, {
           method: 'PUT', headers,
-          body: JSON.stringify({ cab_type: selectedCabType, techs: edits[yr] }),
+          body: JSON.stringify({ cab_type: selectedCabType, techs: cabEdits[yr] }),
         })
       ));
       if (results.some(r => !r.ok)) {
@@ -791,26 +854,29 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
           token={token}
           effectiveEditableYears={effectiveEditableYears}
           savedProgress={interviewProgress}
-          onComplete={(interviewCabType, newEdits) => {
+          interviewInputsByCAB={interviewInputsByCAB}
+          onComplete={(interviewCabType, newEdits, rawGroupInputs) => {
             setEdits(prev => {
-              const merged = { ...prev };
+              const cabEdits = { ...(prev[interviewCabType] || {}) };
               for (const [yr, techVals] of Object.entries(newEdits)) {
-                merged[Number(yr)] = { ...(merged[Number(yr)] || {}), ...techVals };
+                cabEdits[Number(yr)] = { ...(cabEdits[Number(yr)] || {}), ...techVals };
               }
-              return merged;
+              return { ...prev, [interviewCabType]: cabEdits };
             });
+            setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: rawGroupInputs }));
             setInterviewProgress(null);
             handleCabTypeChange(interviewCabType);
             setShowInterview(false);
           }}
           onSaveAndExit={(interviewCabType, partialEdits, progressState) => {
             setEdits(prev => {
-              const merged = { ...prev };
+              const cabEdits = { ...(prev[interviewCabType] || {}) };
               for (const [yr, techVals] of Object.entries(partialEdits)) {
-                merged[Number(yr)] = { ...(merged[Number(yr)] || {}), ...techVals };
+                cabEdits[Number(yr)] = { ...(cabEdits[Number(yr)] || {}), ...techVals };
               }
-              return merged;
+              return { ...prev, [interviewCabType]: cabEdits };
             });
+            setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: progressState.groupInputs }));
             setInterviewProgress(progressState);
             handleCabTypeChange(interviewCabType);
             setShowInterview(false);
@@ -830,7 +896,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
                 const hasPriorYear    = y - 1 >= 2003;
                 const hasPriorSame    = hasPriorYear && (
                   Object.keys(techData[y - 1] || {}).length > 0 ||
-                  Object.values(edits[y - 1] || {}).some(v => v !== '' && v != null)
+                  Object.values((edits[selectedCabType] || {})[y - 1] || {}).some(v => v !== '' && v != null)
                 );
                 const hasCurrentOther = Object.keys(otherTechData[y]      || {}).length > 0;
                 const hasPriorOther   = hasPriorYear && Object.keys(otherTechData[y - 1] || {}).length > 0;
@@ -915,8 +981,20 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
                             <input
                               style={{...styles.techInput, fontSize:12, padding:'4px 24px 4px 6px'}}
                               type="number" min="0" max="100"
-                              value={edits[y]?.[tech.label] ?? ''}
-                              onChange={e => setEdits(prev => ({...prev, [y]: {...prev[y], [tech.label]: e.target.value}}))}
+                              value={((edits[selectedCabType] || {})[y] || {})[tech.label] ?? ''}
+                              onChange={e => {
+                                let val = e.target.value;
+                                if (val !== '' && val !== '-') {
+                                  const n = Number(val);
+                                  if (n < 0) val = '0';
+                                  else if (n > 100) val = '100';
+                                }
+                                setEdits(prev => {
+                                  const cabEdits = { ...(prev[selectedCabType] || {}) };
+                                  cabEdits[y] = { ...(cabEdits[y] || {}), [tech.label]: val };
+                                  return { ...prev, [selectedCabType]: cabEdits };
+                                });
+                              }}
                               placeholder="—"
                             />
                             <span style={styles.pctSign}>%</span>
