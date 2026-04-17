@@ -795,6 +795,41 @@ app.put("/api/fuel/:year", requireAuth, async (req, res) => {
   }
 });
 
+/**
+ * GET /api/fuel/benchmarks
+ * Returns average MPG per fuel type across all other fleets (excludes current fleet).
+ */
+app.get("/api/fuel/benchmarks", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [rows] = await db.query(
+      `SELECT fuel_type,
+              AVG(mpg) AS avg_mpg,
+              COUNT(*) AS fleet_count
+       FROM (
+         SELECT fleet_id, fuel_type,
+                SUM(ifta_miles) / NULLIF(SUM(ifta_fuel), 0) AS mpg
+         FROM ffs_mpg
+         WHERE fleet_id != ?
+           AND ifta_fuel > 0 AND ifta_miles > 0
+           AND fuel_type IN ('Diesel','Biodiesel','CNG','LNG')
+         GROUP BY fleet_id, mpg_year, fuel_type
+         HAVING mpg > 0.5 AND mpg < 50
+       ) sub
+       GROUP BY fuel_type`,
+      [fleet_id]
+    );
+    const result = {};
+    for (const r of rows) {
+      result[r.fuel_type] = { avg_mpg: parseFloat(r.avg_mpg), fleet_count: Number(r.fleet_count) };
+    }
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Database error' });
+  }
+});
+
 // ─── Fleet Equipment Routes ───────────────────────────────────────────────────
 
 /**

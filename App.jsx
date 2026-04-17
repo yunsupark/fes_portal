@@ -6,6 +6,15 @@ import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, C
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
 const fmt = (n) => n?.toLocaleString() ?? "—";
 
+function getMpgAlert(mpg, benchmarks, fuelType) {
+  if (!mpg || isNaN(mpg) || mpg <= 0) return null;
+  const b = benchmarks?.[fuelType];
+  if (!b?.avg_mpg) return null;
+  if (mpg < b.avg_mpg * 0.25) return 'low';
+  if (mpg > b.avg_mpg * 2)    return 'high';
+  return null;
+}
+
 // ─── Components ───────────────────────────────────────────────────────────────
 
 function LoginScreen({ onLogin }) {
@@ -177,8 +186,15 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   const [categories, setCategories]   = useState({});
   const [groupInputs, setGroupInputs] = useState(savedProgress?.groupInputs || {});
   const [groupEdits, setGroupEdits]   = useState(savedProgress?.groupEdits || {});
-  const [confirmExit, setConfirmExit] = useState(null); // null | 'ask' | 'sure'
+  const [confirmExit, setConfirmExit] = useState(null);
+  const [fuelBenchmarks, setFuelBenchmarks] = useState({});
   const pctRefs = useRef([]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/fuel/benchmarks', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : {}).then(b => setFuelBenchmarks(b)).catch(() => {});
+  }, [token]);
 
   useEffect(() => {
     if (!token) return;
@@ -226,6 +242,25 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     return merged;
   };
 
+  const buildFuelRowsFromEdits = (editsMap, inputsMap) => {
+    const fuelState = inputsMap['__fuel__'] || {};
+    const selectedTypes = fuelState.fuelTypes || [];
+    const firstYear = fuelState.firstYear || maxYear;
+    const fuelYears = sortedYears.filter(y => y >= firstYear);
+    const fuelEdits = editsMap['__fuel__'] || {};
+    const rows = [];
+    for (const yr of fuelYears) {
+      for (const ft of selectedTypes) {
+        const miles = (fuelEdits[yr] || {})[`${ft}__miles`] ?? '';
+        const vol   = (fuelEdits[yr] || {})[`${ft}__vol`]   ?? '';
+        if (miles !== '' || vol !== '') {
+          rows.push({ year: yr, fuel_type: ft, ifta_miles: miles !== '' ? miles : null, volume: vol !== '' ? vol : null });
+        }
+      }
+    }
+    return rows;
+  };
+
   // Whether there's any meaningful progress to save (past intro)
   const hasProgress = typeof step === 'object' || step === 'done';
 
@@ -239,7 +274,8 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
 
   const handleSaveAndExit = () => {
     const progressState = { step, cabType, groupInputs, groupEdits };
-    onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState);
+    const fuelRows = buildFuelRowsFromEdits(groupEdits, groupInputs);
+    onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState, fuelRows);
   };
 
   const overlay  = { position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', backdropFilter: 'blur(4px)', zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' };
@@ -631,23 +667,256 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     );
   }
 
-  // ── Done ──────────────────────────────────────────────────────────
+  // ── Fuel setup ────────────────────────────────────────────────────
+  if (step === 'fuel-setup') {
+    const allFuelTypes = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
+    const fuelState = groupInputs['__fuel__'] || {};
+    const selectedTypes = fuelState.fuelTypes || ['Diesel'];
+    const firstYear = fuelState.firstYear || maxYear;
+
+    const toggleFuelType = (ft) => {
+      const next = selectedTypes.includes(ft)
+        ? selectedTypes.filter(f => f !== ft)
+        : [...selectedTypes, ft];
+      setGroupInputs(prev => ({ ...prev, '__fuel__': { ...fuelState, fuelTypes: next.length ? next : selectedTypes } }));
+    };
+
+    const setFirstYear = (yr) =>
+      setGroupInputs(prev => ({ ...prev, '__fuel__': { ...fuelState, firstYear: Number(yr) } }));
+
+    const fuelYears = sortedYears.filter(y => y >= firstYear);
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Fuel (IFTA)</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Fuel Data" />
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Next, we'll collect your IFTA fuel and mileage data. This helps calculate fleet-wide MPG.
+          </p>
+          <div>
+            <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: 14, color: '#111827' }}>Which fuel type(s) does your fleet purchase?</p>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              {allFuelTypes.map(ft => (
+                <button key={ft} onClick={() => toggleFuelType(ft)} style={{
+                  padding: '8px 18px', borderRadius: 8, border: '2px solid',
+                  borderColor: selectedTypes.includes(ft) ? '#1c3660' : '#D1D5DB',
+                  background:  selectedTypes.includes(ft) ? '#EFF6FF' : '#fff',
+                  color:       selectedTypes.includes(ft) ? '#1c3660' : '#374151',
+                  fontSize: 13, fontWeight: selectedTypes.includes(ft) ? 700 : 400, cursor: 'pointer',
+                }}>{ft}</button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: 14, color: '#111827' }}>How far back do you have IFTA data available?</p>
+            <select value={firstYear} onChange={e => setFirstYear(e.target.value)}
+              style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}>
+              {sortedYears.map(y => <option key={y} value={y}>{y}{y === maxYear ? ' (this year only)' : ''}</option>)}
+            </select>
+            {fuelYears.length > 1 && (
+              <p style={{ margin: '6px 0 0', fontSize: 12, color: '#6B7280' }}>
+                You'll enter data for {fuelYears.length} year{fuelYears.length > 1 ? 's' : ''}: {fuelYears.join(', ')}
+              </p>
+            )}
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={() => setStep({ group: visibleGroups[totalGroups - 1], phase: 'review' })} style={bGhost}>← Back</button>
+            <button onClick={() => setStep('fuel-entry')} style={bPrim}>Enter Fuel Data →</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Fuel entry ────────────────────────────────────────────────────
+  if (step === 'fuel-entry') {
+    const fuelState = groupInputs['__fuel__'] || {};
+    const selectedTypes = fuelState.fuelTypes || ['Diesel'];
+    const firstYear = fuelState.firstYear || maxYear;
+    const fuelYears = sortedYears.filter(y => y >= firstYear);
+    const fuelEdits = groupEdits['__fuel__'] || {};
+
+    const setFuelCell = (yr, ft, field, val) =>
+      setGroupEdits(prev => {
+        const ye = { ...(prev['__fuel__'] || {}) };
+        ye[yr] = { ...(ye[yr] || {}) };
+        const key = `${ft}__${field}`;
+        ye[yr][key] = val;
+        return { ...prev, '__fuel__': ye };
+      });
+
+    const getFuelCell = (yr, ft, field) => (fuelEdits[yr] || {})[`${ft}__${field}`] ?? '';
+
+    const calcMpg = (miles, vol) => {
+      const m = parseFloat(miles), v = parseFloat(vol);
+      return m > 0 && v > 0 ? m / v : null;
+    };
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Fuel (IFTA) — Data Entry</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Fuel Data" />
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Enter IFTA miles and gallons (or DGE for CNG/LNG) for each year. MPG calculates automatically.
+          </p>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%' }}>
+              <thead>
+                <tr style={{ background: '#F3F4F6' }}>
+                  <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: 110 }}>Fuel Type</th>
+                  {fuelYears.map(y => (
+                    <th key={y} colSpan={3} style={{ padding: '8px 10px', textAlign: 'center', fontWeight: y === maxYear ? 700 : 500, color: y === maxYear ? '#1c3660' : '#374151', borderLeft: '2px solid #E5E7EB', minWidth: 210 }}>{y}</th>
+                  ))}
+                </tr>
+                <tr style={{ background: '#F9FAFB' }}>
+                  <th style={{ padding: '4px 12px' }} />
+                  {fuelYears.map(y => (
+                    <React.Fragment key={y}>
+                      <th style={{ padding: '4px 8px', textAlign: 'center', fontSize: 11, color: '#6B7280', fontWeight: 600, borderLeft: '2px solid #E5E7EB', minWidth: 80 }}>IFTA Miles</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'center', fontSize: 11, color: '#6B7280', fontWeight: 600, minWidth: 80 }}>Gal / DGE</th>
+                      <th style={{ padding: '4px 8px', textAlign: 'center', fontSize: 11, color: '#6B7280', fontWeight: 600, minWidth: 55 }}>MPG</th>
+                    </React.Fragment>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {selectedTypes.map((ft, fi) => {
+                  const isCng = ['CNG', 'LNG'].includes(ft);
+                  return (
+                    <tr key={ft} style={{ borderBottom: '1px solid #F3F4F6', background: fi % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                      <td style={{ padding: '8px 12px', fontWeight: 600, color: '#374151' }}>{ft}</td>
+                      {fuelYears.map(yr => {
+                        const miles = getFuelCell(yr, ft, 'miles');
+                        const vol   = getFuelCell(yr, ft, 'vol');
+                        const mpg   = calcMpg(miles, vol);
+                        const alert = getMpgAlert(mpg, fuelBenchmarks, ft);
+                        const b     = fuelBenchmarks?.[ft];
+                        const alertMsg = alert === 'low'
+                          ? `Below 25% of ${ft} avg (${b?.avg_mpg?.toFixed(2)} MPG)`
+                          : alert === 'high'
+                          ? `More than 2× ${ft} avg (${b?.avg_mpg?.toFixed(2)} MPG)`
+                          : null;
+                        return (
+                          <React.Fragment key={yr}>
+                            <td style={{ padding: '4px 6px', borderLeft: '2px solid #E5E7EB' }}>
+                              <input type="number" value={miles} onChange={e => setFuelCell(yr, ft, 'miles', e.target.value)}
+                                placeholder="—" style={{ width: 80, padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 12, textAlign: 'right' }} />
+                            </td>
+                            <td style={{ padding: '4px 6px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                                <input type="number" value={vol} onChange={e => setFuelCell(yr, ft, 'vol', e.target.value)}
+                                  placeholder="—" style={{ width: 80, padding: '4px 6px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 12, textAlign: 'right' }} />
+                                <span style={{ fontSize: 10, color: '#9CA3AF' }}>{isCng ? 'DGE' : 'gal'}</span>
+                              </div>
+                            </td>
+                            <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+                              {mpg != null ? (
+                                <div>
+                                  <span style={{ fontWeight: 600, color: alert ? '#DC2626' : '#1c3660', fontSize: 12 }}>
+                                    {mpg.toFixed(2)}
+                                    {alert && <span title={alertMsg} style={{ marginLeft: 3, cursor: 'help' }}>⚠</span>}
+                                  </span>
+                                  {alertMsg && <div style={{ fontSize: 10, color: '#DC2626', lineHeight: 1.2, maxWidth: 80 }}>{alertMsg}</div>}
+                                </div>
+                              ) : <span style={{ color: '#D1D5DB' }}>—</span>}
+                            </td>
+                          </React.Fragment>
+                        );
+                      })}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={() => setStep('fuel-setup')} style={bGhost}>← Back</button>
+            <button onClick={() => setStep('fuel-done')} style={bPrim}>Review & Finish →</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Fuel done ─────────────────────────────────────────────────────
+  if (step === 'fuel-done') {
+    const fuelState = groupInputs['__fuel__'] || {};
+    const selectedTypes = fuelState.fuelTypes || ['Diesel'];
+    const firstYear = fuelState.firstYear || maxYear;
+    const fuelYears = sortedYears.filter(y => y >= firstYear);
+    const fuelEdits = groupEdits['__fuel__'] || {};
+
+    const getFuelCell = (yr, ft, field) => (fuelEdits[yr] || {})[`${ft}__${field}`] ?? '';
+
+    // Build fuelRows for saving: [{year, fuel_type, ifta_miles, volume}]
+    const buildFuelRows = () => {
+      const result = [];
+      for (const yr of fuelYears) {
+        for (const ft of selectedTypes) {
+          const miles = getFuelCell(yr, ft, 'miles');
+          const vol   = getFuelCell(yr, ft, 'vol');
+          if (miles !== '' || vol !== '') {
+            result.push({ year: yr, fuel_type: ft, ifta_miles: miles !== '' ? miles : null, volume: vol !== '' ? vol : null });
+          }
+        }
+      }
+      return result;
+    };
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Interview Complete</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Complete" />
+          <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '14px 18px', fontSize: 13, color: '#374151' }}>
+            <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#15803D' }}>Ready to apply</p>
+            <ul style={{ margin: 0, paddingLeft: 20, color: '#6B7280', lineHeight: 1.8 }}>
+              <li>Technology adoption data for <strong>{cabType}</strong></li>
+              <li>Fuel (IFTA) data for {fuelYears.length} year{fuelYears.length !== 1 ? 's' : ''} ({selectedTypes.join(', ')})</li>
+            </ul>
+          </div>
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Clicking <strong>Apply to Table</strong> will load all data into the forms for your review. You can still edit before saving.
+          </p>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={() => setStep('fuel-entry')} style={bGhost}>← Back</button>
+            <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits), groupInputs, buildFuelRows())} style={bPrim}>Apply to Table</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Done (tech only — transition to fuel) ─────────────────────────
   return (
     <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
       <ExitConfirm />
       <div style={card}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-          <h2 style={h2style}>Interview Complete</h2>
+          <h2 style={h2style}>Technology Adoption Complete</h2>
           <CloseBtn />
         </div>
-        <ProgressBar label="Complete" />
+        <ProgressBar label="Technology complete — fuel data next" />
         <p style={{ margin: 0, fontSize: 14, color: '#374151' }}>
-          Technology adoption data for <strong>{cabType}</strong> has been filled in across all groups.
-          Click <strong>Apply to Table</strong> to load it into the adoption table for review before saving.
+          All technology groups are done. Next, we'll collect your IFTA fuel data so we can calculate fleet MPG.
         </p>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button onClick={handleCloseRequest} style={bGhost}>Cancel</button>
-          <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits), groupInputs)} style={bPrim}>Apply to Table</button>
+          <button onClick={() => onComplete(cabType, mergeGroupEdits(groupEdits), groupInputs, [])} style={bGhost}>Skip fuel, apply tech only</button>
+          <button onClick={() => setStep('fuel-setup')} style={bPrim}>Continue to Fuel →</button>
         </div>
       </div>
     </div>
@@ -855,7 +1124,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
           effectiveEditableYears={effectiveEditableYears}
           savedProgress={interviewProgress}
           interviewInputsByCAB={interviewInputsByCAB}
-          onComplete={(interviewCabType, newEdits, rawGroupInputs) => {
+          onComplete={async (interviewCabType, newEdits, rawGroupInputs, fuelRows) => {
             setEdits(prev => {
               const cabEdits = { ...(prev[interviewCabType] || {}) };
               for (const [yr, techVals] of Object.entries(newEdits)) {
@@ -865,10 +1134,23 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
             });
             setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: rawGroupInputs }));
             setInterviewProgress(null);
+            // Save fuel rows by year
+            if (fuelRows && fuelRows.length > 0) {
+              const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+              const byYear = {};
+              for (const r of fuelRows) {
+                if (!byYear[r.year]) byYear[r.year] = [];
+                byYear[r.year].push(r);
+              }
+              await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
+                fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
+              ));
+              onSave?.();
+            }
             handleCabTypeChange(interviewCabType);
             setShowInterview(false);
           }}
-          onSaveAndExit={(interviewCabType, partialEdits, progressState) => {
+          onSaveAndExit={async (interviewCabType, partialEdits, progressState, fuelRows) => {
             setEdits(prev => {
               const cabEdits = { ...(prev[interviewCabType] || {}) };
               for (const [yr, techVals] of Object.entries(partialEdits)) {
@@ -878,6 +1160,18 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
             });
             setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: progressState.groupInputs }));
             setInterviewProgress(progressState);
+            if (fuelRows && fuelRows.length > 0) {
+              const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+              const byYear = {};
+              for (const r of fuelRows) {
+                if (!byYear[r.year]) byYear[r.year] = [];
+                byYear[r.year].push(r);
+              }
+              await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
+                fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
+              ));
+              onSave?.();
+            }
             handleCabTypeChange(interviewCabType);
             setShowInterview(false);
           }}
@@ -1550,12 +1844,13 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
-  const [rows,         setRows]         = useState([]);   // flat array from API
-  const [edits,        setEdits]        = useState({});   // { year: [rows] }
+  const [rows,         setRows]         = useState([]);
+  const [edits,        setEdits]        = useState({});
   const [years,        setYears]        = useState([]);
   const [selectedYear, setSelectedYear] = useState(null);
   const [saving,       setSaving]       = useState(false);
   const [status,       setStatus]       = useState(null);
+  const [benchmarks,   setBenchmarks]   = useState({});
 
   const loadData = async () => {
     const r = await fetch('/api/fuel', { headers: { Authorization: `Bearer ${token}` } });
@@ -1583,6 +1878,14 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
   };
 
   useEffect(() => { if (token) loadData(); }, [token, editableYearsKey]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/fuel/benchmarks', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : {})
+      .then(b => setBenchmarks(b))
+      .catch(() => {});
+  }, [token]);
 
   const isEditable = editableYears.includes(selectedYear);
 
@@ -1686,7 +1989,15 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
                   const isCng = ['CNG','LNG'].includes(row.fuel_type);
                   const vol = row.volume != null ? row.volume : (isCng ? row.nat_gas_dge : row.ifta_fuel);
                   const miles = parseFloat(row.ifta_miles), galDge = parseFloat(vol);
-                  const mpgVal = miles > 0 && galDge > 0 ? (miles / galDge).toFixed(2) : null;
+                  const mpgNum = miles > 0 && galDge > 0 ? miles / galDge : null;
+                  const mpgVal = mpgNum != null ? mpgNum.toFixed(2) : null;
+                  const mpgAlert = getMpgAlert(mpgNum, benchmarks, row.fuel_type);
+                  const b = benchmarks[row.fuel_type];
+                  const alertMsg = mpgAlert === 'low'
+                    ? `MPG is less than 25% of the ${row.fuel_type} fleet average (${b?.avg_mpg?.toFixed(2)}). Please check your entries.`
+                    : mpgAlert === 'high'
+                    ? `MPG is more than double the ${row.fuel_type} fleet average (${b?.avg_mpg?.toFixed(2)}). Please check your entries.`
+                    : null;
                   return (
                     <tr key={idx} style={row._remove ? {opacity:0.45} : {}}>
                       {isEditable && (
@@ -1730,8 +2041,18 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
                           return v != null ? `${fmt(v)} ${isCng ? 'DGE' : 'gal'}` : '—';
                         })()}
                       </td>
-                      <td style={{...styles.detailTd, textAlign:'center', fontWeight: mpgVal ? 600 : 400, color: mpgVal ? '#1c3660' : '#9CA3AF', fontSize:13}}>
-                        {mpgVal ?? '—'}
+                      <td style={{...styles.detailTd, textAlign:'center', fontSize:13}}>
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'center', gap:4}}>
+                          <span style={{fontWeight: mpgVal ? 600 : 400, color: mpgAlert ? '#DC2626' : mpgVal ? '#1c3660' : '#9CA3AF'}}>
+                            {mpgVal ?? '—'}
+                          </span>
+                          {alertMsg && (
+                            <span title={alertMsg} style={{cursor:'help', fontSize:14, color:'#DC2626', lineHeight:1}}>⚠</span>
+                          )}
+                        </div>
+                        {alertMsg && (
+                          <div style={{fontSize:10, color:'#DC2626', maxWidth:140, lineHeight:1.3, marginTop:2}}>{alertMsg}</div>
+                        )}
                       </td>
                     </tr>
                   );
