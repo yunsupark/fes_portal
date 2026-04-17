@@ -3934,9 +3934,10 @@ function BenchmarkPage({ token }) {
 
   // Adoption by tech for current cab type
   const adoptionTechs = benchData
-    ? Object.keys(benchData.adoption).filter(tech =>
-        Object.values(benchData.adoption[tech]).some(cabMap => cabMap[cabType])
-      )
+    ? Object.keys(benchData.adoption).filter(tech => {
+        const byFleet = benchData.adoption[tech]?.[cabType];
+        return byFleet && Object.keys(byFleet).length > 0;
+      })
     : [];
 
   const adoptionChartData = benchData ? years.map(yr => {
