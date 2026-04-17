@@ -3566,6 +3566,7 @@ export default function App() {
   const [interviewProgress, setInterviewProgress] = useState(null);
   const [interviewProgressLoaded, setInterviewProgressLoaded] = useState(false);
   const [interviewInputsByCAB, setInterviewInputsByCAB] = useState({});
+  const [page, setPage] = useState('dashboard'); // 'dashboard' | 'benchmark'
 
   useEffect(() => {
     if (!token) return;
@@ -3705,6 +3706,21 @@ export default function App() {
         <div style={styles.sidebarLogo}>
           <img src="/nacfe-logo.png" alt="NACFE" style={styles.sidebarLogoImg} />
         </div>
+        <nav style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          {[
+            { id: 'dashboard', label: 'Dashboard' },
+            ...(!isNewFleet ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
+          ].map(item => (
+            <button key={item.id} onClick={() => setPage(item.id)} style={{
+              display: 'block', width: '100%', textAlign: 'left',
+              padding: '10px 20px', border: 'none', cursor: 'pointer',
+              background: page === item.id ? 'rgba(255,255,255,0.1)' : 'transparent',
+              color: page === item.id ? '#FFFFFF' : '#9CA3AF',
+              fontSize: 14, fontWeight: page === item.id ? 700 : 400,
+              borderLeft: page === item.id ? '3px solid #A41C24' : '3px solid transparent',
+            }}>{item.label}</button>
+          ))}
+        </nav>
         <div style={styles.sidebarFooter}>
           <div style={styles.fleetChip}>
             <div style={styles.fleetAvatar}>{fleet?.name?.[0]}</div>
@@ -3719,6 +3735,8 @@ export default function App() {
 
       {/* Main content */}
       <main style={styles.main}>
+        {page === 'benchmark' && <BenchmarkPage token={token} />}
+        {page === 'dashboard' && <>
         <header style={styles.mainHeader}>
             <div>
               <h1 style={styles.mainTitle}>Dashboard</h1>
@@ -3834,6 +3852,7 @@ export default function App() {
 
         {/* Tech Adoption Card */}
         <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} isNewFleet={isNewFleet} />
+        </>}
       </main>
 
       {/* Data Entry Modal */}
@@ -3846,6 +3865,307 @@ export default function App() {
           onCancel={() => setEntering(false)}
           onSave={() => setEntering(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// ─── Benchmarking Page ────────────────────────────────────────────────────────
+
+const BENCH_COLORS = ['#1c3660', '#A41C24', '#059669', '#D97706', '#7C3AED', '#0891B2'];
+
+function BenchmarkPage({ token }) {
+  const [dutyCycle, setDutyCycle]       = useState(null);
+  const [availableFleets, setAvailableFleets] = useState([]);
+  const [selected, setSelected]         = useState([]); // fleet_ids chosen
+  const [mode, setMode]                 = useState('all'); // 'all' | 'custom'
+  const [benchData, setBenchData]       = useState(null);
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState(null);
+  const [cabType, setCabType]           = useState('Sleeper');
+
+  // Load list of comparable fleets on mount
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/benchmark/fleets', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json())
+      .then(d => {
+        setDutyCycle(d.dutyCycle);
+        setAvailableFleets(d.fleets || []);
+      })
+      .catch(() => {});
+  }, [token]);
+
+  const MIN_PEERS = 3;
+  const enoughForAll = availableFleets.length >= MIN_PEERS;
+  const customValid  = selected.length >= MIN_PEERS;
+
+  const fetchBenchmark = async () => {
+    const ids = mode === 'all'
+      ? availableFleets.map(f => f.fleet_id)
+      : selected;
+    if (ids.length < MIN_PEERS) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const r = await fetch(`/api/benchmark/data?fleet_ids=${ids.join(',')}`,
+        { headers: { Authorization: `Bearer ${token}` } });
+      const d = await r.json();
+      if (!r.ok) throw new Error(d.error || 'Failed');
+      setBenchData(d);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const toggleFleet = (id) =>
+    setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+
+  // ── Derived chart data ─────────────────────────────────────────────
+  const labels   = benchData?.labels || [];
+  const years    = (benchData?.years || []).slice(-10);
+  const mpgData  = benchData ? years.map(yr => {
+    const pt = { year: String(yr) };
+    for (const lbl of labels) pt[lbl] = benchData.mpg[lbl]?.[yr] ?? null;
+    return pt;
+  }) : [];
+
+  // Adoption by tech for current cab type
+  const adoptionTechs = benchData
+    ? Object.keys(benchData.adoption).filter(tech =>
+        Object.values(benchData.adoption[tech]).some(cabMap => cabMap[cabType])
+      )
+    : [];
+
+  const adoptionChartData = benchData ? years.map(yr => {
+    const pt = { year: String(yr) };
+    for (const lbl of labels) {
+      // average across techs that have data for this fleet/year
+      const vals = adoptionTechs
+        .map(t => benchData.adoption[t]?.[cabType]?.[lbl]?.[yr])
+        .filter(v => v != null);
+      pt[lbl] = vals.length ? parseFloat((vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(1)) : null;
+    }
+    return pt;
+  }) : [];
+
+  const fmtPct = v => `${Math.round(v)}%`;
+  const latestYear = years[years.length - 1];
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Header */}
+      <header style={styles.mainHeader}>
+        <div>
+          <h1 style={styles.mainTitle}>Benchmarking</h1>
+          <p style={styles.mainSub}>
+            Compare your fleet against others in the {dutyCycle === 'LH' ? 'Long-Haul' : dutyCycle === 'RH' ? 'Regional Haul' : dutyCycle || '—'} duty cycle
+          </p>
+        </div>
+      </header>
+
+      {/* Fleet selector card */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <p style={{ margin: 0, fontWeight: 700, fontSize: 14, color: '#111827' }}>Compare against</p>
+        <div style={{ display: 'flex', gap: 10 }}>
+          {[['all', 'All fleets in duty cycle'], ['custom', 'Specific fleets']].map(([val, label]) => (
+            <button key={val} onClick={() => setMode(val)} style={{
+              padding: '8px 18px', borderRadius: 8, border: '2px solid',
+              borderColor: mode === val ? '#1c3660' : '#D1D5DB',
+              background:  mode === val ? '#EFF6FF' : '#fff',
+              color:       mode === val ? '#1c3660' : '#374151',
+              fontSize: 13, fontWeight: mode === val ? 700 : 400, cursor: 'pointer',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {mode === 'custom' && (
+          <div>
+            <p style={{ margin: '0 0 10px', fontSize: 13, color: '#6B7280' }}>
+              Select at least {MIN_PEERS} fleets. Fleet names are shown here for selection only — they will not appear in results.
+            </p>
+            {availableFleets.length === 0 ? (
+              <p style={{ fontSize: 13, color: '#9CA3AF' }}>No other fleets with submissions in this duty cycle.</p>
+            ) : (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {availableFleets.map(f => (
+                  <button key={f.fleet_id} onClick={() => toggleFleet(f.fleet_id)} style={{
+                    padding: '6px 14px', borderRadius: 20, border: '2px solid', fontSize: 12,
+                    borderColor: selected.includes(f.fleet_id) ? '#1c3660' : '#D1D5DB',
+                    background:  selected.includes(f.fleet_id) ? '#EFF6FF' : '#F9FAFB',
+                    color:       selected.includes(f.fleet_id) ? '#1c3660' : '#374151',
+                    fontWeight:  selected.includes(f.fleet_id) ? 700 : 400, cursor: 'pointer',
+                  }}>
+                    {f.fleet_name}
+                    <span style={{ marginLeft: 6, color: '#9CA3AF', fontWeight: 400 }}>
+                      ({f.submission_count} yr{f.submission_count !== 1 ? 's' : ''})
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {selected.length > 0 && selected.length < MIN_PEERS && (
+              <p style={{ margin: '8px 0 0', fontSize: 12, color: '#A41C24' }}>
+                Select at least {MIN_PEERS - selected.length} more fleet{MIN_PEERS - selected.length !== 1 ? 's' : ''} to run comparison.
+              </p>
+            )}
+          </div>
+        )}
+
+        {mode === 'all' && !enoughForAll && (
+          <p style={{ margin: 0, fontSize: 13, color: '#A41C24' }}>
+            Not enough fleets in this duty cycle yet ({availableFleets.length} of {MIN_PEERS} required).
+          </p>
+        )}
+
+        <div>
+          <button
+            onClick={fetchBenchmark}
+            disabled={loading || (mode === 'all' ? !enoughForAll : !customValid)}
+            style={{ ...styles.btnPrimary, opacity: (loading || (mode === 'all' ? !enoughForAll : !customValid)) ? 0.5 : 1 }}
+          >
+            {loading ? 'Loading…' : 'Run Comparison'}
+          </button>
+        </div>
+        {error && <p style={{ margin: 0, fontSize: 13, color: '#A41C24' }}>{error}</p>}
+      </div>
+
+      {/* Results */}
+      {benchData && (
+        <>
+          {/* Cab type toggle */}
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <span style={{ fontSize: 13, color: '#6B7280', fontWeight: 600 }}>Cab type:</span>
+            {['Sleeper', 'Day Cab'].map(ct => (
+              <button key={ct} onClick={() => setCabType(ct)} style={{
+                padding: '5px 14px', borderRadius: 6, border: '2px solid', fontSize: 13,
+                borderColor: cabType === ct ? '#1c3660' : '#D1D5DB',
+                background:  cabType === ct ? '#EFF6FF' : '#fff',
+                color:       cabType === ct ? '#1c3660' : '#374151',
+                fontWeight:  cabType === ct ? 700 : 400, cursor: 'pointer',
+              }}>{ct}</button>
+            ))}
+          </div>
+
+          {/* Two charts side by side */}
+          <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap' }}>
+            {/* MPG chart */}
+            <div style={{ ...styles.chartCard, flex: '1 1 360px', minWidth: 0 }}>
+              <h3 style={styles.chartTitle}>IFTA MPG by Year</h3>
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={mpgData} margin={{ top: 8, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 12 }} />
+                  <YAxis stroke="#9CA3AF" tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={styles.tooltipStyle} formatter={(v, name) => [v != null ? `${parseFloat(v).toFixed(2)} mpg` : '—', name]} />
+                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                  {labels.map((lbl, i) => (
+                    <Line
+                      key={lbl}
+                      type="monotone"
+                      dataKey={lbl}
+                      stroke={BENCH_COLORS[i % BENCH_COLORS.length]}
+                      strokeWidth={lbl === 'You' ? 3 : 1.5}
+                      strokeDasharray={lbl === 'You' ? undefined : undefined}
+                      dot={lbl === 'You' ? { r: 4 } : { r: 2 }}
+                      connectNulls
+                    />
+                  ))}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* Avg adoption chart */}
+            <div style={{ ...styles.chartCard, flex: '1 1 360px', minWidth: 0 }}>
+              <h3 style={styles.chartTitle}>Average Tech Adoption by Year ({cabType})</h3>
+              <ResponsiveContainer width="100%" height={260}>
+                <ComposedChart data={adoptionChartData} margin={{ top: 8, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 12 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 11 }} />
+                  <Tooltip contentStyle={styles.tooltipStyle} formatter={(v, name) => [v != null ? `${Math.round(v)}%` : '—', name]} />
+                  <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
+                  {labels.map((lbl, i) => (
+                    <Line
+                      key={lbl}
+                      type="monotone"
+                      dataKey={lbl}
+                      stroke={BENCH_COLORS[i % BENCH_COLORS.length]}
+                      strokeWidth={lbl === 'You' ? 3 : 1.5}
+                      dot={lbl === 'You' ? { r: 4 } : { r: 2 }}
+                      connectNulls
+                    />
+                  ))}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Tech adoption table */}
+          <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '22px 24px' }}>
+            <h3 style={{ ...styles.chartTitle, marginBottom: 4 }}>
+              Technology Adoption — {latestYear} ({cabType})
+            </h3>
+            <p style={{ margin: '0 0 16px', fontSize: 12, color: '#6B7280' }}>
+              Adoption percentages for the most recent year with data. Comparison fleet identities are anonymized.
+            </p>
+            {adoptionTechs.length === 0 ? (
+              <p style={{ fontSize: 13, color: '#9CA3AF' }}>No adoption data available for this cab type.</p>
+            ) : (
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: '#F3F4F6' }}>
+                      <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: 200, position: 'sticky', left: 0, background: '#F3F4F6', zIndex: 1 }}>
+                        Technology
+                      </th>
+                      {labels.map((lbl, i) => (
+                        <th key={lbl} style={{
+                          padding: '9px 14px', textAlign: 'center', fontWeight: 700,
+                          color: BENCH_COLORS[i % BENCH_COLORS.length], minWidth: 90,
+                          borderLeft: '1px solid #E5E7EB',
+                        }}>{lbl}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adoptionTechs.map((tech, ti) => {
+                      const rowBg = ti % 2 === 0 ? '#fff' : '#FAFAFA';
+                      return (
+                        <tr key={tech} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                          <td style={{ padding: '7px 14px', color: '#111827', fontWeight: 500, position: 'sticky', left: 0, background: rowBg, zIndex: 1 }}>
+                            {tech}
+                          </td>
+                          {labels.map((lbl, i) => {
+                            // Find latest year with data for this fleet+tech
+                            const byYear = benchData.adoption[tech]?.[cabType]?.[lbl] || {};
+                            const latestWithData = [...years].reverse().find(y => byYear[y] != null);
+                            const val = latestWithData != null ? byYear[latestWithData] : null;
+                            return (
+                              <td key={lbl} style={{
+                                padding: '7px 14px', textAlign: 'center',
+                                background: rowBg, borderLeft: '1px solid #F3F4F6',
+                                color: val == null ? '#D1D5DB' : '#111827',
+                                fontWeight: lbl === 'You' ? 700 : 400,
+                              }}>
+                                {val != null ? `${Math.round(val)}%` : '—'}
+                                {latestWithData != null && latestWithData !== latestYear && (
+                                  <span style={{ fontSize: 10, color: '#9CA3AF', display: 'block' }}>({latestWithData})</span>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </>
       )}
     </div>
   );

@@ -1429,6 +1429,137 @@ app.get("/api/chart-data", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Benchmarking ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/benchmark/fleets
+ * Returns list of fleets in same duty cycle as the requesting fleet that have
+ * at least one submission, excluding fleet_id 0, 45, 46 and the current fleet.
+ */
+app.get("/api/benchmark/fleets", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const [[fleetRow]] = await db.query(
+      `SELECT default_duty_cycle FROM ffs_fleet WHERE fleet_id = ?`, [fleet_id]
+    );
+    if (!fleetRow?.default_duty_cycle) return res.json({ dutyCycle: null, fleets: [] });
+
+    const [rows] = await db.query(
+      `SELECT f.fleet_id, f.fleet_name, COUNT(DISTINCT s.survey_year) AS submission_count
+       FROM ffs_fleet f
+       JOIN ffs_submission s ON s.fleet_id = f.fleet_id
+       WHERE f.default_duty_cycle = ?
+         AND f.fleet_id != ?
+         AND f.fleet_id NOT IN (0, 45, 46)
+       GROUP BY f.fleet_id, f.fleet_name
+       ORDER BY f.fleet_name`,
+      [fleetRow.default_duty_cycle, fleet_id]
+    );
+    res.json({ dutyCycle: fleetRow.default_duty_cycle, fleets: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch benchmark fleets" });
+  }
+});
+
+/**
+ * GET /api/benchmark/data?fleet_ids=1,2,3
+ * Returns per-year MPG and per-tech adoption % for the requested comparison
+ * fleet IDs plus the current fleet. Comparison fleets are returned with
+ * randomly-assigned labels (Fleet 1, Fleet 2, …); the current fleet is "You".
+ * fleet_ids must be comma-separated integers from the same duty cycle.
+ */
+app.get("/api/benchmark/data", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  try {
+    const rawIds = (req.query.fleet_ids || '').split(',').map(s => parseInt(s, 10)).filter(n => !isNaN(n) && n > 0);
+    if (rawIds.length === 0) return res.status(400).json({ error: "fleet_ids required" });
+
+    // Validate all requested fleets are in same duty cycle as requesting fleet
+    const [[fleetRow]] = await db.query(
+      `SELECT default_duty_cycle FROM ffs_fleet WHERE fleet_id = ?`, [fleet_id]
+    );
+    if (!fleetRow?.default_duty_cycle) return res.status(400).json({ error: "Fleet has no duty cycle" });
+
+    const [validRows] = await db.query(
+      `SELECT fleet_id FROM ffs_fleet
+       WHERE fleet_id IN (?) AND default_duty_cycle = ? AND fleet_id NOT IN (0, 45, 46)`,
+      [rawIds, fleetRow.default_duty_cycle]
+    );
+    const validIds = validRows.map(r => r.fleet_id);
+    const allIds = [fleet_id, ...validIds];
+
+    // MPG per fleet per year
+    const [mpgRows] = await db.query(
+      `SELECT fleet_id, mpg_year,
+              IF(SUM(ifta_fuel)>0, SUM(ifta_miles)/SUM(ifta_fuel), NULL) AS mpg
+       FROM ffs_mpg
+       WHERE fleet_id IN (?)
+       GROUP BY fleet_id, mpg_year
+       ORDER BY mpg_year`,
+      [allIds]
+    );
+
+    // Adoption per fleet per tech per year (latest config only)
+    const [adoptionRows] = await db.query(
+      `SELECT a.fleet_id, a.adoption_year, t.technology, a.cab_type,
+              a.adoption_percent * 100 AS adoption_pct
+       FROM ffs_adoption a
+       JOIN ffs_tech t ON a.tech_id = t.tech_id
+       WHERE a.fleet_id IN (?)
+         AND a.cab_type IN ('Sleeper', 'Day Cab')
+         AND a.config = (
+           SELECT MAX(a2.config) FROM ffs_adoption a2
+           WHERE a2.fleet_id = a.fleet_id AND a2.adoption_year = a.adoption_year AND a2.cab_type = a.cab_type
+         )
+       ORDER BY a.adoption_year, t.tech_group, t.technology`,
+      [allIds]
+    );
+
+    // Shuffle comparison fleet IDs for anonymisation
+    const shuffled = [...validIds].sort(() => Math.random() - 0.5);
+    const labelMap = { [fleet_id]: 'You' };
+    shuffled.forEach((id, i) => { labelMap[id] = `Fleet ${i + 1}`; });
+
+    // Structure mpg: { fleetLabel: { year: mpg } }
+    const mpgByFleet = {};
+    for (const r of mpgRows) {
+      const label = labelMap[r.fleet_id];
+      if (!label) continue;
+      if (!mpgByFleet[label]) mpgByFleet[label] = {};
+      if (r.mpg != null) mpgByFleet[label][r.mpg_year] = parseFloat(parseFloat(r.mpg).toFixed(2));
+    }
+
+    // Structure adoption: { technology: { cab_type: { fleetLabel: { year: pct } } } }
+    const adoptionByTech = {};
+    for (const r of adoptionRows) {
+      const label = labelMap[r.fleet_id];
+      if (!label) continue;
+      if (!adoptionByTech[r.technology]) adoptionByTech[r.technology] = {};
+      if (!adoptionByTech[r.technology][r.cab_type]) adoptionByTech[r.technology][r.cab_type] = {};
+      if (!adoptionByTech[r.technology][r.cab_type][label]) adoptionByTech[r.technology][r.cab_type][label] = {};
+      adoptionByTech[r.technology][r.cab_type][label][r.adoption_year] = parseFloat(parseFloat(r.adoption_pct).toFixed(1));
+    }
+
+    // Collect all years across all data
+    const allYears = [...new Set([
+      ...mpgRows.map(r => r.mpg_year),
+      ...adoptionRows.map(r => r.adoption_year),
+    ])].sort((a, b) => a - b);
+
+    res.json({
+      dutyCycle: fleetRow.default_duty_cycle,
+      labels: ['You', ...shuffled.map((_, i) => `Fleet ${i + 1}`)],
+      years: allYears,
+      mpg: mpgByFleet,
+      adoption: adoptionByTech,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch benchmark data" });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {
