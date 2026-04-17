@@ -1541,6 +1541,16 @@ app.get("/api/benchmark/data", requireAuth, async (req, res) => {
       adoptionByTech[r.technology][r.cab_type][label][r.adoption_year] = parseFloat(parseFloat(r.adoption_pct).toFixed(1));
     }
 
+    // Tech group ordering from ffs_tech
+    const [techRows] = await db.query(
+      `SELECT tech_group, technology FROM ffs_tech WHERE active_to IS NULL ORDER BY tech_group, technology`
+    );
+    const techGroups = {};
+    for (const r of techRows) {
+      if (!techGroups[r.tech_group]) techGroups[r.tech_group] = [];
+      techGroups[r.tech_group].push(r.technology);
+    }
+
     // Collect all years across all data
     const allYears = [...new Set([
       ...mpgRows.map(r => r.mpg_year),
@@ -1553,6 +1563,7 @@ app.get("/api/benchmark/data", requireAuth, async (req, res) => {
       years: allYears,
       mpg: mpgByFleet,
       adoption: adoptionByTech,
+      techGroups,
     });
   } catch (err) {
     console.error(err);

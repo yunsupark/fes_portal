@@ -3708,7 +3708,7 @@ export default function App() {
         </div>
         <nav style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {[
-            { id: 'dashboard', label: 'Dashboard' },
+            { id: 'dashboard', label: 'Data' },
             ...(!isNewFleet ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
           ].map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
@@ -3883,6 +3883,7 @@ function BenchmarkPage({ token }) {
   const [loading, setLoading]           = useState(false);
   const [error, setError]               = useState(null);
   const [cabType, setCabType]           = useState('Sleeper');
+  const [openGroups, setOpenGroups]     = useState({});
 
   // Load list of comparable fleets on mount
   useEffect(() => {
@@ -4104,13 +4105,13 @@ function BenchmarkPage({ token }) {
             </div>
           </div>
 
-          {/* Tech adoption table */}
+          {/* Tech adoption table — grouped + collapsible */}
           <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '22px 24px' }}>
             <h3 style={{ ...styles.chartTitle, marginBottom: 4 }}>
-              Technology Adoption — {latestYear} ({cabType})
+              Technology Adoption ({cabType})
             </h3>
             <p style={{ margin: '0 0 16px', fontSize: 12, color: '#6B7280' }}>
-              Adoption percentages for the most recent year with data. Comparison fleet identities are anonymized.
+              Most recent year with data per fleet. Comparison fleet identities are anonymized.
             </p>
             {adoptionTechs.length === 0 ? (
               <p style={{ fontSize: 13, color: '#9CA3AF' }}>No adoption data available for this cab type.</p>
@@ -4119,7 +4120,7 @@ function BenchmarkPage({ token }) {
                 <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 13 }}>
                   <thead>
                     <tr style={{ background: '#F3F4F6' }}>
-                      <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: 200, position: 'sticky', left: 0, background: '#F3F4F6', zIndex: 1 }}>
+                      <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: 220, position: 'sticky', left: 0, background: '#F3F4F6', zIndex: 1 }}>
                         Technology
                       </th>
                       {labels.map((lbl, i) => (
@@ -4132,33 +4133,54 @@ function BenchmarkPage({ token }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {adoptionTechs.map((tech, ti) => {
-                      const rowBg = ti % 2 === 0 ? '#fff' : '#FAFAFA';
+                    {Object.entries(benchData.techGroups || {}).map(([group, techsInGroup]) => {
+                      const visibleTechs = techsInGroup.filter(t => adoptionTechs.includes(t));
+                      if (visibleTechs.length === 0) return null;
+                      const isOpen = openGroups[group] !== false;
                       return (
-                        <tr key={tech} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                          <td style={{ padding: '7px 14px', color: '#111827', fontWeight: 500, position: 'sticky', left: 0, background: rowBg, zIndex: 1 }}>
-                            {tech}
-                          </td>
-                          {labels.map((lbl, i) => {
-                            // Find latest year with data for this fleet+tech
-                            const byYear = benchData.adoption[tech]?.[cabType]?.[lbl] || {};
-                            const latestWithData = [...years].reverse().find(y => byYear[y] != null);
-                            const val = latestWithData != null ? byYear[latestWithData] : null;
+                        <React.Fragment key={group}>
+                          {/* Group header row */}
+                          <tr
+                            style={{ cursor: 'pointer', userSelect: 'none' }}
+                            onClick={() => setOpenGroups(p => ({ ...p, [group]: !isOpen }))}
+                          >
+                            <td style={{ ...styles.heatCatRow, position: 'sticky', left: 0, zIndex: 2 }}>
+                              {isOpen ? '▼' : '▶'} {group}
+                            </td>
+                            {labels.map((lbl) => (
+                              <td key={lbl} style={{ background: '#F3F4F6', borderLeft: '1px solid #E5E7EB' }} />
+                            ))}
+                          </tr>
+                          {/* Tech rows */}
+                          {isOpen && visibleTechs.map((tech, ti) => {
+                            const rowBg = ti % 2 === 0 ? '#fff' : '#FAFAFA';
                             return (
-                              <td key={lbl} style={{
-                                padding: '7px 14px', textAlign: 'center',
-                                background: rowBg, borderLeft: '1px solid #F3F4F6',
-                                color: val == null ? '#D1D5DB' : '#111827',
-                                fontWeight: lbl === 'You' ? 700 : 400,
-                              }}>
-                                {val != null ? `${Math.round(val)}%` : '—'}
-                                {latestWithData != null && latestWithData !== latestYear && (
-                                  <span style={{ fontSize: 10, color: '#9CA3AF', display: 'block' }}>({latestWithData})</span>
-                                )}
-                              </td>
+                              <tr key={tech} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                                <td style={{ padding: '7px 14px', color: '#111827', position: 'sticky', left: 0, background: rowBg, zIndex: 1 }}>
+                                  {tech}
+                                </td>
+                                {labels.map((lbl, i) => {
+                                  const byYear = benchData.adoption[tech]?.[cabType]?.[lbl] || {};
+                                  const latestWithData = [...years].reverse().find(y => byYear[y] != null);
+                                  const val = latestWithData != null ? byYear[latestWithData] : null;
+                                  return (
+                                    <td key={lbl} style={{
+                                      padding: '7px 14px', textAlign: 'center',
+                                      background: rowBg, borderLeft: '1px solid #F3F4F6',
+                                      color: val == null ? '#D1D5DB' : '#111827',
+                                      fontWeight: lbl === 'You' ? 700 : 400,
+                                    }}>
+                                      {val != null ? `${Math.round(val)}%` : '—'}
+                                      {latestWithData != null && latestWithData !== latestYear && (
+                                        <span style={{ fontSize: 10, color: '#9CA3AF', display: 'block' }}>({latestWithData})</span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
                             );
                           })}
-                        </tr>
+                        </React.Fragment>
                       );
                     })}
                   </tbody>
