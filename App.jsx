@@ -192,6 +192,43 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   const [fuelBenchmarks, setFuelBenchmarks] = useState({});
   const pctRefs = useRef([]);
 
+  // ── Equipment steps state ──────────────────────────────────────────
+  // utilEdits: { year: [ {application, tractors, trailers, grossed_out_pct, cubed_out_pct, ave_length_haul, empty_miles_pct} ] }
+  // equipEdits: { year: [ EMPTY_EQUIP_ROW ] }
+  const equipYears = sortedYears.slice(-2); // at most last 2 editable years
+  const [utilEdits,  setUtilEdits]  = useState(() => {
+    if (savedProgress?.utilEdits) return savedProgress.utilEdits;
+    const init = {};
+    equipYears.forEach(yr => { init[yr] = [EMPTY_UTIL_ROW()]; });
+    return init;
+  });
+  const [equipEdits, setEquipEdits] = useState(() => {
+    if (savedProgress?.equipEdits) return savedProgress.equipEdits;
+    const init = {};
+    equipYears.forEach(yr => { init[yr] = [EMPTY_EQUIP_ROW()]; });
+    return init;
+  });
+  const [equipYear,  setEquipYear]  = useState(savedProgress?.equipYear ?? equipYears[equipYears.length - 1] ?? maxYear);
+  const [makeModels,   setMakeModels]   = useState([]);
+  const [engineModels, setEngineModels] = useState([]);
+  const ENGINE_MAKE_LIMITS_LOCAL = {
+    'Freightliner': ['Detroit', 'Cummins'],
+    'Kenworth':     ['Paccar', 'Cummins'],
+    'Peterbilt':    ['Paccar', 'Cummins'],
+    'Volvo':        ['Volvo', 'Cummins'],
+    'International':['International', 'Cummins'],
+    'Tesla':        null,
+    'Rivian':       null,
+  };
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/fleet-equip/reference', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : {})
+      .then(d => { setMakeModels(d.makeModels || []); setEngineModels(d.engineModels || []); })
+      .catch(() => {});
+  }, [token]);
+
   useEffect(() => {
     if (!token) return;
     fetch('/api/fuel/benchmarks', { headers: { Authorization: `Bearer ${token}` } })
@@ -230,9 +267,18 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
 
   const currentGroupIdx = typeof step === 'object' ? visibleGroups.indexOf(step.group) : -1;
   const totalGroups = visibleGroups.length;
-  const progressPct = step === 'done' ? 100
+  const progressPct =
+    step === 'interview-complete' ? 100
+    : step === 'final-review'     ? 95
+    : step === 'fleet-equip'      ? 88
+    : step === 'equip-util'       ? 82
+    : step === 'equip-intro'      ? 78
+    : step === 'fuel-done'        ? 75
+    : step === 'fuel-entry'       ? 68
+    : step === 'fuel-setup'       ? 62
+    : step === 'done'             ? 58
     : typeof step === 'object'
-      ? Math.round(((currentGroupIdx + (step.phase === 'review' ? 0.5 : 0)) / totalGroups) * 100)
+      ? Math.round(((currentGroupIdx + (step.phase === 'review' ? 0.5 : 0)) / totalGroups) * 55)
       : 0;
 
   const mergeGroupEdits = (editsMap) => {
@@ -265,7 +311,9 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
 
   // Whether there's any meaningful progress to save (past intro)
   const hasProgress = typeof step === 'object' || step === 'done' ||
-    step === 'fuel-setup' || step === 'fuel-entry' || step === 'fuel-done';
+    step === 'fuel-setup' || step === 'fuel-entry' || step === 'fuel-done' ||
+    step === 'equip-intro' || step === 'equip-util' || step === 'fleet-equip' ||
+    step === 'final-review' || step === 'interview-complete';
 
   const handleCloseRequest = () => {
     if (!hasProgress || step === 'intro' || step === 'resume-prompt') {
@@ -276,10 +324,41 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   };
 
   const handleSaveAndExit = () => {
-    const progressState = { step, cabType, groupInputs, groupEdits, autoZero, reviewZeroAsked };
+    const progressState = { step, cabType, groupInputs, groupEdits, autoZero, reviewZeroAsked, utilEdits, equipEdits, equipYear };
     const fuelRows = buildFuelRowsFromEdits(groupEdits, groupInputs);
     onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState, fuelRows);
   };
+
+  // Build finalized tech+fuel edits (applying zeros), used by both complete paths
+  const buildFinalTechFuel = () => {
+    let finalInputs = groupInputs;
+    let finalEdits  = groupEdits;
+    for (const grp of visibleGroups) {
+      const declined = !autoZero && reviewZeroAsked[grp] === false;
+      if (!declined) {
+        finalInputs = applyZeroToGroup(grp, finalInputs);
+        finalEdits  = applyZeroToGroupEdits(grp, finalInputs, finalEdits);
+      }
+    }
+    return { finalInputs, finalEdits };
+  };
+
+  // Build util/equip payloads for saving
+  const buildUtilRows = (yr) => {
+    const pctRatio = s => s !== '' && s != null ? parseFloat(s) / 100 : null;
+    return (utilEdits[yr] || []).filter(r => r.application).map(r => ({
+      application:      r.application,
+      tractors:         r.tractors         !== '' ? parseInt(r.tractors)         : null,
+      trailers:         r.trailers          !== '' ? parseInt(r.trailers)          : null,
+      grossed_out_perc: pctRatio(r.grossed_out_pct),
+      cubed_out_perc:   pctRatio(r.cubed_out_pct),
+      ave_length_haul:  r.ave_length_haul  !== '' ? parseInt(r.ave_length_haul)  : null,
+      empty_miles_perc: pctRatio(r.empty_miles_pct),
+    }));
+  };
+
+  const buildEquipRows = (yr) =>
+    (equipEdits[yr] || []).filter(r => r.qty || r.tractor_make || r.cab_type);
 
   // Returns a copy of groupInputs for `groupName` with blanks zeroed
   const applyZeroToGroup = (groupName, inputs) => {
@@ -947,63 +1026,413 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     const selectedTypes = fuelState.fuelTypes || ['Diesel'];
     const firstYear = fuelState.firstYear || maxYear;
     const fuelYears = sortedYears.filter(y => y >= firstYear);
-    const fuelEdits = groupEdits['__fuel__'] || {};
-
-    const getFuelCell = (yr, ft, field) => (fuelEdits[yr] || {})[`${ft}__${field}`] ?? '';
-
-    // Build fuelRows for saving: [{year, fuel_type, ifta_miles, volume}]
-    const buildFuelRows = () => {
-      const result = [];
-      for (const yr of fuelYears) {
-        for (const ft of selectedTypes) {
-          const miles = getFuelCell(yr, ft, 'miles');
-          const vol   = getFuelCell(yr, ft, 'vol');
-          if (miles !== '' || vol !== '') {
-            result.push({ year: yr, fuel_type: ft, ifta_miles: miles !== '' ? miles : null, volume: vol !== '' ? vol : null });
-          }
-        }
-      }
-      return result;
-    };
 
     return (
       <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
         <ExitConfirm />
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <h2 style={h2style}>Interview Complete</h2>
+            <h2 style={h2style}>Fuel Data Complete</h2>
             <CloseBtn />
           </div>
-          <ProgressBar label="Complete" />
+          <ProgressBar label="Fuel complete — equipment data next" />
           <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '14px 18px', fontSize: 13, color: '#374151' }}>
-            <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#15803D' }}>Ready to apply</p>
-            <ul style={{ margin: 0, paddingLeft: 20, color: '#6B7280', lineHeight: 1.8 }}>
-              <li>Technology adoption data for <strong>{cabType}</strong></li>
-              <li>Fuel (IFTA) data for {fuelYears.length} year{fuelYears.length !== 1 ? 's' : ''} ({selectedTypes.join(', ')})</li>
-            </ul>
+            <p style={{ margin: '0 0 4px', fontWeight: 700, color: '#15803D' }}>Fuel data recorded</p>
+            <p style={{ margin: 0, color: '#6B7280' }}>
+              {fuelYears.length} year{fuelYears.length !== 1 ? 's' : ''} · {selectedTypes.join(', ')}
+            </p>
           </div>
-          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
-            Clicking <strong>Apply to Table</strong> will load all data into the forms for your review. You can still edit before saving.
+          <p style={{ margin: 0, fontSize: 14, color: '#374151' }}>
+            Next, we'll collect equipment utilization and fleet equipment data. These sections are <strong>optional</strong> but help us better understand your fleet.
           </p>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={() => setStep('fuel-entry')} style={bGhost}>← Back</button>
-            <button onClick={() => {
-              // Apply 0% for any skipped tech in groups where user didn't explicitly decline
-              let finalInputs = groupInputs;
-              let finalEdits = groupEdits;
-              for (const grp of visibleGroups) {
-                // declined means reviewZeroAsked[grp] === false (user clicked "No, leave blank")
-                // autoZero=true groups were already zeroed at review→input transition
-                // If autoZero is false and user either accepted or never answered: zero them now
-                const declined = !autoZero && reviewZeroAsked[grp] === false;
-                if (!declined) {
-                  finalInputs = applyZeroToGroup(grp, finalInputs);
-                  finalEdits  = applyZeroToGroupEdits(grp, finalInputs, finalEdits);
-                }
-              }
-              onComplete(cabType, mergeGroupEdits(finalEdits), finalInputs, buildFuelRows());
-            }} style={bPrim}>Apply to Table</button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setStep('final-review')} style={bGhost}>Skip, go to review →</button>
+              <button onClick={() => setStep('equip-intro')} style={bPrim}>Continue →</button>
+            </div>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Equipment intro ───────────────────────────────────────────────
+  if (step === 'equip-intro') {
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Equipment Data</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Optional: Equipment utilization & fleet equipment" />
+          <div style={{ background: '#F0F7FF', borderRadius: 8, padding: '14px 18px', fontSize: 13, color: '#374151', lineHeight: 1.65 }}>
+            <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#1c3660' }}>This section is optional</p>
+            <p style={{ margin: '0 0 6px' }}>
+              Equipment utilization and fleet equipment data help us better understand how fleets operate.
+              You only need to enter data for up to <strong>{equipYears.length} year{equipYears.length !== 1 ? 's' : ''}</strong> ({equipYears.join(', ')}).
+            </p>
+            <p style={{ margin: 0, color: '#6B7280', fontSize: 12 }}>
+              You can skip either or both sections and fill them in later from the Data page.
+            </p>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={() => setStep('fuel-done')} style={bGhost}>← Back</button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setStep('final-review')} style={bGhost}>Skip both, go to review →</button>
+              <button onClick={() => setStep('equip-util')} style={bPrim}>Start with Utilization →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Equipment utilization inline entry ────────────────────────────
+  if (step === 'equip-util') {
+    const UTIL_COLS = [
+      { key: 'tractors',        label: 'Tractors',      type: 'int' },
+      { key: 'trailers',        label: 'Trailers',      type: 'int' },
+      { key: 'grossed_out_pct', label: 'Grossed Out %', type: 'pct' },
+      { key: 'cubed_out_pct',   label: 'Cubed Out %',   type: 'pct' },
+      { key: 'ave_length_haul', label: 'Avg Haul (mi)', type: 'int' },
+      { key: 'empty_miles_pct', label: 'Empty Miles %', type: 'pct' },
+    ];
+    const setUtilCell = (yr, idx, field, val) =>
+      setUtilEdits(prev => {
+        const rows = [...(prev[yr] || [])];
+        rows[idx] = { ...rows[idx], [field]: val };
+        return { ...prev, [yr]: rows };
+      });
+    const addUtilRow = (yr) =>
+      setUtilEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_UTIL_ROW()] }));
+    const removeUtilRow = (yr, idx) =>
+      setUtilEdits(prev => {
+        const rows = [...(prev[yr] || [])];
+        rows.splice(idx, 1);
+        return { ...prev, [yr]: rows.length ? rows : [EMPTY_UTIL_ROW()] };
+      });
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Equipment Utilization</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Equipment Utilization (optional)" />
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Enter the number of tractors and trailers per application type, and utilization details. One row per application (e.g. OTR, Regional, Local).
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {equipYears.map(yr => (
+              <button key={yr} onClick={() => setEquipYear(yr)} style={{
+                padding: '4px 14px', borderRadius: 6, border: '1px solid', fontSize: 13, cursor: 'pointer',
+                fontWeight: equipYear === yr ? 700 : 400,
+                borderColor: equipYear === yr ? '#1c3660' : '#D1D5DB',
+                background:  equipYear === yr ? '#1c3660' : '#fff',
+                color:       equipYear === yr ? '#fff'    : '#374151',
+              }}>{yr}</button>
+            ))}
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+              <thead>
+                <tr style={{ background: '#F3F4F6' }}>
+                  <th style={{ padding: '7px 10px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: 140 }}>Application</th>
+                  {UTIL_COLS.map(c => (
+                    <th key={c.key} style={{ padding: '7px 10px', textAlign: 'center', fontWeight: 600, color: '#374151', minWidth: 90 }}>{c.label}</th>
+                  ))}
+                  <th style={{ width: 32 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {(utilEdits[equipYear] || [EMPTY_UTIL_ROW()]).map((row, idx) => (
+                  <tr key={idx} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                    <td style={{ padding: '4px 6px' }}>
+                      <input value={row.application} onChange={e => setUtilCell(equipYear, idx, 'application', e.target.value)}
+                        placeholder="e.g. OTR" style={{ width: '100%', padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12 }} />
+                    </td>
+                    {UTIL_COLS.map(c => (
+                      <td key={c.key} style={{ padding: '4px 6px', textAlign: 'center' }}>
+                        <input type="number" value={row[c.key]} onChange={e => setUtilCell(equipYear, idx, c.key, e.target.value)}
+                          style={{ width: 72, padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12, textAlign: 'center' }} />
+                      </td>
+                    ))}
+                    <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+                      <button onClick={() => removeUtilRow(equipYear, idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', fontSize: 14 }} title="Remove">✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <button onClick={() => addUtilRow(equipYear)} style={{ ...bGhost, fontSize: 12, padding: '5px 14px', alignSelf: 'flex-start' }}>+ Add row</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={() => setStep('equip-intro')} style={bGhost}>← Back</button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setStep('final-review')} style={bGhost}>Skip fleet equipment, go to review →</button>
+              <button onClick={() => setStep('fleet-equip')} style={bPrim}>Continue to Fleet Equipment →</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Fleet equipment inline entry ──────────────────────────────────
+  if (step === 'fleet-equip') {
+    const tractorMakes = [...new Set(makeModels.map(m => m.make))].sort();
+    const setEquipCell = (yr, idx, field, val) =>
+      setEquipEdits(prev => {
+        const rows = [...(prev[yr] || [])];
+        if (field === 'tractor_make') rows[idx] = { ...rows[idx], tractor_make: val, tractor_model: '', engine_make: '', engine_model: '' };
+        else if (field === 'engine_make') rows[idx] = { ...rows[idx], engine_make: val, engine_model: '' };
+        else rows[idx] = { ...rows[idx], [field]: val };
+        return { ...prev, [yr]: rows };
+      });
+    const addEquipRow = (yr) =>
+      setEquipEdits(prev => ({ ...prev, [yr]: [...(prev[yr] || []), EMPTY_EQUIP_ROW()] }));
+    const removeEquipRow = (yr, idx) =>
+      setEquipEdits(prev => {
+        const rows = [...(prev[yr] || [])];
+        rows.splice(idx, 1);
+        return { ...prev, [yr]: rows.length ? rows : [EMPTY_EQUIP_ROW()] };
+      });
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={{ ...card, maxWidth: 900 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Fleet Equipment</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Fleet Equipment (optional)" />
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Enter the tractors purchased in each year. One row per tractor make/model combination.
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {equipYears.map(yr => (
+              <button key={yr} onClick={() => setEquipYear(yr)} style={{
+                padding: '4px 14px', borderRadius: 6, border: '1px solid', fontSize: 13, cursor: 'pointer',
+                fontWeight: equipYear === yr ? 700 : 400,
+                borderColor: equipYear === yr ? '#1c3660' : '#D1D5DB',
+                background:  equipYear === yr ? '#1c3660' : '#fff',
+                color:       equipYear === yr ? '#fff'    : '#374151',
+              }}>{yr}</button>
+            ))}
+          </div>
+          <div style={{ overflowX: 'auto' }}>
+            <table style={{ borderCollapse: 'collapse', fontSize: 12, width: '100%' }}>
+              <thead>
+                <tr style={{ background: '#F3F4F6' }}>
+                  {[['qty','Qty',60],['cab_type','Cab Type',100],['tractor_make','Make',120],['tractor_model','Model',130],['engine_make','Engine Make',120],['engine_model','Engine Model',130]].map(([key,label,w]) => (
+                    <th key={key} style={{ padding: '7px 8px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: w }}>{label}</th>
+                  ))}
+                  <th style={{ width: 32 }} />
+                </tr>
+              </thead>
+              <tbody>
+                {(equipEdits[equipYear] || [EMPTY_EQUIP_ROW()]).map((row, idx) => {
+                  const makeModelsForMake = makeModels.filter(m => m.make === row.tractor_make).map(m => m.model);
+                  const engineMakeLimits = ENGINE_MAKE_LIMITS_LOCAL[row.tractor_make];
+                  const availEngMakes = engineMakeLimits === null ? [] : engineMakeLimits
+                    ? engineMakeLimits
+                    : [...new Set(engineModels.map(m => m.make))].sort();
+                  const availEngModels = engineModels.filter(m => m.make === row.engine_make).map(m => m.model);
+                  return (
+                    <tr key={idx} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                      <td style={{ padding: '4px 6px' }}>
+                        <input type="number" value={row.qty} onChange={e => setEquipCell(equipYear, idx, 'qty', e.target.value)}
+                          style={{ width: 52, padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12, textAlign: 'center' }} />
+                      </td>
+                      <td style={{ padding: '4px 6px' }}>
+                        <select value={row.cab_type} onChange={e => setEquipCell(equipYear, idx, 'cab_type', e.target.value)}
+                          style={{ padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12 }}>
+                          <option value="">—</option>
+                          {['Sleeper', 'Day Cab', 'Straight Truck'].map(ct => <option key={ct} value={ct}>{ct}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ padding: '4px 6px' }}>
+                        <select value={row.tractor_make} onChange={e => setEquipCell(equipYear, idx, 'tractor_make', e.target.value)}
+                          style={{ padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12 }}>
+                          <option value="">—</option>
+                          {tractorMakes.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ padding: '4px 6px' }}>
+                        <select value={row.tractor_model} onChange={e => setEquipCell(equipYear, idx, 'tractor_model', e.target.value)}
+                          style={{ padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12 }}>
+                          <option value="">—</option>
+                          {makeModelsForMake.map(m => <option key={m} value={m}>{m}</option>)}
+                        </select>
+                      </td>
+                      <td style={{ padding: '4px 6px' }}>
+                        {engineMakeLimits === null ? (
+                          <span style={{ fontSize: 11, color: '#9CA3AF' }}>N/A</span>
+                        ) : (
+                          <select value={row.engine_make} onChange={e => setEquipCell(equipYear, idx, 'engine_make', e.target.value)}
+                            style={{ padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12 }}>
+                            <option value="">—</option>
+                            {availEngMakes.map(m => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                        )}
+                      </td>
+                      <td style={{ padding: '4px 6px' }}>
+                        {engineMakeLimits === null ? (
+                          <span style={{ fontSize: 11, color: '#9CA3AF' }}>N/A</span>
+                        ) : (
+                          <select value={row.engine_model} onChange={e => setEquipCell(equipYear, idx, 'engine_model', e.target.value)}
+                            style={{ padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12 }}>
+                            <option value="">—</option>
+                            {availEngModels.map(m => <option key={m} value={m}>{m}</option>)}
+                          </select>
+                        )}
+                      </td>
+                      <td style={{ padding: '4px 6px', textAlign: 'center' }}>
+                        <button onClick={() => removeEquipRow(equipYear, idx)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', fontSize: 14 }} title="Remove">✕</button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <button onClick={() => addEquipRow(equipYear)} style={{ ...bGhost, fontSize: 12, padding: '5px 14px', alignSelf: 'flex-start' }}>+ Add row</button>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <button onClick={() => setStep('equip-util')} style={bGhost}>← Back</button>
+            <button onClick={() => setStep('final-review')} style={bPrim}>Continue to Review →</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Final review ──────────────────────────────────────────────────
+  if (step === 'final-review') {
+    const fuelState = groupInputs['__fuel__'] || {};
+    const selectedFuelTypes = fuelState.fuelTypes || [];
+    const fuelFirstYear = fuelState.firstYear || maxYear;
+    const fuelYears = sortedYears.filter(y => y >= fuelFirstYear);
+    const hasFuel = selectedFuelTypes.length > 0 && fuelYears.length > 0;
+
+    const utilEntered = equipYears.some(yr => (utilEdits[yr] || []).some(r => r.application));
+    const equipEntered = equipYears.some(yr => (equipEdits[yr] || []).some(r => r.qty || r.tractor_make));
+
+    const sectionStyle = { background: '#F9FAFB', borderRadius: 10, border: '1px solid #E5E7EB', padding: '14px 18px' };
+    const sectionHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 };
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Final Review</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Review before submitting" />
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Review what you've entered. Click <strong>Edit</strong> on any section to go back and make changes.
+          </p>
+
+          {/* Tech adoption summary */}
+          <div style={sectionStyle}>
+            <div style={sectionHead}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Adoption — {cabType}</span>
+              <button onClick={() => setStep({ group: visibleGroups[0], phase: 'input' })} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
+            </div>
+            <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
+              {visibleGroups.length} group{visibleGroups.length !== 1 ? 's' : ''}: {visibleGroups.join(', ')}
+            </p>
+          </div>
+
+          {/* Fuel summary */}
+          <div style={sectionStyle}>
+            <div style={sectionHead}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Fuel (IFTA)</span>
+              <button onClick={() => setStep('fuel-setup')} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
+            </div>
+            {hasFuel ? (
+              <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
+                {fuelYears.length} year{fuelYears.length !== 1 ? 's' : ''} ({fuelYears.join(', ')}) · {selectedFuelTypes.join(', ')}
+              </p>
+            ) : (
+              <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>No fuel data entered</p>
+            )}
+          </div>
+
+          {/* Equip util summary */}
+          <div style={sectionStyle}>
+            <div style={sectionHead}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Equipment Utilization</span>
+              <button onClick={() => setStep('equip-util')} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
+            </div>
+            {utilEntered ? (
+              <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
+                Data entered for {equipYears.filter(yr => (utilEdits[yr] || []).some(r => r.application)).join(', ')}
+              </p>
+            ) : (
+              <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>Skipped (optional)</p>
+            )}
+          </div>
+
+          {/* Fleet equip summary */}
+          <div style={sectionStyle}>
+            <div style={sectionHead}>
+              <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Fleet Equipment</span>
+              <button onClick={() => setStep('fleet-equip')} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
+            </div>
+            {equipEntered ? (
+              <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
+                Data entered for {equipYears.filter(yr => (equipEdits[yr] || []).some(r => r.qty || r.tractor_make)).join(', ')}
+              </p>
+            ) : (
+              <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>Skipped (optional)</p>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button onClick={() => setStep('interview-complete')} style={bPrim}>Looks good →</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Interview complete — submit or save for later ──────────────────
+  if (step === 'interview-complete') {
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Ready to Submit</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label="Complete" />
+          <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '16px 20px', fontSize: 13, color: '#374151' }}>
+            <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#15803D', fontSize: 14 }}>Your interview is complete</p>
+            <p style={{ margin: 0, lineHeight: 1.65 }}>
+              All data has been collected. You can <strong>submit now</strong> to officially log this data for the Fleet Fuel Study,
+              or <strong>save your progress</strong> and submit from the Data page when you're ready.
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {[true, false].map(submit => (
+              <button key={String(submit)} onClick={() => {
+                const { finalInputs, finalEdits } = buildFinalTechFuel();
+                const fuelRows = buildFuelRowsFromEdits(finalEdits, finalInputs);
+                onComplete(cabType, mergeGroupEdits(finalEdits), finalInputs, fuelRows, utilEdits, equipEdits, submit);
+              }} style={{ ...(submit ? bPrim : bGhost), textAlign: 'center' }}>
+                {submit ? 'Submit Now' : 'Save data, submit later from Data page'}
+              </button>
+            ))}
+          </div>
+          <button onClick={() => setStep('final-review')} style={{ ...bGhost, alignSelf: 'flex-start', fontSize: 12, padding: '5px 12px' }}>← Back to review</button>
         </div>
       </div>
     );
@@ -1023,18 +1452,6 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           All technology groups are done. Next, we'll collect your IFTA fuel data so we can calculate fleet MPG.
         </p>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-          <button onClick={() => {
-              let finalInputs = groupInputs;
-              let finalEdits  = groupEdits;
-              for (const grp of visibleGroups) {
-                const declined = !autoZero && reviewZeroAsked[grp] === false;
-                if (!declined) {
-                  finalInputs = applyZeroToGroup(grp, finalInputs);
-                  finalEdits  = applyZeroToGroupEdits(grp, finalInputs, finalEdits);
-                }
-              }
-              onComplete(cabType, mergeGroupEdits(finalEdits), finalInputs, []);
-            }} style={bGhost}>Skip fuel, apply tech only</button>
           <button onClick={() => setStep('fuel-setup')} style={bPrim}>Continue to Fuel →</button>
         </div>
       </div>
@@ -3751,16 +4168,47 @@ export default function App() {
             effectiveEditableYears={editableYears}
             savedProgress={interviewProgress}
             interviewInputsByCAB={interviewInputsByCAB}
-            onComplete={async (interviewCabType, newTechEdits, rawGroupInputs, fuelRows) => {
-              setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: rawGroupInputs }));
-              // Save fuel rows to DB
+            onComplete={async (interviewCabType, newTechEdits, rawGroupInputs, fuelRows, utilEditsMap, equipEditsMap, shouldSubmit) => {
+              if (rawGroupInputs) setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: rawGroupInputs }));
+              const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+              const saves = [];
+              // Save fuel rows
               if (fuelRows && fuelRows.length > 0) {
-                const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
                 const byYear = {};
                 for (const r of fuelRows) { if (!byYear[r.year]) byYear[r.year] = []; byYear[r.year].push(r); }
-                await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
+                saves.push(...Object.entries(byYear).map(([yr, rows]) =>
                   fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
                 ));
+              }
+              // Save equipment utilization rows
+              if (utilEditsMap) {
+                const pctRatio = s => s !== '' && s != null ? parseFloat(s) / 100 : null;
+                for (const [yr, rows] of Object.entries(utilEditsMap)) {
+                  const utilRows = rows.filter(r => r.application).map(r => ({
+                    application: r.application,
+                    tractors: r.tractors !== '' ? parseInt(r.tractors) : null,
+                    trailers: r.trailers !== '' ? parseInt(r.trailers) : null,
+                    grossed_out_perc: pctRatio(r.grossed_out_pct),
+                    cubed_out_perc:   pctRatio(r.cubed_out_pct),
+                    ave_length_haul:  r.ave_length_haul !== '' ? parseInt(r.ave_length_haul) : null,
+                    empty_miles_perc: pctRatio(r.empty_miles_pct),
+                  }));
+                  if (utilRows.length > 0)
+                    saves.push(fetch(`/api/fleet-details/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ utilization: utilRows }) }));
+                }
+              }
+              // Save fleet equipment rows
+              if (equipEditsMap) {
+                for (const [yr, rows] of Object.entries(equipEditsMap)) {
+                  const equipRows = rows.filter(r => r.qty || r.tractor_make || r.cab_type);
+                  if (equipRows.length > 0)
+                    saves.push(fetch(`/api/fleet-equip/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows: equipRows }) }));
+                }
+              }
+              await Promise.all(saves);
+              // Submit if requested
+              if (shouldSubmit) {
+                await fetch('/api/submit-all', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
               }
               // Clear server-side progress
               saveInterviewProgress(null);
