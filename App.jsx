@@ -4569,6 +4569,7 @@ function SubmitPanel({ token, editableYears, submittedYears, saveCount, onSubmit
 
   if (alreadySubmitted) return null;
   if (loadedCount === 0) return null; // still loading
+  if (!canSubmit) return null; // not enough data yet
 
   return (
     <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
