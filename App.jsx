@@ -844,7 +844,8 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     const allFuelTypes = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
     const fuelState = groupInputs['__fuel__'] || {};
     const selectedTypes = fuelState.fuelTypes || ['Diesel'];
-    const firstYear = fuelState.firstYear || maxYear;
+    const minFirstYear = sortedYears.length >= 2 ? sortedYears[sortedYears.length - 2] : maxYear;
+    const firstYear = fuelState.firstYear || minFirstYear;
 
     const toggleFuelType = (ft) => {
       const next = selectedTypes.includes(ft)
@@ -857,6 +858,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
       setGroupInputs(prev => ({ ...prev, '__fuel__': { ...fuelState, firstYear: Number(yr) } }));
 
     const fuelYears = sortedYears.filter(y => y >= firstYear);
+    const selectableYears = sortedYears.filter(y => y <= minFirstYear);
 
     return (
       <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
@@ -885,10 +887,11 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
             </div>
           </div>
           <div>
-            <p style={{ margin: '0 0 10px', fontWeight: 600, fontSize: 14, color: '#111827' }}>How far back do you have IFTA data available?</p>
+            <p style={{ margin: '0 0 4px', fontWeight: 600, fontSize: 14, color: '#111827' }}>How far back do you have IFTA data available?</p>
+            <p style={{ margin: '0 0 10px', fontSize: 12, color: '#6B7280' }}>At minimum the last 2 years are required. You may go further back.</p>
             <select value={firstYear} onChange={e => setFirstYear(e.target.value)}
               style={{ padding: '6px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }}>
-              {sortedYears.map(y => <option key={y} value={y}>{y}{y === maxYear ? ' (this year only)' : ''}</option>)}
+              {selectableYears.map(y => <option key={y} value={y}>{y}{y === minFirstYear ? ' (minimum — 2 years)' : ''}</option>)}
             </select>
             {fuelYears.length > 1 && (
               <p style={{ margin: '6px 0 0', fontSize: 12, color: '#6B7280' }}>
@@ -1254,7 +1257,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
                         <select value={row.cab_type} onChange={e => setEquipCell(equipYear, idx, 'cab_type', e.target.value)}
                           style={{ padding: '4px 6px', border: '1px solid #D1D5DB', borderRadius: 4, fontSize: 12 }}>
                           <option value="">—</option>
-                          {['Sleeper', 'Day Cab', 'Straight Truck'].map(ct => <option key={ct} value={ct}>{ct}</option>)}
+                          {['Sleeper', 'Day Cab'].map(ct => <option key={ct} value={ct}>{ct}</option>)}
                         </select>
                       </td>
                       <td style={{ padding: '4px 6px' }}>
@@ -4377,7 +4380,7 @@ export default function App() {
         )}
 
         {/* Charts row — replaced with welcome card for new fleets */}
-        {isNewFleet && interviewProgressLoaded ? (
+        {isNewFleet && interviewProgressLoaded && submittedYears.length === 0 ? (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E5E7EB', padding: '32px 36px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
               <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#1c3660' }}>Welcome to the Fleet Fuel Study</h2>
