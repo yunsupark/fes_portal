@@ -4291,6 +4291,17 @@ export default function App() {
               if (rawGroupInputs) setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: rawGroupInputs }));
               const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
               const saves = [];
+              // Save tech adoption rows
+              if (newTechEdits) {
+                for (const [yr, techs] of Object.entries(newTechEdits)) {
+                  const hasData = Object.values(techs).some(v => v !== '' && v != null);
+                  if (hasData)
+                    saves.push(fetch(`/api/techs/${yr}`, {
+                      method: 'PUT', headers,
+                      body: JSON.stringify({ cab_type: interviewCabType, techs }),
+                    }));
+                }
+              }
               // Save fuel rows
               if (fuelRows && fuelRows.length > 0) {
                 const byYear = {};
