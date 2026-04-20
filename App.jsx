@@ -326,7 +326,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   const handleSaveAndExit = () => {
     const progressState = { step, cabType, groupInputs, groupEdits, autoZero, reviewZeroAsked, utilEdits, equipEdits, equipYear };
     const fuelRows = buildFuelRowsFromEdits(groupEdits, groupInputs);
-    onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState, fuelRows);
+    onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState, fuelRows, utilEdits, equipEdits);
   };
 
   // Build finalized tech+fuel edits (applying zeros), used by both complete paths
@@ -912,7 +912,8 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   if (step === 'fuel-entry') {
     const fuelState = groupInputs['__fuel__'] || {};
     const selectedTypes = fuelState.fuelTypes || ['Diesel'];
-    const firstYear = fuelState.firstYear || maxYear;
+    const fuelEntryMinFirst = sortedYears.length >= 2 ? sortedYears[sortedYears.length - 2] : maxYear;
+    const firstYear = fuelState.firstYear || fuelEntryMinFirst;
     const fuelYears = sortedYears.filter(y => y >= firstYear);
     const fuelEdits = groupEdits['__fuel__'] || {};
 
@@ -1016,7 +1017,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={() => setStep('fuel-setup')} style={bGhost}>← Back</button>
-            <button onClick={() => setStep('fuel-done')} style={bPrim}>Review & Finish →</button>
+            <button onClick={() => setStep('fuel-done')} style={bPrim}>Continue →</button>
           </div>
         </div>
       </div>
@@ -1027,7 +1028,8 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   if (step === 'fuel-done') {
     const fuelState = groupInputs['__fuel__'] || {};
     const selectedTypes = fuelState.fuelTypes || ['Diesel'];
-    const firstYear = fuelState.firstYear || maxYear;
+    const fuelDoneMinFirst = sortedYears.length >= 2 ? sortedYears[sortedYears.length - 2] : maxYear;
+    const firstYear = fuelState.firstYear || fuelDoneMinFirst;
     const fuelYears = sortedYears.filter(y => y >= firstYear);
 
     return (
@@ -1308,7 +1310,10 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           <button onClick={() => addEquipRow(equipYear)} style={{ ...bGhost, fontSize: 12, padding: '5px 14px', alignSelf: 'flex-start' }}>+ Add row</button>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <button onClick={() => setStep('equip-util')} style={bGhost}>← Back</button>
-            <button onClick={() => setStep('final-review')} style={bPrim}>Continue to Review →</button>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setStep('final-review')} style={bGhost}>Skip, go to review →</button>
+              <button onClick={() => setStep('final-review')} style={bPrim}>Continue to Review →</button>
+            </div>
           </div>
         </div>
       </div>
@@ -1318,10 +1323,11 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   // ── Final review ──────────────────────────────────────────────────
   if (step === 'final-review') {
     const fuelState = groupInputs['__fuel__'] || {};
-    const selectedFuelTypes = fuelState.fuelTypes || [];
-    const fuelFirstYear = fuelState.firstYear || maxYear;
+    const selectedFuelTypes = fuelState.fuelTypes || ['Diesel'];
+    const fuelMinFirstYear = sortedYears.length >= 2 ? sortedYears[sortedYears.length - 2] : maxYear;
+    const fuelFirstYear = fuelState.firstYear || fuelMinFirstYear;
     const fuelYears = sortedYears.filter(y => y >= fuelFirstYear);
-    const hasFuel = selectedFuelTypes.length > 0 && fuelYears.length > 0;
+    const hasFuel = fuelYears.length > 0;
     const utilEntered = equipYears.some(yr => (utilEdits[yr] || []).some(r => r.application));
     const equipEntered = equipYears.some(yr => (equipEdits[yr] || []).some(r => r.qty || r.tractor_make));
 
@@ -4349,16 +4355,55 @@ export default function App() {
               setShowInterview(false);
               notifySave();
             }}
-            onSaveAndExit={async (interviewCabType, _partialEdits, progressState, fuelRows) => {
+            onSaveAndExit={async (interviewCabType, partialTechEdits, progressState, fuelRows, utilEditsMap, equipEditsMap) => {
               setInterviewInputsByCAB(prev => ({ ...prev, [interviewCabType]: progressState.groupInputs }));
+              const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+              const saves = [];
+              // Save completed tech adoption groups
+              if (partialTechEdits) {
+                for (const [yr, techs] of Object.entries(partialTechEdits)) {
+                  const hasData = Object.values(techs).some(v => v !== '' && v != null);
+                  if (hasData)
+                    saves.push(fetch(`/api/techs/${yr}`, {
+                      method: 'PUT', headers,
+                      body: JSON.stringify({ cab_type: interviewCabType, techs }),
+                    }));
+                }
+              }
+              // Save fuel rows
               if (fuelRows && fuelRows.length > 0) {
-                const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
                 const byYear = {};
                 for (const r of fuelRows) { if (!byYear[r.year]) byYear[r.year] = []; byYear[r.year].push(r); }
-                await Promise.all(Object.entries(byYear).map(([yr, rows]) =>
+                saves.push(...Object.entries(byYear).map(([yr, rows]) =>
                   fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
                 ));
               }
+              // Save util rows
+              if (utilEditsMap) {
+                const pctRatio = s => s !== '' && s != null ? parseFloat(s) / 100 : null;
+                for (const [yr, rows] of Object.entries(utilEditsMap)) {
+                  const utilRows = rows.filter(r => r.application).map(r => ({
+                    application: r.application,
+                    tractors: r.tractors !== '' ? parseInt(r.tractors) : null,
+                    trailers: r.trailers !== '' ? parseInt(r.trailers) : null,
+                    grossed_out_perc: pctRatio(r.grossed_out_pct),
+                    cubed_out_perc:   pctRatio(r.cubed_out_pct),
+                    ave_length_haul:  r.ave_length_haul !== '' ? parseInt(r.ave_length_haul) : null,
+                    empty_miles_perc: pctRatio(r.empty_miles_pct),
+                  }));
+                  if (utilRows.length > 0)
+                    saves.push(fetch(`/api/fleet-details/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ utilization: utilRows }) }));
+                }
+              }
+              // Save equip rows
+              if (equipEditsMap) {
+                for (const [yr, rows] of Object.entries(equipEditsMap)) {
+                  const equipRows = rows.filter(r => r.qty || r.tractor_make || r.cab_type);
+                  if (equipRows.length > 0)
+                    saves.push(fetch(`/api/fleet-equip/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows: equipRows }) }));
+                }
+              }
+              await Promise.all(saves);
               saveInterviewProgress(progressState);
               setInterviewProgress(progressState);
               setShowInterview(false);
@@ -4368,16 +4413,14 @@ export default function App() {
           />
         )}
 
-        {/* Submit panel — shown for established fleets with unsubmitted editable years */}
-        {!isNewFleet && (
-          <SubmitPanel
-            token={token}
-            editableYears={editableYears}
-            submittedYears={submittedYears}
-            saveCount={saveCount}
-            onSubmitted={notifySave}
-          />
-        )}
+        {/* Submit panel — shown once fleet has data to submit */}
+        <SubmitPanel
+          token={token}
+          editableYears={editableYears}
+          submittedYears={submittedYears}
+          saveCount={saveCount}
+          onSubmitted={notifySave}
+        />
 
         {/* Charts row — replaced with welcome card for new fleets */}
         {isNewFleet && interviewProgressLoaded && submittedYears.length === 0 ? (
@@ -4413,12 +4456,9 @@ export default function App() {
                   Start New Fleet Interview →
                 </button>
               ) : (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span style={{ fontSize: 13, color: '#92400E', fontWeight: 600 }}>Interview in progress</span>
-                  <button onClick={() => setShowInterview(true)} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
-                    Resume Interview →
-                  </button>
-                </div>
+                <button onClick={() => setShowInterview(true)} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 8, padding: '11px 24px', fontSize: 14, fontWeight: 700, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  Continue where I left off →
+                </button>
               )}
             </div>
           </div>
