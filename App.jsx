@@ -1319,17 +1319,33 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     const fuelFirstYear = fuelState.firstYear || maxYear;
     const fuelYears = sortedYears.filter(y => y >= fuelFirstYear);
     const hasFuel = selectedFuelTypes.length > 0 && fuelYears.length > 0;
-
     const utilEntered = equipYears.some(yr => (utilEdits[yr] || []).some(r => r.application));
     const equipEntered = equipYears.some(yr => (equipEdits[yr] || []).some(r => r.qty || r.tractor_make));
 
-    const sectionStyle = { background: '#F9FAFB', borderRadius: 10, border: '1px solid #E5E7EB', padding: '14px 18px' };
-    const sectionHead = { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 };
+    // Pre-compute finalized tech edits for display (apply zeros)
+    let displayInputs = groupInputs;
+    let displayEdits  = groupEdits;
+    for (const grp of visibleGroups) {
+      const declined = !autoZero && reviewZeroAsked[grp] === false;
+      if (!declined) {
+        displayInputs = applyZeroToGroup(grp, displayInputs);
+        displayEdits  = applyZeroToGroupEdits(grp, displayInputs, displayEdits);
+      }
+    }
+    const reviewYears = sortedYears.slice(-4); // show last 4 years in tech table
+
+    const sectionStyle = { borderRadius: 10, border: '1px solid #E5E7EB', overflow: 'hidden' };
+    const sectionHead  = {
+      display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+      padding: '12px 16px', background: '#F3F4F6',
+    };
+    const tdBase  = { padding: '5px 10px', fontSize: 12, borderBottom: '1px solid #F3F4F6' };
+    const thBase2 = { padding: '6px 10px', fontSize: 11, fontWeight: 600, color: '#6B7280', background: '#F9FAFB', textAlign: 'center', borderBottom: '1px solid #E5E7EB' };
 
     return (
       <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
         <ExitConfirm />
-        <div style={card}>
+        <div style={{ ...card, maxWidth: 860 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <h2 style={h2style}>Final Review</h2>
             <CloseBtn />
@@ -1339,59 +1355,162 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
             Review what you've entered. Click <strong>Edit</strong> on any section to go back and make changes.
           </p>
 
-          {/* Tech adoption summary */}
+          {/* ── Technology Adoption ── */}
           <div style={sectionStyle}>
             <div style={sectionHead}>
               <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Adoption — {cabType}</span>
               <button onClick={() => setStep({ group: visibleGroups[0], phase: 'input' })} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
             </div>
-            <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
-              {visibleGroups.length} group{visibleGroups.length !== 1 ? 's' : ''}: {visibleGroups.join(', ')}
-            </p>
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                <thead>
+                  <tr>
+                    <th style={{ ...thBase2, textAlign: 'left', minWidth: 180, position: 'sticky', left: 0 }}>Technology</th>
+                    {reviewYears.map(y => <th key={y} style={{ ...thBase2, minWidth: 58 }}>{y}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleGroups.flatMap(grp => {
+                    const techs = getVisibleTechs(grp);
+                    return [
+                      <tr key={`g-${grp}`} style={{ background: '#F3F4F6' }}>
+                        <td colSpan={reviewYears.length + 1} style={{ padding: '4px 10px', fontSize: 11, fontWeight: 700, color: '#6B7280', letterSpacing: 1, textTransform: 'uppercase' }}>{grp}</td>
+                      </tr>,
+                      ...techs.map((tech, ti) => (
+                        <tr key={tech.label} style={{ background: ti % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                          <td style={{ ...tdBase, color: '#374151', position: 'sticky', left: 0, background: ti % 2 === 0 ? '#fff' : '#FAFAFA' }}>{tech.label}</td>
+                          {reviewYears.map(yr => {
+                            const val = (displayEdits[grp]?.[yr] || {})[tech.label];
+                            return (
+                              <td key={yr} style={{ ...tdBase, textAlign: 'center', color: val == null || val === '' ? '#D1D5DB' : '#111827' }}>
+                                {val != null && val !== '' ? `${Math.round(val)}%` : '—'}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      )),
+                    ];
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
-          {/* Fuel summary */}
+          {/* ── Fuel (IFTA) ── */}
           <div style={sectionStyle}>
             <div style={sectionHead}>
               <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Fuel (IFTA)</span>
               <button onClick={() => setStep('fuel-setup')} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
             </div>
-            {hasFuel ? (
-              <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
-                {fuelYears.length} year{fuelYears.length !== 1 ? 's' : ''} ({fuelYears.join(', ')}) · {selectedFuelTypes.join(', ')}
-              </p>
+            {!hasFuel ? (
+              <p style={{ margin: 0, padding: '12px 16px', fontSize: 12, color: '#9CA3AF' }}>No fuel data entered</p>
             ) : (
-              <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>No fuel data entered</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thBase2, textAlign: 'left', minWidth: 100 }}>Year</th>
+                      <th style={{ ...thBase2, textAlign: 'left', minWidth: 100 }}>Fuel Type</th>
+                      <th style={{ ...thBase2, minWidth: 120 }}>IFTA Miles</th>
+                      <th style={{ ...thBase2, minWidth: 120 }}>Volume (gal/DGE)</th>
+                      <th style={{ ...thBase2, minWidth: 80 }}>MPG</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fuelYears.flatMap((yr, yi) =>
+                      selectedFuelTypes.map((ft, fi) => {
+                        const miles = (groupEdits['__fuel__']?.[yr] || {})[`${ft}__miles`] ?? '';
+                        const vol   = (groupEdits['__fuel__']?.[yr] || {})[`${ft}__vol`]   ?? '';
+                        const mpg   = miles !== '' && vol !== '' && parseFloat(vol) > 0
+                          ? (parseFloat(miles) / parseFloat(vol)).toFixed(2) : '—';
+                        const bg = (yi * selectedFuelTypes.length + fi) % 2 === 0 ? '#fff' : '#FAFAFA';
+                        return (
+                          <tr key={`${yr}-${ft}`} style={{ background: bg }}>
+                            <td style={{ ...tdBase, color: '#374151' }}>{yr}</td>
+                            <td style={{ ...tdBase, color: '#374151' }}>{ft}</td>
+                            <td style={{ ...tdBase, textAlign: 'center', color: miles !== '' ? '#111827' : '#D1D5DB' }}>{miles !== '' ? Number(miles).toLocaleString() : '—'}</td>
+                            <td style={{ ...tdBase, textAlign: 'center', color: vol !== '' ? '#111827' : '#D1D5DB' }}>{vol !== '' ? Number(vol).toLocaleString() : '—'}</td>
+                            <td style={{ ...tdBase, textAlign: 'center', color: mpg !== '—' ? '#111827' : '#D1D5DB', fontWeight: mpg !== '—' ? 600 : 400 }}>{mpg}</td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
-          {/* Equip util summary */}
+          {/* ── Equipment Utilization ── */}
           <div style={sectionStyle}>
             <div style={sectionHead}>
               <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Equipment Utilization</span>
               <button onClick={() => setStep('equip-util')} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
             </div>
-            {utilEntered ? (
-              <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
-                Data entered for {equipYears.filter(yr => (utilEdits[yr] || []).some(r => r.application)).join(', ')}
-              </p>
+            {!utilEntered ? (
+              <p style={{ margin: 0, padding: '12px 16px', fontSize: 12, color: '#9CA3AF' }}>Skipped (optional)</p>
             ) : (
-              <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>Skipped (optional)</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {['Year','Application','Tractors','Trailers','Grossed Out %','Cubed Out %','Avg Haul (mi)','Empty Miles %'].map(h => (
+                        <th key={h} style={{ ...thBase2, textAlign: h === 'Year' || h === 'Application' ? 'left' : 'center', minWidth: h === 'Application' ? 130 : 80 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {equipYears.flatMap(yr =>
+                      (utilEdits[yr] || []).filter(r => r.application).map((r, i) => (
+                        <tr key={`${yr}-${i}`} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                          <td style={{ ...tdBase, color: '#374151' }}>{yr}</td>
+                          <td style={{ ...tdBase, color: '#374151' }}>{r.application}</td>
+                          {['tractors','trailers','grossed_out_pct','cubed_out_pct','ave_length_haul','empty_miles_pct'].map(k => (
+                            <td key={k} style={{ ...tdBase, textAlign: 'center', color: r[k] !== '' && r[k] != null ? '#111827' : '#D1D5DB' }}>
+                              {r[k] !== '' && r[k] != null ? (k.endsWith('_pct') ? `${r[k]}%` : r[k]) : '—'}
+                            </td>
+                          ))}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
-          {/* Fleet equip summary */}
+          {/* ── Fleet Equipment ── */}
           <div style={sectionStyle}>
             <div style={sectionHead}>
               <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Fleet Equipment</span>
               <button onClick={() => setStep('fleet-equip')} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
             </div>
-            {equipEntered ? (
-              <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>
-                Data entered for {equipYears.filter(yr => (equipEdits[yr] || []).some(r => r.qty || r.tractor_make)).join(', ')}
-              </p>
+            {!equipEntered ? (
+              <p style={{ margin: 0, padding: '12px 16px', fontSize: 12, color: '#9CA3AF' }}>Skipped (optional)</p>
             ) : (
-              <p style={{ margin: 0, fontSize: 12, color: '#9CA3AF' }}>Skipped (optional)</p>
+              <div style={{ overflowX: 'auto' }}>
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {['Year','Qty','Cab Type','Make','Model','Engine Make','Engine Model'].map(h => (
+                        <th key={h} style={{ ...thBase2, textAlign: h === 'Year' ? 'left' : 'center', minWidth: h === 'Model' || h === 'Engine Model' ? 120 : 70 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {equipYears.flatMap(yr =>
+                      (equipEdits[yr] || []).filter(r => r.qty || r.tractor_make || r.cab_type).map((r, i) => (
+                        <tr key={`${yr}-${i}`} style={{ background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                          <td style={{ ...tdBase, color: '#374151' }}>{yr}</td>
+                          {[r.qty, r.cab_type, r.tractor_make, r.tractor_model, r.engine_make, r.engine_model].map((v, vi) => (
+                            <td key={vi} style={{ ...tdBase, textAlign: 'center', color: v ? '#111827' : '#D1D5DB' }}>{v || '—'}</td>
+                          ))}
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
+              </div>
             )}
           </div>
 
@@ -4235,6 +4354,17 @@ export default function App() {
           />
         )}
 
+        {/* Submit panel — shown for established fleets with unsubmitted editable years */}
+        {!isNewFleet && (
+          <SubmitPanel
+            token={token}
+            editableYears={editableYears}
+            submittedYears={submittedYears}
+            saveCount={saveCount}
+            onSubmitted={notifySave}
+          />
+        )}
+
         {/* Charts row — replaced with welcome card for new fleets */}
         {isNewFleet && interviewProgressLoaded ? (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E5E7EB', padding: '32px 36px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -4313,6 +4443,155 @@ export default function App() {
           onCancel={() => setEntering(false)}
           onSave={() => setEntering(false)}
         />
+      )}
+    </div>
+  );
+}
+
+// ─── Submit Panel ─────────────────────────────────────────────────────────────
+
+function SubmitPanel({ token, editableYears, submittedYears, saveCount, onSubmitted }) {
+  const [status,    setStatus]    = useState(null); // null | 'checking-optional' | 'submitting' | 'done' | 'error'
+  const [hasUtil,   setHasUtil]   = useState(null); // null = not yet checked
+  const [hasEquip,  setHasEquip]  = useState(null);
+  const [mpgYears,  setMpgYears]  = useState({});   // { year: mpg }
+  const [techYears, setTechYears] = useState({});   // { year: avgPct }
+  const [loadedCount, setLoadedCount] = useState(0);
+
+  const neededYears = [...editableYears].sort((a, b) => a - b);
+  const requiredYears = neededYears.slice(-2); // most recent 2
+
+  useEffect(() => {
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      fetch('/api/chart-data', { headers }).then(r => r.ok ? r.json() : {}),
+      fetch('/api/fleet-details', { headers }).then(r => r.ok ? r.json() : {}),
+      fetch('/api/fleet-equip',   { headers }).then(r => r.ok ? r.json() : {}),
+    ]).then(([chartData, utilData, equipData]) => {
+      setMpgYears(chartData.ownMpg || {});
+      // Combine sleeper + day cab adoption — if either cab type has data for the year, count it
+      const combined = {};
+      for (const [yr, v] of Object.entries(chartData.sleeperAdoption || {})) combined[yr] = v;
+      for (const [yr, v] of Object.entries(chartData.dayCabAdoption  || {})) {
+        if (combined[yr] == null) combined[yr] = v;
+      }
+      setTechYears(combined);
+      setHasUtil(Object.keys(utilData).some(yr => (utilData[yr]?.utilization || []).length > 0));
+      setHasEquip(Object.keys(equipData).some(yr => (equipData[yr] || []).length > 0));
+      setLoadedCount(c => c + 1);
+    }).catch(() => {});
+  }, [token, saveCount]);
+
+  const missingRequired = requiredYears.filter(yr =>
+    (mpgYears[yr] == null) || (techYears[yr] == null)
+  );
+  const canSubmit = missingRequired.length === 0;
+  const alreadySubmitted = requiredYears.every(yr => submittedYears.includes(yr));
+  const unsubmitted = neededYears.filter(yr => !submittedYears.includes(yr));
+
+  const doSubmit = async () => {
+    setStatus('submitting');
+    try {
+      await Promise.all(unsubmitted.map(yr =>
+        fetch(`/api/submit/${yr}`, { method: 'POST', headers: { Authorization: `Bearer ${token}` } })
+      ));
+      setStatus('done');
+      onSubmitted?.();
+    } catch {
+      setStatus('error');
+    }
+  };
+
+  const handleSubmitClick = () => {
+    if (!canSubmit) return;
+    if (alreadySubmitted) return;
+    if (!hasUtil || !hasEquip) {
+      setStatus('checking-optional');
+    } else {
+      doSubmit();
+    }
+  };
+
+  if (alreadySubmitted) return null;
+  if (loadedCount === 0) return null; // still loading
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 15, color: '#111827' }}>Submit Fleet Fuel Study Data</p>
+          <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
+            Submit your data for {unsubmitted.join(', ')} to the Fleet Fuel Study.
+          </p>
+        </div>
+        <button
+          onClick={handleSubmitClick}
+          disabled={!canSubmit || status === 'submitting'}
+          title={!canSubmit ? `Missing required data for: ${missingRequired.join(', ')} (tech adoption and MPG required)` : undefined}
+          style={{
+            background: canSubmit ? '#1c3660' : '#E5E7EB',
+            color: canSubmit ? '#fff' : '#9CA3AF',
+            border: 'none', borderRadius: 8, padding: '10px 24px',
+            fontSize: 14, fontWeight: 700, cursor: canSubmit ? 'pointer' : 'not-allowed',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {status === 'submitting' ? 'Submitting…' : status === 'done' ? 'Submitted ✓' : 'Submit'}
+        </button>
+      </div>
+
+      {/* Required data checklist */}
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {requiredYears.map(yr => {
+          const hasMpg  = mpgYears[yr] != null;
+          const hasTech = techYears[yr] != null;
+          const ok = hasMpg && hasTech;
+          return (
+            <div key={yr} style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px',
+              borderRadius: 6, background: ok ? '#F0FDF4' : '#FFF7ED',
+              border: `1px solid ${ok ? '#BBF7D0' : '#FCD34D'}`,
+              fontSize: 12,
+            }}>
+              <span style={{ fontWeight: 700, color: ok ? '#15803D' : '#92400E' }}>{yr}</span>
+              <span style={{ color: hasTech ? '#15803D' : '#DC2626' }}>{hasTech ? '✓' : '✗'} Tech</span>
+              <span style={{ color: hasMpg  ? '#15803D' : '#DC2626' }}>{hasMpg  ? '✓' : '✗'} MPG</span>
+              <span style={{ color: hasUtil ? '#15803D' : '#9CA3AF' }}>{hasUtil ? '✓' : '○'} Equip Util</span>
+              <span style={{ color: hasEquip ? '#15803D' : '#9CA3AF' }}>{hasEquip ? '✓' : '○'} Fleet Equip</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {!canSubmit && (
+        <p style={{ margin: 0, fontSize: 12, color: '#DC2626' }}>
+          Tech adoption and IFTA MPG data are required for the {requiredYears.length === 1 ? 'most recent year' : `${requiredYears.length} most recent years`} before submitting.
+        </p>
+      )}
+      {status === 'error' && (
+        <p style={{ margin: 0, fontSize: 12, color: '#DC2626' }}>Submission failed. Please try again.</p>
+      )}
+
+      {/* Optional section prompt */}
+      {status === 'checking-optional' && (
+        <div style={{ background: '#FFFBEB', border: '1px solid #FCD34D', borderRadius: 8, padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <p style={{ margin: 0, fontWeight: 600, fontSize: 13, color: '#92400E' }}>
+            Optional sections are incomplete
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: '#374151' }}>
+            {[!hasUtil && 'Equipment Utilization', !hasEquip && 'Fleet Equipment'].filter(Boolean).join(' and ')} {(!hasUtil && !hasEquip) ? 'have' : 'has'} not been filled in.
+            These sections help us better understand your fleet. Would you like to fill them in before submitting?
+          </p>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button onClick={() => setStatus(null)} style={{ background: '#fff', color: '#374151', border: '1px solid #D1D5DB', borderRadius: 7, padding: '7px 16px', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+              Go back and fill in optional sections
+            </button>
+            <button onClick={doSubmit} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 16px', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+              Submit without optional sections
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
