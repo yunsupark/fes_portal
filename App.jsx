@@ -1361,12 +1361,12 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
               <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Adoption — {cabType}</span>
               <button onClick={() => setStep({ group: visibleGroups[0], phase: 'input' })} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
             </div>
-            <div style={{ overflowX: 'auto' }}>
+            <div style={{ overflowX: 'auto', maxHeight: 300, overflowY: 'auto' }}>
               <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: 12 }}>
                 <thead>
                   <tr>
-                    <th style={{ ...thBase2, textAlign: 'left', minWidth: 180, position: 'sticky', left: 0 }}>Technology</th>
-                    {reviewYears.map(y => <th key={y} style={{ ...thBase2, minWidth: 58 }}>{y}</th>)}
+                    <th style={{ ...thBase2, textAlign: 'left', minWidth: 180, position: 'sticky', left: 0, top: 0, zIndex: 2 }}>Technology</th>
+                    {reviewYears.map(y => <th key={y} style={{ ...thBase2, minWidth: 58, position: 'sticky', top: 0, zIndex: 1 }}>{y}</th>)}
                   </tr>
                 </thead>
                 <tbody>
