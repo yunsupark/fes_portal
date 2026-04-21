@@ -53,7 +53,7 @@ function LoginScreen({ onLogin }) {
         <div style={styles.loginLogo}>
           <img src="/nacfe-logo.png" alt="NACFE" style={styles.loginLogoImg} />
         </div>
-        <h1 style={styles.loginTitle}>Fleet Fuel Study</h1>
+        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
         <p style={styles.loginSub}>Fleet Portal</p>
 
         <form onSubmit={handleSubmit} style={styles.loginForm}>
@@ -529,7 +529,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div>
-              <h2 style={h2style}>Fleet Fuel Study New Fleet Interview</h2>
+              <h2 style={h2style}>Fleet Efficiency Study New Fleet Interview</h2>
               <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>We will start with the technology adoption section.</p>
             </div>
             <CloseBtn />
@@ -1668,7 +1668,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '16px 20px', fontSize: 13, color: '#374151' }}>
             <p style={{ margin: '0 0 8px', fontWeight: 700, color: '#15803D', fontSize: 14 }}>Your interview is complete</p>
             <p style={{ margin: 0, lineHeight: 1.65 }}>
-              All data has been collected. You can <strong>submit now</strong> to officially log this data for the Fleet Fuel Study,
+              All data has been collected. You can <strong>submit now</strong> to officially log this data for the Fleet Efficiency Study,
               or <strong>save your progress</strong> and submit from the Data page when you're ready.
             </p>
           </div>
@@ -4549,7 +4549,7 @@ export default function App() {
         {isNewFleet && interviewProgressLoaded && submittedYears.length === 0 ? (
           <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E5E7EB', padding: '32px 36px', boxShadow: '0 2px 12px rgba(0,0,0,0.06)', display: 'flex', flexDirection: 'column', gap: 20 }}>
             <div>
-              <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#1c3660' }}>Welcome to the Fleet Fuel Study</h2>
+              <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700, color: '#1c3660' }}>Welcome to the Fleet Efficiency Study</h2>
               <p style={{ margin: 0, fontSize: 14, color: '#6B7280' }}>Let's get your fleet's data set up.</p>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 16 }}>
@@ -4698,9 +4698,9 @@ function SubmitPanel({ token, editableYears, submittedYears, saveCount, onSubmit
     <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 14, marginBottom: 24 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 15, color: '#111827' }}>Submit Fleet Fuel Study Data</p>
+          <p style={{ margin: '0 0 4px', fontWeight: 700, fontSize: 15, color: '#111827' }}>Submit Fleet Efficiency Study Data</p>
           <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
-            Submit your data for {unsubmitted.join(', ')} to the Fleet Fuel Study.
+            Submit your data for {unsubmitted.join(', ')} to the Fleet Efficiency Study.
           </p>
         </div>
         <button
