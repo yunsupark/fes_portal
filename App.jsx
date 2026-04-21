@@ -189,7 +189,10 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   const [confirmExit, setConfirmExit] = useState(null);
   const [autoZero, setAutoZero]       = useState(savedProgress?.autoZero ?? false);
   const [reviewZeroAsked, setReviewZeroAsked] = useState(savedProgress?.reviewZeroAsked || {});
+  const [isSecondCab, setIsSecondCab] = useState(savedProgress?.isSecondCab ?? false);
   const [fuelBenchmarks, setFuelBenchmarks] = useState({});
+  const [categoriesCabType, setCategoriesCabType] = useState(null);
+  const [pendingCabSwitch, setPendingCabSwitch] = useState(null); // { inputs, targetStep }
   const pctRefs = useRef([]);
 
   // ── Equipment steps state ──────────────────────────────────────────
@@ -239,7 +242,10 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     if (!token) return;
     fetch(`/api/techs?cab_type=${encodeURIComponent(cabType)}`, {
       headers: { Authorization: `Bearer ${token}` },
-    }).then(r => r.json()).then(t => setCategories(t.categories || {})).catch(() => {});
+    }).then(r => r.json()).then(t => {
+      setCategories(t.categories || {});
+      setCategoriesCabType(cabType);
+    }).catch(() => {});
   }, [cabType, token]);
 
   const getVisibleTechs = (groupName) =>
@@ -251,6 +257,36 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     });
 
   const visibleGroups = Object.keys(categories).filter(g => getVisibleTechs(g).length > 0);
+
+  // Apply a pending cab-type switch once the new cab's categories have loaded
+  useEffect(() => {
+    if (!pendingCabSwitch) return;
+    if (categoriesCabType !== cabType) return; // categories not yet refreshed for new cab
+    if (visibleGroups.length === 0) return;
+    const { inputs, targetStep } = pendingCabSwitch;
+    if (inputs) {
+      const carried = {};
+      for (const [grp, techInputs] of Object.entries(inputs)) {
+        const applicable = getVisibleTechs(grp);
+        const groupCarry = {};
+        for (const tech of applicable) {
+          if (techInputs[tech.label]) groupCarry[tech.label] = { ...techInputs[tech.label] };
+        }
+        if (Object.keys(groupCarry).length > 0) carried[grp] = groupCarry;
+      }
+      setGroupInputs(carried);
+      const newEdits = {};
+      for (const grp of Object.keys(carried)) {
+        newEdits[grp] = computeGroupEditsFromInputs(grp, carried[grp] || {});
+      }
+      setGroupEdits(newEdits);
+    } else {
+      setGroupInputs({});
+      setGroupEdits({});
+    }
+    setStep({ group: visibleGroups[0], phase: targetStep });
+    setPendingCabSwitch(null);
+  }, [categories, pendingCabSwitch]); // eslint-disable-line
 
   const computeGroupEditsFromInputs = (groupName, inputs) => {
     const techs = getVisibleTechs(groupName);
@@ -276,7 +312,9 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     : step === 'fuel-done'        ? 75
     : step === 'fuel-entry'       ? 68
     : step === 'fuel-setup'       ? 62
-    : step === 'done'             ? 58
+    : step === 'done'                  ? 58
+    : step === 'second-cab-prompt'     ? 58
+    : step === 'second-cab-carryover'  ? 58
     : typeof step === 'object'
       ? Math.round(((currentGroupIdx + (step.phase === 'review' ? 0.5 : 0)) / totalGroups) * 55)
       : 0;
@@ -311,6 +349,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
 
   // Whether there's any meaningful progress to save (past intro)
   const hasProgress = typeof step === 'object' || step === 'done' ||
+    step === 'second-cab-prompt' || step === 'second-cab-carryover' ||
     step === 'fuel-setup' || step === 'fuel-entry' || step === 'fuel-done' ||
     step === 'equip-intro' || step === 'equip-util' || step === 'fleet-equip' ||
     step === 'final-review' || step === 'interview-complete';
@@ -324,7 +363,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   };
 
   const handleSaveAndExit = () => {
-    const progressState = { step, cabType, groupInputs, groupEdits, autoZero, reviewZeroAsked, utilEdits, equipEdits, equipYear };
+    const progressState = { step, cabType, groupInputs, groupEdits, autoZero, reviewZeroAsked, isSecondCab, utilEdits, equipEdits, equipYear };
     const fuelRows = buildFuelRowsFromEdits(groupEdits, groupInputs);
     onSaveAndExit(cabType, mergeGroupEdits(groupEdits), progressState, fuelRows, utilEdits, equipEdits);
   };
@@ -754,7 +793,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
       if (showZeroPrompt) {
         setReviewZeroAsked(prev => ({ ...prev, [groupName]: false }));
       }
-      if (isLast) setStep('done');
+      if (isLast) setStep(isSecondCab ? 'done' : 'second-cab-prompt');
       else setStep({ group: visibleGroups[currentGroupIdx + 1], phase: 'input' });
     };
 
@@ -834,6 +873,90 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
               {isLast ? 'Finish →' : 'Save & Continue →'}
             </button>
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Second cab type prompt ────────────────────────────────────────
+  if (step === 'second-cab-prompt') {
+    const otherCab = cabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Technology Adoption Complete</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label={`${cabType} complete`} />
+          <div style={{ background: '#F0FDF4', borderRadius: 8, padding: '14px 18px', fontSize: 13, color: '#374151' }}>
+            <p style={{ margin: '0 0 4px', fontWeight: 700, color: '#15803D' }}>
+              {cabType} technology adoption recorded.
+            </p>
+            <p style={{ margin: 0, color: '#6B7280' }}>
+              Would you also like to fill in technology adoption for <strong>{otherCab}</strong> trucks?
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button onClick={() => setStep('second-cab-carryover')} style={{ ...bPrim, flex: 1 }}>
+              Yes, add {otherCab} data →
+            </button>
+            <button onClick={() => setStep('done')} style={{ ...bGhost, flex: 1 }}>
+              No, continue to fuel
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Second cab carryover prompt ───────────────────────────────────
+  if (step === 'second-cab-carryover') {
+    const otherCab = cabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
+    const firstCabInputs = groupInputs; // capture before switching
+
+    const switchCab = (carryover) => {
+      // Save first cab tech data to DB (fire-and-forget)
+      const mergedEdits = mergeGroupEdits(groupEdits);
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+      for (const [yr, techs] of Object.entries(mergedEdits)) {
+        const hasData = Object.values(techs).some(v => v !== '' && v != null);
+        if (hasData) fetch(`/api/techs/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ cab_type: cabType, techs }) });
+      }
+      setIsSecondCab(true);
+      setGroupEdits({});
+      setReviewZeroAsked({});
+      setCabType(otherCab);
+      setPendingCabSwitch({ inputs: carryover ? firstCabInputs : null, targetStep: carryover ? 'review' : 'input' });
+    };
+
+    return (
+      <div style={overlay} onClick={e => e.target === e.currentTarget && handleCloseRequest()}>
+        <ExitConfirm />
+        <div style={card}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+            <h2 style={h2style}>Add {otherCab} Data</h2>
+            <CloseBtn />
+          </div>
+          <ProgressBar label={`Starting ${otherCab} cab type`} />
+          <div style={{ background: '#F0F7FF', borderRadius: 8, padding: '14px 18px', fontSize: 13, color: '#374151', lineHeight: 1.65 }}>
+            <p style={{ margin: '0 0 6px', fontWeight: 700, color: '#1c3660' }}>
+              Would you like to pre-fill {otherCab} answers from your {cabType} responses?
+            </p>
+            <p style={{ margin: 0, color: '#6B7280' }}>
+              Technologies that don't apply to {otherCab} will be filtered out. You can review and adjust each value before saving.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <button onClick={() => switchCab(true)} style={{ ...bPrim, flex: 1 }}>
+              Yes, pre-fill from {cabType}
+            </button>
+            <button onClick={() => switchCab(false)} style={{ ...bGhost, flex: 1 }}>
+              No, start fresh
+            </button>
+          </div>
+          <button onClick={() => setStep('second-cab-prompt')} style={{ ...bGhost, alignSelf: 'flex-start', fontSize: 12, padding: '5px 12px' }}>← Back</button>
         </div>
       </div>
     );
