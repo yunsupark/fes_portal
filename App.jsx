@@ -4364,6 +4364,21 @@ export default function App() {
     setToken(null);
   };
 
+  // Redirect to login if token is expired
+  useEffect(() => {
+    const checkExpiry = () => {
+      const tok = localStorage.getItem('token');
+      if (!tok) return;
+      try {
+        const { exp } = JSON.parse(atob(tok.split('.')[1]));
+        if (exp && exp * 1000 < Date.now()) handleSignOut();
+      } catch {}
+    };
+    checkExpiry();
+    const id = setInterval(checkExpiry, 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   if (!authed) return <LoginScreen onLogin={handleLogin} />;
   if (isAdmin) return <AdminView token={token} onSignOut={handleSignOut} />;
 
