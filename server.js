@@ -170,7 +170,7 @@ app.post("/api/auth/login", async (req, res) => {
     const token = jwt.sign(
       { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id },
       JWT_SECRET,
-      { expiresIn: "8h" }
+      { expiresIn: "30d" }
     );
 
     res.json({
