@@ -18,30 +18,56 @@ function getMpgAlert(mpg, benchmarks, fuelType) {
 // ─── Components ───────────────────────────────────────────────────────────────
 
 function LoginScreen({ onLogin }) {
-  const [email, setEmail] = useState("");
-  const [err, setErr] = useState("");
+  const [view, setView]       = useState('login'); // 'login' | 'forgot' | 'check-email'
+  const [email, setEmail]     = useState("");
+  const [password, setPassword] = useState("");
+  const [err, setErr]         = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
     setErr("");
     if (!email || !email.includes("@")) return setErr("Valid email required");
+    if (!password) return setErr("Password required");
     setLoading(true);
     try {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
+        body: JSON.stringify({ email, password })
       });
       const body = await res.json();
       if (!res.ok) {
-        setErr(body.error || 'Login failed');
+        if (body.error === 'no_password') {
+          setErr('No password set for this account. Use "Forgot password?" below to set one.');
+        } else {
+          setErr(body.error || 'Login failed');
+        }
         setLoading(false);
         return;
       }
       onLogin(body.token, body.fleet);
     } catch (err) {
       setErr(err.message || 'Network error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgot = async (e) => {
+    e.preventDefault();
+    setErr("");
+    if (!email || !email.includes("@")) return setErr("Valid email required");
+    setLoading(true);
+    try {
+      await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email })
+      });
+      setView('check-email');
+    } catch {
+      setErr('Network error. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -56,22 +82,63 @@ function LoginScreen({ onLogin }) {
         <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
         <p style={styles.loginSub}>Fleet Portal</p>
 
-        <form onSubmit={handleSubmit} style={styles.loginForm}>
-          <div style={styles.fieldGroup}>
-            <label style={styles.label}>Email</label>
-            <input
-              style={styles.input}
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="you@example.com"
-              autoFocus
-            />
+        {view === 'login' && (
+          <form onSubmit={handleLogin} style={styles.loginForm}>
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>Email</label>
+              <input style={styles.input} type="email" value={email}
+                onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoFocus />
+            </div>
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>Password</label>
+              <input style={styles.input} type="password" value={password}
+                onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+            </div>
+            {err && <p style={styles.errMsg}>{err}</p>}
+            <button style={{...styles.btn, opacity: loading ? 0.7 : 1}} type="submit" disabled={loading}>
+              {loading ? "Signing in…" : "Sign In"}
+            </button>
+            <button type="button" onClick={() => { setView('forgot'); setErr(''); }}
+              style={{ background: 'none', border: 'none', color: '#6B7280', fontSize: 13, cursor: 'pointer', marginTop: 4 }}>
+              Forgot password?
+            </button>
+          </form>
+        )}
+
+        {view === 'forgot' && (
+          <form onSubmit={handleForgot} style={styles.loginForm}>
+            <p style={{ margin: '0 0 12px', fontSize: 13, color: '#374151' }}>
+              Enter your email and we'll send you a link to set your password.
+            </p>
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>Email</label>
+              <input style={styles.input} type="email" value={email}
+                onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoFocus />
+            </div>
+            {err && <p style={styles.errMsg}>{err}</p>}
+            <button style={{...styles.btn, opacity: loading ? 0.7 : 1}} type="submit" disabled={loading}>
+              {loading ? "Sending…" : "Send reset link"}
+            </button>
+            <button type="button" onClick={() => { setView('login'); setErr(''); }}
+              style={{ background: 'none', border: 'none', color: '#6B7280', fontSize: 13, cursor: 'pointer', marginTop: 4 }}>
+              ← Back to sign in
+            </button>
+          </form>
+        )}
+
+        {view === 'check-email' && (
+          <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <p style={{ fontSize: 14, color: '#374151', lineHeight: 1.65, marginBottom: 16 }}>
+              If <strong>{email}</strong> is registered, you'll receive a password reset link shortly.
+              Check your inbox (and spam folder).
+            </p>
+            <button type="button" onClick={() => { setView('login'); setErr(''); }}
+              style={{ background: 'none', border: 'none', color: '#1c3660', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+              ← Back to sign in
+            </button>
           </div>
-          {err && <p style={styles.errMsg}>{err}</p>}
-          <button style={{...styles.btn, opacity: loading ? 0.7 : 1}} type="submit" disabled={loading}>
-            {loading ? "Signing in…" : "Sign In"}
-          </button>
-        </form>
+        )}
+
         <p style={styles.loginFooter}>
           Need access? Contact <a href="mailto:yunsu.park@nacfe.org" style={styles.link}>yunsu.park@nacfe.org</a>
         </p>
@@ -80,6 +147,71 @@ function LoginScreen({ onLogin }) {
   );
 }
 
+
+function ResetPasswordScreen({ token, onDone }) {
+  const [password, setPassword]   = useState('');
+  const [confirm, setConfirm]     = useState('');
+  const [err, setErr]             = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [success, setSuccess]     = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErr('');
+    if (password.length < 8) return setErr('Password must be at least 8 characters');
+    if (password !== confirm) return setErr('Passwords do not match');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/auth/reset-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, password }),
+      });
+      const body = await res.json();
+      if (!res.ok) return setErr(body.error || 'Failed to set password');
+      setSuccess(true);
+    } catch {
+      setErr('Network error. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={styles.loginBg}>
+      <div style={styles.loginCard}>
+        <div style={styles.loginLogo}>
+          <img src="/nacfe-logo.png" alt="NACFE" style={styles.loginLogoImg} />
+        </div>
+        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
+        <p style={styles.loginSub}>Set your password</p>
+        {success ? (
+          <div style={{ textAlign: 'center', padding: '12px 0' }}>
+            <p style={{ fontSize: 14, color: '#15803D', fontWeight: 600, marginBottom: 12 }}>Password set successfully!</p>
+            <button onClick={onDone} style={styles.btn}>Sign in →</button>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} style={styles.loginForm}>
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>New password</label>
+              <input style={styles.input} type="password" value={password}
+                onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoFocus />
+            </div>
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>Confirm password</label>
+              <input style={styles.input} type="password" value={confirm}
+                onChange={e => setConfirm(e.target.value)} placeholder="••••••••" />
+            </div>
+            {err && <p style={styles.errMsg}>{err}</p>}
+            <button style={{...styles.btn, opacity: loading ? 0.7 : 1}} type="submit" disabled={loading}>
+              {loading ? 'Setting password…' : 'Set password'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function MpgChart({ chartData: cd = {}, fleetName }) {
   const {
@@ -4215,7 +4347,9 @@ function AdminView({ token, onSignOut }) {
 
 // ─── Main App ────────────────────────────────────────────────────────────────
 export default function App() {
-  const previewToken = new URLSearchParams(window.location.search).get('preview');
+  const searchParams  = new URLSearchParams(window.location.search);
+  const previewToken  = searchParams.get('preview');
+  const resetToken    = searchParams.get('reset');
   const [authed, setAuthed] = useState(!!(previewToken || localStorage.getItem('token')));
   const [entering, setEntering] = useState(false);
   const [token, setToken] = useState(previewToken || localStorage.getItem('token') || null);
@@ -4379,6 +4513,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={() => window.location.href = '/'} />;
   if (!authed) return <LoginScreen onLogin={handleLogin} />;
   if (isAdmin) return <AdminView token={token} onSignOut={handleSignOut} />;
 

@@ -3,16 +3,29 @@
 // Usage: node server.js (or nodemon server.js for dev)
 
 require("dotenv").config();
-const express = require("express");
-const mysql   = require("mysql2/promise");
-const cors    = require("cors");
-const bcrypt  = require("bcryptjs");
-const jwt     = require("jsonwebtoken");
-const path    = require("path");
+const express    = require("express");
+const mysql      = require("mysql2/promise");
+const cors       = require("cors");
+const bcrypt     = require("bcryptjs");
+const jwt        = require("jsonwebtoken");
+const path       = require("path");
+const crypto     = require("crypto");
+const nodemailer = require("nodemailer");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production";
+const APP_URL    = (process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3001").replace(/\/$/, "");
+
+const mailer = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 587,
+  secure: false,
+  auth: {
+    user: process.env.SMTP_USER || "noreply@nacfe.org",
+    pass: process.env.SMTP_PASS,
+  },
+});
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:5173",
@@ -101,6 +114,27 @@ const db = mysql.createPool({
         updated_at   DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )
     `);
+    // Password auth columns / table
+    const [[{ pw_col }]] = await db.query(
+      `SELECT COUNT(*) AS pw_col FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ffs_contact' AND COLUMN_NAME = 'password_hash'`
+    );
+    if (!pw_col) {
+      await db.query(`ALTER TABLE ffs_contact ADD COLUMN password_hash VARCHAR(255) NULL`);
+      console.log("Added password_hash column to ffs_contact");
+    }
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ffs_password_reset (
+        id         INT AUTO_INCREMENT PRIMARY KEY,
+        contact_id INT NOT NULL,
+        token      VARCHAR(64) NOT NULL UNIQUE,
+        expires_at DATETIME NOT NULL,
+        used       TINYINT(1) NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_token (token),
+        INDEX idx_contact (contact_id)
+      )
+    `);
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -136,20 +170,27 @@ function requireAuth(req, res, next) {
  * `ffs_contact.email`. It joins to the `fleets` table to return fleet info.
  */
 app.post("/api/auth/login", async (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.status(400).json({ error: "email required" });
+  const { email, password } = req.body;
+  if (!email)    return res.status(400).json({ error: "email required" });
+  if (!password) return res.status(400).json({ error: "password required" });
 
   try {
     const [rows] = await db.query(
       `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
-              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email
+              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email, c.password_hash
        FROM ffs_contact c
        JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
        WHERE c.email = ? LIMIT 1`,
       [email]
     );
     const row = rows[0];
-    if (!row) return res.status(401).json({ error: "Fleet not found for that email" });
+    if (!row) return res.status(401).json({ error: "Invalid email or password" });
+
+    if (!row.password_hash) {
+      return res.status(401).json({ error: "no_password" });
+    }
+    const match = await bcrypt.compare(password, row.password_hash);
+    if (!match) return res.status(401).json({ error: "Invalid email or password" });
 
     // Admins (fleet_id=0) always have access; others must have portal_access=1
     if (row.fleet_id !== 0) {
@@ -185,6 +226,89 @@ app.post("/api/auth/login", async (req, res) => {
     });
   } catch (err) {
     console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * POST /api/auth/forgot-password
+ * Body: { email }
+ * Sends a password reset link. Always returns 200 to prevent email enumeration.
+ */
+app.post("/api/auth/forgot-password", async (req, res) => {
+  const { email } = req.body;
+  if (!email) return res.status(400).json({ error: "email required" });
+  try {
+    const [[contact]] = await db.query(
+      `SELECT c.contact_id, c.first_name
+       FROM ffs_contact c
+       JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
+       WHERE c.email = ? LIMIT 1`,
+      [email]
+    );
+    if (contact) {
+      const token = crypto.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 2 * 60 * 60 * 1000); // 2 hours
+      await db.query(
+        `INSERT INTO ffs_password_reset (contact_id, token, expires_at)
+         VALUES (?, ?, ?)
+         ON DUPLICATE KEY UPDATE token = VALUES(token), expires_at = VALUES(expires_at), used = 0`,
+        [contact.contact_id, token, expiresAt]
+      );
+      const resetUrl = `${APP_URL}?reset=${token}`;
+      await mailer.sendMail({
+        from: `"Fleet Efficiency Study" <${process.env.SMTP_USER}>`,
+        to: email,
+        subject: "Set your Fleet Efficiency Study password",
+        html: `
+          <div style="font-family:sans-serif;max-width:480px;margin:auto">
+            <h2 style="color:#1c3660">Fleet Efficiency Study</h2>
+            <p>Hi ${contact.first_name || "there"},</p>
+            <p>Click the button below to set your password. This link expires in <strong>2 hours</strong>.</p>
+            <p style="margin:28px 0">
+              <a href="${resetUrl}" style="background:#1c3660;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-weight:600">
+                Set my password
+              </a>
+            </p>
+            <p style="color:#6B7280;font-size:13px">
+              If you didn't request this, you can ignore this email.<br>
+              Or copy this link: ${resetUrl}
+            </p>
+          </div>`,
+      });
+    }
+  } catch (err) {
+    console.error("forgot-password error:", err);
+  }
+  // Always return success
+  res.json({ ok: true });
+});
+
+/**
+ * POST /api/auth/reset-password
+ * Body: { token, password }
+ * Validates the reset token and sets a new password.
+ */
+app.post("/api/auth/reset-password", async (req, res) => {
+  const { token, password } = req.body;
+  if (!token || !password) return res.status(400).json({ error: "token and password required" });
+  if (password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+  try {
+    const [[row]] = await db.query(
+      `SELECT r.contact_id, r.expires_at, r.used
+       FROM ffs_password_reset r
+       WHERE r.token = ? LIMIT 1`,
+      [token]
+    );
+    if (!row || row.used || new Date(row.expires_at) < new Date()) {
+      return res.status(400).json({ error: "This reset link is invalid or has expired. Please request a new one." });
+    }
+    const hash = await bcrypt.hash(password, 12);
+    await db.query(`UPDATE ffs_contact SET password_hash = ? WHERE contact_id = ?`, [hash, row.contact_id]);
+    await db.query(`UPDATE ffs_password_reset SET used = 1 WHERE token = ?`, [token]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("reset-password error:", err);
     res.status(500).json({ error: "Database error" });
   }
 });
