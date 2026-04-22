@@ -27,6 +27,13 @@ const mailer = nodemailer.createTransport({
   },
 });
 
+// Verify SMTP connection on startup
+mailer.verify().then(() => {
+  console.log("[SMTP] Connection verified — email is ready");
+}).catch(err => {
+  console.error("[SMTP] Connection FAILED:", err.message);
+});
+
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:5173",
   credentials: true,
@@ -282,6 +289,25 @@ app.post("/api/auth/forgot-password", async (req, res) => {
   }
   // Always return success
   res.json({ ok: true });
+});
+
+/**
+ * POST /api/admin/test-email
+ * Admin only — sends a test email and returns any SMTP error for debugging.
+ */
+app.post("/api/admin/test-email", requireAuth, requireAdmin, async (req, res) => {
+  const to = req.body.to || process.env.SMTP_USER;
+  try {
+    await mailer.sendMail({
+      from: `"Fleet Efficiency Study" <${process.env.SMTP_USER}>`,
+      to,
+      subject: "SMTP test",
+      text: "If you received this, SMTP is working.",
+    });
+    res.json({ ok: true, message: `Test email sent to ${to}` });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message, code: err.code });
+  }
 });
 
 /**
