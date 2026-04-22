@@ -10,30 +10,15 @@ const bcrypt     = require("bcryptjs");
 const jwt        = require("jsonwebtoken");
 const path       = require("path");
 const crypto     = require("crypto");
-const nodemailer = require("nodemailer");
+const { Resend } = require("resend");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production";
 const APP_URL    = (process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3001").replace(/\/$/, "");
 
-const mailer = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 587,
-  secure: false,
-  family: 4, // force IPv4 — Railway doesn't support IPv6 outbound
-  auth: {
-    user: process.env.SMTP_USER || "noreply@nacfe.org",
-    pass: process.env.SMTP_PASS,
-  },
-});
-
-// Verify SMTP connection on startup
-mailer.verify().then(() => {
-  console.log("[SMTP] Connection verified — email is ready");
-}).catch(err => {
-  console.error("[SMTP] Connection FAILED:", err.message);
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
+const EMAIL_FROM = process.env.EMAIL_FROM || "noreply@nacfe.org";
 
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:5173",
@@ -264,8 +249,8 @@ app.post("/api/auth/forgot-password", async (req, res) => {
         [contact.contact_id, token, expiresAt]
       );
       const resetUrl = `${APP_URL}?reset=${token}`;
-      await mailer.sendMail({
-        from: `"Fleet Efficiency Study" <${process.env.SMTP_USER}>`,
+      const { error: sendErr } = await resend.emails.send({
+        from: `Fleet Efficiency Study <${EMAIL_FROM}>`,
         to: email,
         subject: "Set your Fleet Efficiency Study password",
         html: `
@@ -284,6 +269,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
             </p>
           </div>`,
       });
+      if (sendErr) console.error("[Resend] send error:", sendErr);
     }
   } catch (err) {
     console.error("forgot-password error:", err);
@@ -299,15 +285,16 @@ app.post("/api/auth/forgot-password", async (req, res) => {
 app.post("/api/admin/test-email", requireAuth, requireAdmin, async (req, res) => {
   const to = req.body.to || process.env.SMTP_USER;
   try {
-    await mailer.sendMail({
-      from: `"Fleet Efficiency Study" <${process.env.SMTP_USER}>`,
+    const { data, error } = await resend.emails.send({
+      from: `Fleet Efficiency Study <${EMAIL_FROM}>`,
       to,
-      subject: "SMTP test",
-      text: "If you received this, SMTP is working.",
+      subject: "Email test",
+      text: "If you received this, Resend is working.",
     });
-    res.json({ ok: true, message: `Test email sent to ${to}` });
+    if (error) return res.status(500).json({ ok: false, error });
+    res.json({ ok: true, message: `Test email sent to ${to}`, id: data?.id });
   } catch (err) {
-    res.status(500).json({ ok: false, error: err.message, code: err.code });
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
