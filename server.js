@@ -21,6 +21,7 @@ const mailer = nodemailer.createTransport({
   host: "smtp.gmail.com",
   port: 587,
   secure: false,
+  family: 4, // force IPv4 — Railway doesn't support IPv6 outbound
   auth: {
     user: process.env.SMTP_USER || "noreply@nacfe.org",
     pass: process.env.SMTP_PASS,
