@@ -128,12 +128,12 @@ function LoginScreen({ onLogin }) {
 
         {view === 'check-email' && (
           <div style={{ textAlign: 'center', padding: '12px 0' }}>
-            <p style={{ fontSize: 14, color: '#374151', lineHeight: 1.65, marginBottom: 16 }}>
+            <p style={{ fontSize: 14, color: '#fff', lineHeight: 1.65, marginBottom: 16 }}>
               If <strong>{email}</strong> is registered, you'll receive a password reset link shortly.
               Check your inbox (and spam folder).
             </p>
             <button type="button" onClick={() => { setView('login'); setErr(''); }}
-              style={{ background: 'none', border: 'none', color: '#1c3660', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+              style={{ background: 'none', border: 'none', color: '#fff', fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
               ← Back to sign in
             </button>
           </div>
