@@ -4527,7 +4527,7 @@ export default function App() {
         <nav style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {[
             { id: 'dashboard', label: 'Data' },
-            ...(!isNewFleet ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
+            ...(!isNewFleet || submittedYears.length > 0 ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
           ].map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
               display: 'block', width: '100%', textAlign: 'left',
@@ -4980,13 +4980,20 @@ function BenchmarkPage({ token }) {
     setSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
 
   // ── Derived chart data ─────────────────────────────────────────────
-  const labels   = benchData?.labels || [];
-  const years    = (benchData?.years || []).slice(-10);
-  const mpgData  = benchData ? years.map(yr => {
-    const pt = { year: String(yr) };
-    for (const lbl of labels) pt[lbl] = benchData.mpg[lbl]?.[yr] ?? null;
-    return pt;
-  }) : [];
+  const labels     = benchData?.labels || [];
+  const peerLabels = labels.filter(l => l !== 'You');
+  const years      = (benchData?.years || []).slice(-10);
+
+  const avgOf = (vals) => {
+    const clean = vals.filter(v => v != null);
+    return clean.length ? parseFloat((clean.reduce((s, v) => s + v, 0) / clean.length).toFixed(2)) : null;
+  };
+
+  const mpgData = benchData ? years.map(yr => ({
+    year: String(yr),
+    'You':          benchData.mpg['You']?.[yr] ?? null,
+    'Peer Average': avgOf(peerLabels.map(l => benchData.mpg[l]?.[yr])),
+  })) : [];
 
   // Adoption by tech for current cab type
   const adoptionTechs = benchData
@@ -4998,15 +5005,19 @@ function BenchmarkPage({ token }) {
 
   const adoptionChartData = benchData ? years.map(yr => {
     const pt = { year: String(yr) };
-    for (const lbl of labels) {
-      // average across techs that have data for this fleet/year
-      const vals = adoptionTechs
-        .map(t => benchData.adoption[t]?.[cabType]?.[lbl]?.[yr])
-        .filter(v => v != null);
-      pt[lbl] = vals.length ? parseFloat((vals.reduce((s,v)=>s+v,0)/vals.length).toFixed(1)) : null;
-    }
+    // "You" — average adoption across all techs for this year
+    const youVals = adoptionTechs.map(t => benchData.adoption[t]?.[cabType]?.['You']?.[yr]).filter(v => v != null);
+    pt['You'] = youVals.length ? parseFloat((youVals.reduce((s,v)=>s+v,0)/youVals.length).toFixed(1)) : null;
+    // "Peer Average" — average across all peer fleets and all techs
+    const peerVals = peerLabels.flatMap(lbl =>
+      adoptionTechs.map(t => benchData.adoption[t]?.[cabType]?.[lbl]?.[yr])
+    ).filter(v => v != null);
+    pt['Peer Average'] = peerVals.length ? parseFloat((peerVals.reduce((s,v)=>s+v,0)/peerVals.length).toFixed(1)) : null;
     return pt;
   }) : [];
+
+  const chartLines = ['You', 'Peer Average'];
+  const lineColors = { 'You': '#1c3660', 'Peer Average': '#A41C24' };
 
   const fmtPct = v => `${Math.round(v)}%`;
   const latestYear = years[years.length - 1];
@@ -5118,14 +5129,13 @@ function BenchmarkPage({ token }) {
                   <YAxis stroke="#9CA3AF" tick={{ fontSize: 11 }} />
                   <Tooltip contentStyle={styles.tooltipStyle} formatter={(v, name) => [v != null ? `${parseFloat(v).toFixed(2)} mpg` : '—', name]} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                  {labels.map((lbl, i) => (
+                  {chartLines.map(lbl => (
                     <Line
                       key={lbl}
                       type="monotone"
                       dataKey={lbl}
-                      stroke={BENCH_COLORS[i % BENCH_COLORS.length]}
+                      stroke={lineColors[lbl]}
                       strokeWidth={lbl === 'You' ? 3 : 1.5}
-                      strokeDasharray={lbl === 'You' ? undefined : undefined}
                       dot={lbl === 'You' ? { r: 4 } : { r: 2 }}
                       connectNulls
                     />
@@ -5144,12 +5154,12 @@ function BenchmarkPage({ token }) {
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 11 }} />
                   <Tooltip contentStyle={styles.tooltipStyle} formatter={(v, name) => [v != null ? `${Math.round(v)}%` : '—', name]} />
                   <Legend iconType="circle" iconSize={8} wrapperStyle={{ fontSize: 12 }} />
-                  {labels.map((lbl, i) => (
+                  {chartLines.map(lbl => (
                     <Line
                       key={lbl}
                       type="monotone"
                       dataKey={lbl}
-                      stroke={BENCH_COLORS[i % BENCH_COLORS.length]}
+                      stroke={lineColors[lbl]}
                       strokeWidth={lbl === 'You' ? 3 : 1.5}
                       dot={lbl === 'You' ? { r: 4 } : { r: 2 }}
                       connectNulls
