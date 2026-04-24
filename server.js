@@ -116,6 +116,14 @@ const db = mysql.createPool({
       await db.query(`ALTER TABLE ffs_contact ADD COLUMN password_hash VARCHAR(255) NULL`);
       console.log("Added password_hash column to ffs_contact");
     }
+    const [[{ ll_col }]] = await db.query(
+      `SELECT COUNT(*) AS ll_col FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ffs_contact' AND COLUMN_NAME = 'last_login'`
+    );
+    if (!ll_col) {
+      await db.query(`ALTER TABLE ffs_contact ADD COLUMN last_login DATETIME NULL`);
+      console.log("Added last_login column to ffs_contact");
+    }
     await db.query(`
       CREATE TABLE IF NOT EXISTS ffs_password_reset (
         id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -206,6 +214,9 @@ app.post("/api/auth/login", async (req, res) => {
       JWT_SECRET,
       { expiresIn: "30d" }
     );
+
+    // Record last login time
+    await db.query(`UPDATE ffs_contact SET last_login = NOW() WHERE contact_id = ?`, [row.user_contact_id]);
 
     res.json({
       token,
@@ -1257,7 +1268,8 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
     const [contactRows] = await db.query(
       `SELECT contact_id, fleet_id, first_name, last_name, email, phone,
               COALESCE(active, 1) AS active,
-              COALESCE(portal_access, 0) AS portal_access
+              COALESCE(portal_access, 0) AS portal_access,
+              last_login
        FROM ffs_contact
        WHERE fleet_id NOT IN (0, 45, 46)
        ORDER BY fleet_id, last_name, first_name`
@@ -1376,6 +1388,26 @@ app.patch("/api/admin/contacts/:id/access", requireAuth, requireAdmin, async (re
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to update access" });
+  }
+});
+
+/**
+ * GET /api/admin/admin-contacts
+ * Returns all contacts with fleet_id = 0 (admins), including last_login.
+ */
+app.get("/api/admin/admin-contacts", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT contact_id, first_name, last_name, email, phone,
+              COALESCE(active, 1) AS active, last_login
+       FROM ffs_contact
+       WHERE fleet_id = 0
+       ORDER BY last_name, first_name`
+    );
+    res.json({ contacts: rows.map(c => ({ ...c, active: Number(c.active) })) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
   }
 });
 

@@ -3520,6 +3520,10 @@ function AdminView({ token, onSignOut }) {
   const [contactSort, setContactSort] = useState({ field: 'last_name', dir: 'asc' });
   const [contactFilter, setContactFilter] = useState('active'); // 'active' | 'inactive' | 'all'
 
+  // Admin contacts
+  const [adminContacts, setAdminContacts] = useState([]);
+  const [adminContactsCollapsed, setAdminContactsCollapsed] = useState(false);
+
   // Card collapse state
   const [fleetsCollapsed,    setFleetsCollapsed]    = useState(false);
   const [contactsCollapsed,  setContactsCollapsed]  = useState(false);
@@ -3574,7 +3578,14 @@ function AdminView({ token, onSignOut }) {
       .finally(() => setLoading(false));
   };
 
-  useEffect(() => { fetchFleets(); }, [token]);
+  const fetchAdminContacts = () => {
+    fetch('/api/admin/admin-contacts', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setAdminContacts(d.contacts || []); })
+      .catch(console.error);
+  };
+
+  useEffect(() => { fetchFleets(); fetchAdminContacts(); }, [token]);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -3935,11 +3946,11 @@ function AdminView({ token, onSignOut }) {
           ))}
         </div>
 
-        {/* ── Contacts Card ── */}
+        {/* ── Fleet Contacts Card ── */}
         <div style={{ ...card, flex: '1 1 0', minWidth: 0, marginBottom: 0 }}>
           <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setContactsCollapsed(c => !c)}>
             <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
-              Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({sortedContacts.length})</span>
+              Fleet Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({sortedContacts.length})</span>
             </h2>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
               <button onClick={() => { setContactFleetId('pick'); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_id: '' }); }}
@@ -3967,6 +3978,7 @@ function AdminView({ token, onSignOut }) {
                     <SortHeader label="Fleet" field="fleet_name" sort={contactSort} setSort={setContactSort} />
                     <SortHeader label="Email" field="email" sort={contactSort} setSort={setContactSort} />
                     <SortHeader label="Phone" field="phone" sort={contactSort} setSort={setContactSort} />
+                    <SortHeader label="Last Login" field="last_login" sort={contactSort} setSort={setContactSort} />
                     <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Allow Access</th>
                     <th style={{ ...thBase, padding: '8px 12px 8px 0' }}></th>
                   </tr>
@@ -3978,6 +3990,9 @@ function AdminView({ token, onSignOut }) {
                       <td style={{ padding: '8px 12px', color: '#6B7280' }}>{c.fleet_name}</td>
                       <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
                       <td style={{ padding: '8px 12px', color: '#374151' }}>{c.phone || '—'}</td>
+                      <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
+                        {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      </td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>
                         <input type="checkbox" checked={!!c.portal_access} onChange={async e => {
                           const val = e.target.checked;
@@ -3991,7 +4006,7 @@ function AdminView({ token, onSignOut }) {
                     </tr>
                   ))}
                   {sortedContacts.length === 0 && (
-                    <tr><td colSpan={6} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No contacts found.</td></tr>
+                    <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No contacts found.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -3999,6 +4014,49 @@ function AdminView({ token, onSignOut }) {
           ))}
         </div>
 
+      </div>
+
+      {/* ── Admin Contacts Card ── */}
+      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setAdminContactsCollapsed(c => !c)}>
+            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
+              Admin Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({adminContacts.length})</span>
+            </h2>
+            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{adminContactsCollapsed ? '▶' : '▼'}</span>
+          </div>
+          {!adminContactsCollapsed && (
+            <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                  <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                    <th style={{ ...thBase, padding: '8px 12px 8px 16px' }}>Name</th>
+                    <th style={{ ...thBase, padding: '8px 12px' }}>Email</th>
+                    <th style={{ ...thBase, padding: '8px 12px' }}>Phone</th>
+                    <th style={{ ...thBase, padding: '8px 12px' }}>Last Login</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminContacts.map(c => (
+                    <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                      <td style={{ padding: '8px 12px 8px 16px', color: '#111827', fontWeight: 500 }}>
+                        {[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}
+                      </td>
+                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
+                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.phone || '—'}</td>
+                      <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
+                        {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                  {adminContacts.length === 0 && (
+                    <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No admin contacts found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Technology Card ── */}
