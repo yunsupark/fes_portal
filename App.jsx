@@ -3513,11 +3513,14 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
 }
 
 function AdminView({ token, onSignOut }) {
-  const adminName = (() => {
+  const { adminName, isAdminRole } = (() => {
     try {
-      const { first_name, last_name } = JSON.parse(atob(token.split('.')[1]));
-      return [first_name, last_name].filter(Boolean).join(' ') || 'Admin';
-    } catch { return 'Admin'; }
+      const { first_name, last_name, admin_role } = JSON.parse(atob(token.split('.')[1]));
+      return {
+        adminName: [first_name, last_name].filter(Boolean).join(' ') || 'Admin',
+        isAdminRole: admin_role === 'admin',
+      };
+    } catch { return { adminName: 'Admin', isAdminRole: false }; }
   })();
   const [fleets, setFleets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -3589,6 +3592,20 @@ function AdminView({ token, onSignOut }) {
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setAdminContacts(d.contacts || []); })
       .catch(console.error);
+  };
+
+  const [roleChanging, setRoleChanging] = useState(null); // contact_id being changed
+  const handleRoleChange = async (contactId, newRole) => {
+    setRoleChanging(contactId);
+    try {
+      const r = await fetch(`/api/admin/admin-contacts/${contactId}/role`, {
+        method: 'PATCH', headers: authHeaders, body: JSON.stringify({ role: newRole }),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Failed to update role'); return; }
+      setAdminContacts(prev => prev.map(c => c.contact_id === contactId ? { ...c, admin_role: newRole } : c));
+    } catch { alert('Network error'); }
+    finally { setRoleChanging(null); }
   };
 
   useEffect(() => { fetchFleets(); fetchAdminContacts(); }, [token]);
@@ -3816,11 +3833,14 @@ function AdminView({ token, onSignOut }) {
       <div style={{ background: '#1c3660', padding: '0 32px', display: 'flex', alignItems: 'center', height: 56, gap: 10 }}>
         <img src="/nacfe-logo.png" alt="NACFE" style={{ height: 32, objectFit: 'contain' }} />
         <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, flex: 1 }}>Admin Panel</span>
-        <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginRight: 8 }}>{adminName}</span>
+        <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{adminName}</span>
+        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: isAdminRole ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)', color: isAdminRole ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: 600, marginRight: 4 }}>
+          {isAdminRole ? 'Admin' : 'View only'}
+        </span>
         <button onClick={() => setShowAdminContacts(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
           Admin Contacts
         </button>
-        <button onClick={() => setShowSettings(true)} title="Settings" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>⚙</button>
+        {isAdminRole && <button onClick={() => setShowSettings(true)} title="Settings" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>⚙</button>}
         <button onClick={onSignOut} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 }}>
           Sign out
         </button>
@@ -3834,10 +3854,10 @@ function AdminView({ token, onSignOut }) {
             <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
               Fleets <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({fleets.length})</span>
             </h2>
-            <button onClick={e => { e.stopPropagation(); setShowFleetForm(true); }}
+            {isAdminRole && <button onClick={e => { e.stopPropagation(); setShowFleetForm(true); }}
               style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, marginRight: 8 }}>
               + New Fleet
-            </button>
+            </button>}
             <span style={{ color: '#9CA3AF', fontSize: 13 }}>{fleetsCollapsed ? '▶' : '▼'}</span>
           </div>
 
@@ -3896,9 +3916,9 @@ function AdminView({ token, onSignOut }) {
                             }}
                           >⧉</button>
                         </td>
-                        <td style={{ padding: '9px 12px 9px 0', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
+                        {isAdminRole && <td style={{ padding: '9px 12px 9px 0', textAlign: 'right' }} onClick={e => e.stopPropagation()}>
                           <button style={editBtn} onClick={() => { setEditFleet(f); setEditFleetForm({ fleet_name: f.fleet_name, fleet_city: f.fleet_city || '', fleet_state: f.fleet_state || '', default_duty_cycle: f.default_duty_cycle || '' }); }}>✎</button>
-                        </td>
+                        </td>}
                       </tr>
                       {expandedFleet === f.fleet_id && (
                         <tr style={{ borderBottom: '1px solid #F3F4F6' }}>
@@ -3927,24 +3947,28 @@ function AdminView({ token, onSignOut }) {
                                         <span style={{ fontSize: 11, color: c.active !== 0 ? '#059669' : '#9CA3AF', fontWeight: 600 }}>{c.active !== 0 ? 'Active' : 'Inactive'}</span>
                                       </td>
                                       <td style={{ padding: '5px 0', textAlign: 'center' }}>
-                                        <input type="checkbox" checked={!!c.portal_access} onChange={async e => {
-                                          const val = e.target.checked;
-                                          await fetch(`/api/admin/contacts/${c.contact_id}/access`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ portal_access: val }) });
-                                          fetchFleets();
-                                        }} />
+                                        {isAdminRole ? (
+                                          <input type="checkbox" checked={!!c.portal_access} onChange={async e => {
+                                            const val = e.target.checked;
+                                            await fetch(`/api/admin/contacts/${c.contact_id}/access`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ portal_access: val }) });
+                                            fetchFleets();
+                                          }} />
+                                        ) : (
+                                          <span style={{ fontSize: 11, color: c.portal_access ? '#059669' : '#9CA3AF', fontWeight: 600 }}>{c.portal_access ? 'Yes' : 'No'}</span>
+                                        )}
                                       </td>
-                                      <td style={{ padding: '5px 0', textAlign: 'right' }}>
+                                      {isAdminRole && <td style={{ padding: '5px 0', textAlign: 'right' }}>
                                         <button style={editBtn} onClick={() => { setEditContact({ ...c, fleet_name: f.fleet_name }); setEditContactForm({ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, phone: c.phone || '', active: c.active !== 0, portal_access: !!c.portal_access }); }}>✎</button>
-                                      </td>
+                                      </td>}
                                     </tr>
                                   ))}
                                 </tbody>
                               </table>
                             )}
-                            <button
+                            {isAdminRole && <button
                               onClick={e => { e.stopPropagation(); setContactFleetId(f.fleet_id); setContactForm({ first_name: '', last_name: '', email: '', phone: '' }); }}
                               style={{ background: '#fff', border: '1px solid #D1D5DB', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: '#374151' }}
-                            >+ Add Contact</button>
+                            >+ Add Contact</button>}
                           </td>
                         </tr>
                       )}
@@ -3963,10 +3987,10 @@ function AdminView({ token, onSignOut }) {
               Fleet Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({sortedContacts.length})</span>
             </h2>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-              <button onClick={() => { setContactFleetId('pick'); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_id: '' }); }}
+              {isAdminRole && <button onClick={() => { setContactFleetId('pick'); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_id: '' }); }}
                 style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
                 + New Contact
-              </button>
+              </button>}
               <div style={{ display: 'flex', gap: 4 }}>
               {['active', 'inactive', 'all'].map(v => (
                 <button key={v} style={toggleBtn(v)} onClick={() => setContactFilter(v)}>
@@ -4004,15 +4028,19 @@ function AdminView({ token, onSignOut }) {
                         {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
                       </td>
                       <td style={{ padding: '8px', textAlign: 'center' }}>
-                        <input type="checkbox" checked={!!c.portal_access} onChange={async e => {
-                          const val = e.target.checked;
-                          await fetch(`/api/admin/contacts/${c.contact_id}/access`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ portal_access: val }) });
-                          fetchFleets();
-                        }} />
+                        {isAdminRole ? (
+                          <input type="checkbox" checked={!!c.portal_access} onChange={async e => {
+                            const val = e.target.checked;
+                            await fetch(`/api/admin/contacts/${c.contact_id}/access`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ portal_access: val }) });
+                            fetchFleets();
+                          }} />
+                        ) : (
+                          <span style={{ fontSize: 11, color: c.portal_access ? '#059669' : '#9CA3AF', fontWeight: 600 }}>{c.portal_access ? 'Yes' : 'No'}</span>
+                        )}
                       </td>
-                      <td style={{ padding: '8px 12px 8px 0', textAlign: 'right' }}>
+                      {isAdminRole && <td style={{ padding: '8px 12px 8px 0', textAlign: 'right' }}>
                         <button style={editBtn} onClick={() => { setEditContact(c); setEditContactForm({ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, phone: c.phone || '', active: c.active !== 0, portal_access: !!c.portal_access }); }}>✎</button>
-                      </td>
+                      </td>}
                     </tr>
                   ))}
                   {sortedContacts.length === 0 && (
@@ -4033,10 +4061,10 @@ function AdminView({ token, onSignOut }) {
             <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
               Technologies <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({techs.length})</span>
             </h2>
-            <button onClick={e => { e.stopPropagation(); setShowTechForm(true); }}
+            {isAdminRole && <button onClick={e => { e.stopPropagation(); setShowTechForm(true); }}
               style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600, marginRight: 8 }}>
               + New Technology
-            </button>
+            </button>}
             <span style={{ color: '#9CA3AF', fontSize: 13 }}>{techsCollapsed ? '▶' : '▼'}</span>
           </div>
           {!techsCollapsed && (techsLoading ? (
@@ -4066,9 +4094,9 @@ function AdminView({ token, onSignOut }) {
                       <td style={{ padding: '8px', textAlign: 'center' }}>{t.applies_daycab ? '✓' : <span style={{ color: '#D1D5DB' }}>—</span>}</td>
                       <td style={{ padding: '8px', textAlign: 'center', color: '#374151' }}>{t.active_from ?? '—'}</td>
                       <td style={{ padding: '8px', textAlign: 'center', color: t.active_to ? '#374151' : '#9CA3AF' }}>{t.active_to ?? 'Current'}</td>
-                      <td style={{ padding: '8px 12px 8px 0', textAlign: 'right' }}>
+                      {isAdminRole && <td style={{ padding: '8px 12px 8px 0', textAlign: 'right' }}>
                         <button style={editBtn} onClick={() => openEditTech(t)}>✎</button>
-                      </td>
+                      </td>}
                     </tr>
                   ))}
                   {techs.length === 0 && (
@@ -4319,34 +4347,54 @@ function AdminView({ token, onSignOut }) {
       {/* ── Admin Contacts Panel ── */}
       {showAdminContacts && (
         <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowAdminContacts(false); }}>
-          <div style={{ ...modalBox, maxWidth: 560 }}>
+          <div style={{ ...modalBox, maxWidth: 640 }}>
             <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 16, color: '#111827', flex: 1 }}>Admin Contacts</h3>
               <button onClick={() => setShowAdminContacts(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}>✕</button>
             </div>
-            <div style={{ overflowY: 'auto', maxHeight: 400 }}>
+            <div style={{ overflowY: 'auto', maxHeight: 420 }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
                     <th style={{ padding: '8px 12px 8px 0', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Name</th>
                     <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Email</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Phone</th>
                     <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Last Login</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Role</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {adminContacts.map(c => (
-                    <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                      <td style={{ padding: '8px 12px 8px 0', color: '#111827', fontWeight: 500 }}>
-                        {[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}
-                      </td>
-                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
-                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.phone || '—'}</td>
-                      <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
-                        {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-                      </td>
-                    </tr>
-                  ))}
+                  {adminContacts.map(c => {
+                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '—';
+                    const role = c.admin_role || 'user';
+                    const adminCount = adminContacts.filter(x => (x.admin_role || 'user') === 'admin').length;
+                    const isLastAdmin = role === 'admin' && adminCount === 1;
+                    return (
+                      <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                        <td style={{ padding: '8px 12px 8px 0', color: '#111827', fontWeight: 500 }}>{name}</td>
+                        <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
+                        <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
+                          {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          {isAdminRole ? (
+                            <select
+                              value={role}
+                              disabled={roleChanging === c.contact_id || isLastAdmin}
+                              onChange={e => handleRoleChange(c.contact_id, e.target.value)}
+                              title={isLastAdmin ? 'Cannot remove last admin' : ''}
+                              style={{ fontSize: 12, padding: '3px 6px', borderRadius: 4, border: '1px solid #D1D5DB', background: '#fff', cursor: isLastAdmin ? 'not-allowed' : 'pointer' }}>
+                              <option value="admin">Admin</option>
+                              <option value="user">User</option>
+                            </select>
+                          ) : (
+                            <span style={{ fontSize: 12, padding: '3px 8px', borderRadius: 10, background: role === 'admin' ? '#EFF6FF' : '#F3F4F6', color: role === 'admin' ? '#1c3660' : '#6B7280', fontWeight: 600 }}>
+                              {role === 'admin' ? 'Admin' : 'User'}
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                   {adminContacts.length === 0 && (
                     <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No admin contacts found.</td></tr>
                   )}

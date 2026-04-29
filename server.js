@@ -128,6 +128,25 @@ const db = mysql.createPool({
     await db.query(
       `DELETE FROM ffs_contact WHERE fleet_id = 0 AND LOWER(first_name) = 'admin' AND LOWER(last_name) = 'admin'`
     );
+    // Add admin_role column for fleet_id=0 contacts
+    const [[{ role_col }]] = await db.query(
+      `SELECT COUNT(*) AS role_col FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ffs_contact' AND COLUMN_NAME = 'admin_role'`
+    );
+    if (!role_col) {
+      await db.query(`ALTER TABLE ffs_contact ADD COLUMN admin_role VARCHAR(20) NULL DEFAULT 'user'`);
+      console.log("Added admin_role column to ffs_contact");
+    }
+    // Seed known admins by name
+    await db.query(`
+      UPDATE ffs_contact SET admin_role = 'admin'
+      WHERE fleet_id = 0 AND (
+        (LOWER(first_name) = 'mike'  AND LOWER(last_name) = 'mchorse')  OR
+        (LOWER(first_name) = 'bruce' AND LOWER(last_name) = 'stockton') OR
+        (LOWER(first_name) = 'mike'  AND LOWER(last_name) = 'roeth')    OR
+        (LOWER(first_name) = 'yunsu' AND LOWER(last_name) = 'park')
+      )
+    `);
     await db.query(`
       CREATE TABLE IF NOT EXISTS ffs_password_reset (
         id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -182,7 +201,8 @@ app.post("/api/auth/login", async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
-              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email, c.password_hash
+              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email, c.password_hash,
+              c.admin_role
        FROM ffs_contact c
        JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
        WHERE c.email = ? LIMIT 1`,
@@ -214,7 +234,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id, first_name: row.first_name || '', last_name: row.last_name || '' },
+      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id, first_name: row.first_name || '', last_name: row.last_name || '', admin_role: row.fleet_id === 0 ? (row.admin_role || 'user') : null },
       JWT_SECRET,
       { expiresIn: "30d" }
     );
@@ -297,7 +317,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
  * POST /api/admin/test-email
  * Admin only — sends a test email and returns any SMTP error for debugging.
  */
-app.post("/api/admin/test-email", requireAuth, requireAdmin, async (req, res) => {
+app.post("/api/admin/test-email", requireAuth, requireAdminRole, async (req, res) => {
   const to = req.body.to || process.env.SMTP_USER;
   try {
     const { data, error } = await resend.emails.send({
@@ -584,7 +604,7 @@ app.post("/api/submit-all", requireAuth, async (req, res) => {
  * POST /api/admin/reset-example-fleet
  * Deletes all input data for the example fleet (fleet_id from ffs_settings).
  */
-app.post("/api/admin/reset-example-fleet", requireAuth, requireAdmin, async (_req, res) => {
+app.post("/api/admin/reset-example-fleet", requireAuth, requireAdminRole, async (_req, res) => {
   const fleetId = 51;
   try {
     await db.query(`DELETE FROM ffs_adoption          WHERE fleet_id = ?`, [fleetId]);
@@ -1246,6 +1266,13 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Requires fleet_id=0 AND admin_role='admin'
+function requireAdminRole(req, res, next) {
+  if (req.user?.fleet_id !== 0) return res.status(403).json({ error: "Admin access required" });
+  if (req.user?.admin_role !== 'admin') return res.status(403).json({ error: "Admin role required" });
+  next();
+}
+
 /*
   Run once to add new columns:
   ALTER TABLE ffs_contact ADD COLUMN IF NOT EXISTS active TINYINT(1) NOT NULL DEFAULT 1;
@@ -1299,7 +1326,7 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
  * Creates a new fleet.
  * Body: { fleet_name, fleet_city, fleet_state, default_duty_cycle }
  */
-app.post("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
+app.post("/api/admin/fleets", requireAuth, requireAdminRole, async (req, res) => {
   const { fleet_name, fleet_city, fleet_state, default_duty_cycle } = req.body;
   if (!fleet_name) return res.status(400).json({ error: "fleet_name required" });
   try {
@@ -1319,7 +1346,7 @@ app.post("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
  * Updates an existing fleet.
  * Body: { fleet_name, fleet_city, fleet_state, default_duty_cycle }
  */
-app.put("/api/admin/fleets/:id", requireAuth, requireAdmin, async (req, res) => {
+app.put("/api/admin/fleets/:id", requireAuth, requireAdminRole, async (req, res) => {
   const id = parseInt(req.params.id);
   const { fleet_name, fleet_city, fleet_state, default_duty_cycle } = req.body;
   if (!fleet_name) return res.status(400).json({ error: "fleet_name required" });
@@ -1340,7 +1367,7 @@ app.put("/api/admin/fleets/:id", requireAuth, requireAdmin, async (req, res) => 
  * Creates a new contact for a fleet.
  * Body: { fleet_id, first_name, last_name, email, phone }
  */
-app.post("/api/admin/contacts", requireAuth, requireAdmin, async (req, res) => {
+app.post("/api/admin/contacts", requireAuth, requireAdminRole, async (req, res) => {
   const { fleet_id, first_name, last_name, email, phone } = req.body;
   if (!fleet_id || !email) return res.status(400).json({ error: "fleet_id and email required" });
   try {
@@ -1360,7 +1387,7 @@ app.post("/api/admin/contacts", requireAuth, requireAdmin, async (req, res) => {
  * Updates an existing contact.
  * Body: { first_name, last_name, email, phone, active }
  */
-app.put("/api/admin/contacts/:id", requireAuth, requireAdmin, async (req, res) => {
+app.put("/api/admin/contacts/:id", requireAuth, requireAdminRole, async (req, res) => {
   const id = parseInt(req.params.id);
   const { first_name, last_name, email, phone, active, portal_access } = req.body;
   if (!email) return res.status(400).json({ error: "email required" });
@@ -1380,7 +1407,7 @@ app.put("/api/admin/contacts/:id", requireAuth, requireAdmin, async (req, res) =
  * PATCH /api/admin/contacts/:id/access
  * Toggles portal_access for a contact. Body: { portal_access: bool }
  */
-app.patch("/api/admin/contacts/:id/access", requireAuth, requireAdmin, async (req, res) => {
+app.patch("/api/admin/contacts/:id/access", requireAuth, requireAdminRole, async (req, res) => {
   const id = parseInt(req.params.id);
   const { portal_access } = req.body;
   try {
@@ -1403,12 +1430,42 @@ app.get("/api/admin/admin-contacts", requireAuth, requireAdmin, async (req, res)
   try {
     const [rows] = await db.query(
       `SELECT contact_id, first_name, last_name, email, phone,
-              COALESCE(active, 1) AS active, last_login
+              COALESCE(active, 1) AS active, last_login,
+              COALESCE(admin_role, 'user') AS admin_role
        FROM ffs_contact
        WHERE fleet_id = 0
        ORDER BY last_name, first_name`
     );
     res.json({ contacts: rows.map(c => ({ ...c, active: Number(c.active) })) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * PATCH /api/admin/admin-contacts/:id/role
+ * Changes the admin_role of a fleet_id=0 contact.
+ * Requires admin role. Enforces at-least-one-admin constraint.
+ */
+app.patch("/api/admin/admin-contacts/:id/role", requireAuth, requireAdminRole, async (req, res) => {
+  const contactId = parseInt(req.params.id);
+  const { role } = req.body;
+  if (!['admin', 'user'].includes(role)) return res.status(400).json({ error: "Invalid role" });
+  try {
+    // Prevent removing last admin
+    if (role === 'user') {
+      const [[{ admin_count }]] = await db.query(
+        `SELECT COUNT(*) AS admin_count FROM ffs_contact WHERE fleet_id = 0 AND admin_role = 'admin' AND contact_id != ?`,
+        [contactId]
+      );
+      if (admin_count === 0) return res.status(400).json({ error: "Cannot remove the last admin" });
+    }
+    await db.query(
+      `UPDATE ffs_contact SET admin_role = ? WHERE contact_id = ? AND fleet_id = 0`,
+      [role, contactId]
+    );
+    res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Database error" });
@@ -1454,7 +1511,7 @@ app.get("/api/admin/techs", requireAuth, requireAdmin, async (req, res) => {
  * POST /api/admin/techs
  * Creates a new technology.
  */
-app.post("/api/admin/techs", requireAuth, requireAdmin, async (req, res) => {
+app.post("/api/admin/techs", requireAuth, requireAdminRole, async (req, res) => {
   const { tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to } = req.body;
   if (!tech_group || !technology || !tech_expl) return res.status(400).json({ error: "tech_group, technology, and description required" });
   try {
@@ -1475,7 +1532,7 @@ app.post("/api/admin/techs", requireAuth, requireAdmin, async (req, res) => {
  * PUT /api/admin/techs/:id
  * Updates a technology.
  */
-app.put("/api/admin/techs/:id", requireAuth, requireAdmin, async (req, res) => {
+app.put("/api/admin/techs/:id", requireAuth, requireAdminRole, async (req, res) => {
   const id = parseInt(req.params.id);
   const { tech_group, technology, tech_expl, applies_sleeper, applies_daycab, active_from, active_to } = req.body;
   if (!tech_group || !technology) return res.status(400).json({ error: "tech_group and technology required" });
@@ -1512,7 +1569,7 @@ app.get("/api/admin/settings", requireAuth, requireAdmin, async (_req, res) => {
  * PUT /api/admin/settings
  * Body: { key: value, ... } — upserts each provided key.
  */
-app.put("/api/admin/settings", requireAuth, requireAdmin, async (req, res) => {
+app.put("/api/admin/settings", requireAuth, requireAdminRole, async (req, res) => {
   const updates = req.body;
   if (!updates || typeof updates !== 'object') return res.status(400).json({ error: "Body must be an object" });
   try {
