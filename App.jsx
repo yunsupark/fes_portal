@@ -3513,6 +3513,12 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
 }
 
 function AdminView({ token, onSignOut }) {
+  const adminName = (() => {
+    try {
+      const { first_name, last_name } = JSON.parse(atob(token.split('.')[1]));
+      return [first_name, last_name].filter(Boolean).join(' ') || 'Admin';
+    } catch { return 'Admin'; }
+  })();
   const [fleets, setFleets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedFleet, setExpandedFleet] = useState(null);
@@ -3522,7 +3528,7 @@ function AdminView({ token, onSignOut }) {
 
   // Admin contacts
   const [adminContacts, setAdminContacts] = useState([]);
-  const [adminContactsCollapsed, setAdminContactsCollapsed] = useState(false);
+  const [showAdminContacts, setShowAdminContacts] = useState(false);
 
   // Card collapse state
   const [fleetsCollapsed,    setFleetsCollapsed]    = useState(false);
@@ -3810,6 +3816,10 @@ function AdminView({ token, onSignOut }) {
       <div style={{ background: '#1c3660', padding: '0 32px', display: 'flex', alignItems: 'center', height: 56, gap: 10 }}>
         <img src="/nacfe-logo.png" alt="NACFE" style={{ height: 32, objectFit: 'contain' }} />
         <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, flex: 1 }}>Admin Panel</span>
+        <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13, marginRight: 8 }}>{adminName}</span>
+        <button onClick={() => setShowAdminContacts(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
+          Admin Contacts
+        </button>
         <button onClick={() => setShowSettings(true)} title="Settings" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>⚙</button>
         <button onClick={onSignOut} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 }}>
           Sign out
@@ -4014,49 +4024,6 @@ function AdminView({ token, onSignOut }) {
           ))}
         </div>
 
-      </div>
-
-      {/* ── Admin Contacts Card ── */}
-      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
-        <div style={{ ...card, marginBottom: 0 }}>
-          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setAdminContactsCollapsed(c => !c)}>
-            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
-              Admin Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({adminContacts.length})</span>
-            </h2>
-            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{adminContactsCollapsed ? '▶' : '▼'}</span>
-          </div>
-          {!adminContactsCollapsed && (
-            <div style={{ overflowY: 'auto', maxHeight: 320 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                  <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-                    <th style={{ ...thBase, padding: '8px 12px 8px 16px' }}>Name</th>
-                    <th style={{ ...thBase, padding: '8px 12px' }}>Email</th>
-                    <th style={{ ...thBase, padding: '8px 12px' }}>Phone</th>
-                    <th style={{ ...thBase, padding: '8px 12px' }}>Last Login</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminContacts.map(c => (
-                    <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                      <td style={{ padding: '8px 12px 8px 16px', color: '#111827', fontWeight: 500 }}>
-                        {[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}
-                      </td>
-                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
-                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.phone || '—'}</td>
-                      <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
-                        {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-                      </td>
-                    </tr>
-                  ))}
-                  {adminContacts.length === 0 && (
-                    <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No admin contacts found.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
       </div>
 
       {/* ── Technology Card ── */}
@@ -4345,6 +4312,47 @@ function AdminView({ token, onSignOut }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Admin Contacts Panel ── */}
+      {showAdminContacts && (
+        <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowAdminContacts(false); }}>
+          <div style={{ ...modalBox, maxWidth: 560 }}>
+            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 16, color: '#111827', flex: 1 }}>Admin Contacts</h3>
+              <button onClick={() => setShowAdminContacts(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}>✕</button>
+            </div>
+            <div style={{ overflowY: 'auto', maxHeight: 400 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                    <th style={{ padding: '8px 12px 8px 0', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Name</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Email</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Phone</th>
+                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Last Login</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {adminContacts.map(c => (
+                    <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                      <td style={{ padding: '8px 12px 8px 0', color: '#111827', fontWeight: 500 }}>
+                        {[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}
+                      </td>
+                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
+                      <td style={{ padding: '8px 12px', color: '#374151' }}>{c.phone || '—'}</td>
+                      <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
+                        {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                      </td>
+                    </tr>
+                  ))}
+                  {adminContacts.length === 0 && (
+                    <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No admin contacts found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       )}

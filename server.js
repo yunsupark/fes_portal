@@ -124,6 +124,10 @@ const db = mysql.createPool({
       await db.query(`ALTER TABLE ffs_contact ADD COLUMN last_login DATETIME NULL`);
       console.log("Added last_login column to ffs_contact");
     }
+    // Remove placeholder admin account if it exists
+    await db.query(
+      `DELETE FROM ffs_contact WHERE fleet_id = 0 AND LOWER(first_name) = 'admin' AND LOWER(last_name) = 'admin'`
+    );
     await db.query(`
       CREATE TABLE IF NOT EXISTS ffs_password_reset (
         id         INT AUTO_INCREMENT PRIMARY KEY,
@@ -210,7 +214,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id },
+      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id, first_name: row.first_name || '', last_name: row.last_name || '' },
       JWT_SECRET,
       { expiresIn: "30d" }
     );
