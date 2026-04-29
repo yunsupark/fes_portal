@@ -3531,7 +3531,7 @@ function AdminView({ token, onSignOut }) {
 
   // Admin contacts
   const [adminContacts, setAdminContacts] = useState([]);
-  const [showAdminContacts, setShowAdminContacts] = useState(false);
+  const [nacfeUsersCollapsed, setNacfeUsersCollapsed] = useState(true);
 
   // Card collapse state
   const [fleetsCollapsed,    setFleetsCollapsed]    = useState(false);
@@ -3837,9 +3837,6 @@ function AdminView({ token, onSignOut }) {
         <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: isAdminRole ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)', color: isAdminRole ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: 600, marginRight: 4 }}>
           {isAdminRole ? 'Admin' : 'View only'}
         </span>
-        <button onClick={() => setShowAdminContacts(true)} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
-          Admin Contacts
-        </button>
         {isAdminRole && <button onClick={() => setShowSettings(true)} title="Settings" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>⚙</button>}
         <button onClick={onSignOut} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 }}>
           Sign out
@@ -4344,22 +4341,24 @@ function AdminView({ token, onSignOut }) {
         </div>
       )}
 
-      {/* ── Admin Contacts Panel ── */}
-      {showAdminContacts && (
-        <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setShowAdminContacts(false); }}>
-          <div style={{ ...modalBox, maxWidth: 640 }}>
-            <div style={{ display: 'flex', alignItems: 'center', marginBottom: 16 }}>
-              <h3 style={{ margin: 0, fontSize: 16, color: '#111827', flex: 1 }}>Admin Contacts</h3>
-              <button onClick={() => setShowAdminContacts(false)} style={{ background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#6B7280', lineHeight: 1 }}>✕</button>
-            </div>
-            <div style={{ overflowY: 'auto', maxHeight: 420 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                <thead>
+      {/* ── NACFE Users Card ── */}
+      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setNacfeUsersCollapsed(c => !c)}>
+            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
+              NACFE Users <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({adminContacts.length})</span>
+            </h2>
+            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{nacfeUsersCollapsed ? '▶' : '▼'}</span>
+          </div>
+          {!nacfeUsersCollapsed && (
+            <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
                   <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-                    <th style={{ padding: '8px 12px 8px 0', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Name</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Email</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Last Login</th>
-                    <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Role</th>
+                    <th style={{ ...thBase, padding: '8px 12px 8px 16px' }}>Name</th>
+                    <th style={{ ...thBase, padding: '8px 12px' }}>Email</th>
+                    <th style={{ ...thBase, padding: '8px 12px' }}>Last Login</th>
+                    <th style={{ ...thBase, padding: '8px 12px' }}>Role</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4370,7 +4369,7 @@ function AdminView({ token, onSignOut }) {
                     const isLastAdmin = role === 'admin' && adminCount === 1;
                     return (
                       <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                        <td style={{ padding: '8px 12px 8px 0', color: '#111827', fontWeight: 500 }}>{name}</td>
+                        <td style={{ padding: '8px 12px 8px 16px', color: '#111827', fontWeight: 500 }}>{name}</td>
                         <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
                         <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
                           {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
@@ -4396,14 +4395,14 @@ function AdminView({ token, onSignOut }) {
                     );
                   })}
                   {adminContacts.length === 0 && (
-                    <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No admin contacts found.</td></tr>
+                    <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No users found.</td></tr>
                   )}
                 </tbody>
               </table>
             </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* ── Settings Panel ── */}
       {showSettings && (
