@@ -3531,7 +3531,11 @@ function AdminView({ token, onSignOut }) {
 
   // Admin contacts
   const [adminContacts, setAdminContacts] = useState([]);
-  const [nacfeUsersCollapsed, setNacfeUsersCollapsed] = useState(true);
+  const [showNacfeUsers, setShowNacfeUsers] = useState(false);
+  const [nacfeUserForm, setNacfeUserForm] = useState({ first_name: '', last_name: '', email: '', phone: '', admin_role: 'user' });
+  const [nacfeUserSaving, setNacfeUserSaving] = useState(false);
+  const [showNacfeUserForm, setShowNacfeUserForm] = useState(false);
+  const nacfeDropdownRef = React.useRef(null);
 
   // Card collapse state
   const [fleetsCollapsed,    setFleetsCollapsed]    = useState(false);
@@ -3608,9 +3612,42 @@ function AdminView({ token, onSignOut }) {
     finally { setRoleChanging(null); }
   };
 
+  const handleAddNacfeUser = async (e) => {
+    e.preventDefault();
+    setNacfeUserSaving(true);
+    try {
+      const r = await fetch('/api/admin/admin-contacts', {
+        method: 'POST', headers: authHeaders, body: JSON.stringify(nacfeUserForm),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Failed to add user'); return; }
+      setNacfeUserForm({ first_name: '', last_name: '', email: '', phone: '', admin_role: 'user' });
+      setShowNacfeUserForm(false);
+      fetchAdminContacts();
+    } catch { alert('Network error'); }
+    finally { setNacfeUserSaving(false); }
+  };
+
+  const handleRemoveNacfeUser = async (contactId) => {
+    if (!window.confirm('Remove this user?')) return;
+    try {
+      const r = await fetch(`/api/admin/admin-contacts/${contactId}`, { method: 'DELETE', headers: authHeaders });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Failed to remove user'); return; }
+      setAdminContacts(prev => prev.filter(c => c.contact_id !== contactId));
+    } catch { alert('Network error'); }
+  };
+
   useEffect(() => { fetchFleets(); fetchAdminContacts(); }, [token]);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  useEffect(() => {
+    if (!showNacfeUsers) return;
+    const handler = (e) => { if (nacfeDropdownRef.current && !nacfeDropdownRef.current.contains(e.target)) setShowNacfeUsers(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showNacfeUsers]);
 
   const fetchTechs = () => {
     setTechsLoading(true);
@@ -3830,13 +3867,115 @@ function AdminView({ token, onSignOut }) {
   return (
     <div style={{ minHeight: '100vh', background: '#F3F4F6', fontFamily: 'Arial, sans-serif' }}>
       {/* Top bar */}
-      <div style={{ background: '#1c3660', padding: '0 32px', display: 'flex', alignItems: 'center', height: 56, gap: 10 }}>
+      <div style={{ background: '#1c3660', padding: '0 32px', display: 'flex', alignItems: 'center', height: 56, gap: 10, position: 'relative', zIndex: 100 }}>
         <img src="/nacfe-logo.png" alt="NACFE" style={{ height: 32, objectFit: 'contain' }} />
         <span style={{ color: '#fff', fontWeight: 700, fontSize: 16, flex: 1 }}>Admin Panel</span>
         <span style={{ color: 'rgba(255,255,255,0.85)', fontSize: 13 }}>{adminName}</span>
-        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: isAdminRole ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)', color: isAdminRole ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: 600, marginRight: 4 }}>
+        <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: isAdminRole ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.10)', color: isAdminRole ? '#fff' : 'rgba(255,255,255,0.65)', fontWeight: 600 }}>
           {isAdminRole ? 'Admin' : 'View only'}
         </span>
+        {/* NACFE Users dropdown */}
+        <div ref={nacfeDropdownRef} style={{ position: 'relative' }}>
+          <button onClick={() => { setShowNacfeUsers(v => !v); setShowNacfeUserForm(false); }}
+            style={{ background: showNacfeUsers ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 12px', cursor: 'pointer', fontSize: 13 }}>
+            NACFE Users
+          </button>
+          {showNacfeUsers && (
+            <div style={{ position: 'absolute', top: 'calc(100% + 8px)', right: 0, width: 520, background: '#fff', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', border: '1px solid #E5E7EB', overflow: 'hidden' }}>
+              <div style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontWeight: 700, fontSize: 14, color: '#111827', flex: 1 }}>NACFE Users</span>
+                {isAdminRole && (
+                  <button onClick={() => setShowNacfeUserForm(v => !v)}
+                    style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
+                    + Add User
+                  </button>
+                )}
+              </div>
+              {showNacfeUserForm && (
+                <form onSubmit={handleAddNacfeUser} style={{ padding: '12px 16px', borderBottom: '1px solid #E5E7EB', background: '#F9FAFB', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input placeholder="First name" required value={nacfeUserForm.first_name} onChange={e => setNacfeUserForm(p => ({ ...p, first_name: e.target.value }))}
+                      style={{ flex: 1, padding: '6px 8px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 12 }} />
+                    <input placeholder="Last name" value={nacfeUserForm.last_name} onChange={e => setNacfeUserForm(p => ({ ...p, last_name: e.target.value }))}
+                      style={{ flex: 1, padding: '6px 8px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 12 }} />
+                  </div>
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <input placeholder="Email" required type="email" value={nacfeUserForm.email} onChange={e => setNacfeUserForm(p => ({ ...p, email: e.target.value }))}
+                      style={{ flex: 2, padding: '6px 8px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 12 }} />
+                    <input placeholder="Phone" value={nacfeUserForm.phone} onChange={e => setNacfeUserForm(p => ({ ...p, phone: e.target.value }))}
+                      style={{ flex: 1, padding: '6px 8px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 12 }} />
+                    <select value={nacfeUserForm.admin_role} onChange={e => setNacfeUserForm(p => ({ ...p, admin_role: e.target.value }))}
+                      style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid #D1D5DB', fontSize: 12 }}>
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </div>
+                  <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                    <button type="button" onClick={() => setShowNacfeUserForm(false)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
+                    <button type="submit" disabled={nacfeUserSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                      {nacfeUserSaving ? 'Saving…' : 'Save'}
+                    </button>
+                  </div>
+                </form>
+              )}
+              <div style={{ overflowY: 'auto', maxHeight: 320 }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                  <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
+                    <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                      <th style={{ ...thBase, padding: '8px 12px 8px 16px' }}>Name</th>
+                      <th style={{ ...thBase, padding: '8px 12px' }}>Email</th>
+                      <th style={{ ...thBase, padding: '8px 12px' }}>Last Login</th>
+                      <th style={{ ...thBase, padding: '8px 12px' }}>Role</th>
+                      {isAdminRole && <th style={{ ...thBase, padding: '8px 12px' }}></th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {adminContacts.map(c => {
+                      const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '—';
+                      const role = c.admin_role || 'user';
+                      const adminCount = adminContacts.filter(x => (x.admin_role || 'user') === 'admin').length;
+                      const isLastAdmin = role === 'admin' && adminCount === 1;
+                      return (
+                        <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                          <td style={{ padding: '8px 12px 8px 16px', color: '#111827', fontWeight: 500 }}>{name}</td>
+                          <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
+                          <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
+                            {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                          </td>
+                          <td style={{ padding: '8px 12px' }}>
+                            {isAdminRole ? (
+                              <select value={role} disabled={roleChanging === c.contact_id || isLastAdmin}
+                                onChange={e => handleRoleChange(c.contact_id, e.target.value)}
+                                title={isLastAdmin ? 'Cannot remove last admin' : ''}
+                                style={{ fontSize: 12, padding: '3px 6px', borderRadius: 4, border: '1px solid #D1D5DB', background: '#fff', cursor: isLastAdmin ? 'not-allowed' : 'pointer' }}>
+                                <option value="admin">Admin</option>
+                                <option value="user">User</option>
+                              </select>
+                            ) : (
+                              <span style={{ fontSize: 12, padding: '3px 8px', borderRadius: 10, background: role === 'admin' ? '#EFF6FF' : '#F3F4F6', color: role === 'admin' ? '#1c3660' : '#6B7280', fontWeight: 600 }}>
+                                {role === 'admin' ? 'Admin' : 'User'}
+                              </span>
+                            )}
+                          </td>
+                          {isAdminRole && (
+                            <td style={{ padding: '8px 12px', textAlign: 'right' }}>
+                              <button onClick={() => handleRemoveNacfeUser(c.contact_id)} disabled={isLastAdmin}
+                                title={isLastAdmin ? 'Cannot remove last admin' : 'Remove user'}
+                                style={{ background: 'none', border: 'none', color: isLastAdmin ? '#D1D5DB' : '#DC2626', cursor: isLastAdmin ? 'not-allowed' : 'pointer', fontSize: 14, lineHeight: 1 }}>✕</button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                    {adminContacts.length === 0 && (
+                      <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No users found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
         {isAdminRole && <button onClick={() => setShowSettings(true)} title="Settings" style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 10px', cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>⚙</button>}
         <button onClick={onSignOut} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 13 }}>
           Sign out
@@ -4340,69 +4479,6 @@ function AdminView({ token, onSignOut }) {
           </div>
         </div>
       )}
-
-      {/* ── NACFE Users Card ── */}
-      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
-        <div style={{ ...card, marginBottom: 0 }}>
-          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setNacfeUsersCollapsed(c => !c)}>
-            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
-              NACFE Users <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({adminContacts.length})</span>
-            </h2>
-            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{nacfeUsersCollapsed ? '▶' : '▼'}</span>
-          </div>
-          {!nacfeUsersCollapsed && (
-            <div style={{ overflowY: 'auto', maxHeight: 320 }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                <thead style={{ position: 'sticky', top: 0, zIndex: 1 }}>
-                  <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-                    <th style={{ ...thBase, padding: '8px 12px 8px 16px' }}>Name</th>
-                    <th style={{ ...thBase, padding: '8px 12px' }}>Email</th>
-                    <th style={{ ...thBase, padding: '8px 12px' }}>Last Login</th>
-                    <th style={{ ...thBase, padding: '8px 12px' }}>Role</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {adminContacts.map(c => {
-                    const name = [c.first_name, c.last_name].filter(Boolean).join(' ') || '—';
-                    const role = c.admin_role || 'user';
-                    const adminCount = adminContacts.filter(x => (x.admin_role || 'user') === 'admin').length;
-                    const isLastAdmin = role === 'admin' && adminCount === 1;
-                    return (
-                      <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                        <td style={{ padding: '8px 12px 8px 16px', color: '#111827', fontWeight: 500 }}>{name}</td>
-                        <td style={{ padding: '8px 12px', color: '#374151' }}>{c.email}</td>
-                        <td style={{ padding: '8px 12px', color: '#6B7280', whiteSpace: 'nowrap' }}>
-                          {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-                        </td>
-                        <td style={{ padding: '8px 12px' }}>
-                          {isAdminRole ? (
-                            <select
-                              value={role}
-                              disabled={roleChanging === c.contact_id || isLastAdmin}
-                              onChange={e => handleRoleChange(c.contact_id, e.target.value)}
-                              title={isLastAdmin ? 'Cannot remove last admin' : ''}
-                              style={{ fontSize: 12, padding: '3px 6px', borderRadius: 4, border: '1px solid #D1D5DB', background: '#fff', cursor: isLastAdmin ? 'not-allowed' : 'pointer' }}>
-                              <option value="admin">Admin</option>
-                              <option value="user">User</option>
-                            </select>
-                          ) : (
-                            <span style={{ fontSize: 12, padding: '3px 8px', borderRadius: 10, background: role === 'admin' ? '#EFF6FF' : '#F3F4F6', color: role === 'admin' ? '#1c3660' : '#6B7280', fontWeight: 600 }}>
-                              {role === 'admin' ? 'Admin' : 'User'}
-                            </span>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                  {adminContacts.length === 0 && (
-                    <tr><td colSpan={4} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No users found.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      </div>
 
       {/* ── Settings Panel ── */}
       {showSettings && (

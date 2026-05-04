@@ -1473,6 +1473,55 @@ app.patch("/api/admin/admin-contacts/:id/role", requireAuth, requireAdminRole, a
 });
 
 /**
+ * POST /api/admin/admin-contacts
+ * Creates a new fleet_id=0 (NACFE) user.
+ */
+app.post("/api/admin/admin-contacts", requireAuth, requireAdminRole, async (req, res) => {
+  const { first_name, last_name, email, phone, admin_role } = req.body;
+  if (!email) return res.status(400).json({ error: "email required" });
+  const role = ['admin', 'user'].includes(admin_role) ? admin_role : 'user';
+  try {
+    const [existing] = await db.query(`SELECT contact_id FROM ffs_contact WHERE email = ?`, [email]);
+    if (existing.length) return res.status(400).json({ error: "A user with that email already exists" });
+    await db.query(
+      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, admin_role)
+       VALUES (0, ?, ?, ?, ?, 1, ?)`,
+      [first_name || '', last_name || '', email, phone || '', role]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * DELETE /api/admin/admin-contacts/:id
+ * Removes a fleet_id=0 (NACFE) user. Enforces at-least-one-admin constraint.
+ */
+app.delete("/api/admin/admin-contacts/:id", requireAuth, requireAdminRole, async (req, res) => {
+  const contactId = parseInt(req.params.id);
+  try {
+    const [[contact]] = await db.query(
+      `SELECT admin_role FROM ffs_contact WHERE contact_id = ? AND fleet_id = 0`, [contactId]
+    );
+    if (!contact) return res.status(404).json({ error: "User not found" });
+    if (contact.admin_role === 'admin') {
+      const [[{ admin_count }]] = await db.query(
+        `SELECT COUNT(*) AS admin_count FROM ffs_contact WHERE fleet_id = 0 AND admin_role = 'admin' AND contact_id != ?`,
+        [contactId]
+      );
+      if (admin_count === 0) return res.status(400).json({ error: "Cannot remove the last admin" });
+    }
+    await db.query(`DELETE FROM ffs_contact WHERE contact_id = ? AND fleet_id = 0`, [contactId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
  * GET /api/admin/preview-token/:fleet_id
  * Returns a short-lived JWT for the given fleet so admin can preview its submission screen.
  */
