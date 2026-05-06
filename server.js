@@ -91,6 +91,10 @@ const db = mysql.createPool({
         ('editable_year_to',   '${new Date().getFullYear()}'),
         ('example_fleet_id',   '45')
     `);
+    await db.query(`
+      INSERT IGNORE INTO ffs_settings (setting_key, setting_value) VALUES
+        ('invite_email_template', '{first_name}, {inviter_name} has added you to {fleet_name}''s NACFE Fleet Efficiency Study portal. The portal is for entering {fleet_name}''s data and to view technology adoption and MPG benchmarking data.\n\nPortal: https://fes.nacfe.org\nUsername: {email}\nTemporary password: {temp_password}\n\nPlease log in and change your password.')
+    `);
     // Use INFORMATION_SCHEMA for compatibility with MySQL < 8.0
     const [[{ col_exists }]] = await db.query(
       `SELECT COUNT(*) AS col_exists FROM INFORMATION_SCHEMA.COLUMNS
@@ -393,6 +397,100 @@ app.get("/api/fleet/me", requireAuth, async (req, res) => {
         submissionYears: yearRows.map(r => r.adoption_year),
       },
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.get("/api/fleet/contacts", requireAuth, async (req, res) => {
+  const { fleet_id } = req.user;
+  if (fleet_id === 0) return res.status(403).json({ error: "Not a fleet user" });
+  try {
+    const [rows] = await db.query(
+      `SELECT contact_id, first_name, last_name, email, phone, COALESCE(active,1) AS active, portal_access, last_login
+       FROM ffs_contact WHERE fleet_id = ? ORDER BY last_name, first_name`,
+      [fleet_id]
+    );
+    res.json({ contacts: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.post("/api/fleet/invite", requireAuth, async (req, res) => {
+  const { fleet_id, contact_id } = req.user;
+  if (fleet_id === 0) return res.status(403).json({ error: "Not a fleet user" });
+  const { users } = req.body;
+  if (!Array.isArray(users) || users.length === 0) return res.status(400).json({ error: "users array required" });
+
+  try {
+    const [[fleet]] = await db.query(`SELECT fleet_name FROM ffs_fleet WHERE fleet_id = ?`, [fleet_id]);
+    const [[inviter]] = await db.query(`SELECT first_name, last_name FROM ffs_contact WHERE contact_id = ?`, [contact_id]);
+    const inviterName = inviter ? [inviter.first_name, inviter.last_name].filter(Boolean).join(' ') : 'A colleague';
+
+    const [[tmplRow]] = await db.query(`SELECT setting_value FROM ffs_settings WHERE setting_key = 'invite_email_template'`);
+    const template = tmplRow?.setting_value || '{first_name}, you have been added to {fleet_name}\'s NACFE Fleet Efficiency Study portal.\n\nPortal: https://fes.nacfe.org\nUsername: {email}\nTemporary password: {temp_password}';
+
+    const results = [];
+    for (const u of users) {
+      if (!u.email) { results.push({ email: u.email, ok: false, error: 'email required' }); continue; }
+      try {
+        const [existing] = await db.query(`SELECT contact_id FROM ffs_contact WHERE email = ?`, [u.email]);
+        if (existing.length) { results.push({ email: u.email, ok: false, error: 'Email already exists' }); continue; }
+
+        const tempPassword = crypto.randomBytes(5).toString('hex');
+        const hash = await bcrypt.hash(tempPassword, 10);
+
+        await db.query(
+          `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, portal_access, password_hash)
+           VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
+          [fleet_id, u.first_name || '', u.last_name || '', u.email, u.phone || '', hash]
+        );
+
+        const body = template
+          .replace(/{first_name}/g, u.first_name || 'there')
+          .replace(/{inviter_name}/g, inviterName)
+          .replace(/{fleet_name}/g, fleet.fleet_name)
+          .replace(/{email}/g, u.email)
+          .replace(/{temp_password}/g, tempPassword);
+
+        const { error: sendErr } = await resend.emails.send({
+          from: `Fleet Efficiency Study <${EMAIL_FROM}>`,
+          to: u.email,
+          subject: `You've been added to ${fleet.fleet_name}'s Fleet Efficiency Study portal`,
+          text: body,
+          html: body.replace(/\n/g, '<br>'),
+        });
+
+        if (sendErr) console.error('Email send error:', sendErr);
+        results.push({ email: u.email, ok: true });
+      } catch (e) {
+        console.error(e);
+        results.push({ email: u.email, ok: false, error: e.message });
+      }
+    }
+    res.json({ results });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.put("/api/user/password", requireAuth, async (req, res) => {
+  const { contact_id } = req.user;
+  const { current_password, new_password } = req.body;
+  if (!current_password || !new_password) return res.status(400).json({ error: "current_password and new_password required" });
+  if (new_password.length < 8) return res.status(400).json({ error: "Password must be at least 8 characters" });
+  try {
+    const [[row]] = await db.query(`SELECT password_hash FROM ffs_contact WHERE contact_id = ?`, [contact_id]);
+    if (!row?.password_hash) return res.status(400).json({ error: "No password set" });
+    const match = await bcrypt.compare(current_password, row.password_hash);
+    if (!match) return res.status(401).json({ error: "Current password is incorrect" });
+    const hash = await bcrypt.hash(new_password, 10);
+    await db.query(`UPDATE ffs_contact SET password_hash = ? WHERE contact_id = ?`, [hash, contact_id]);
+    res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Database error" });

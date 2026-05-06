@@ -3544,7 +3544,7 @@ function AdminView({ token, onSignOut }) {
 
   // Settings panel
   const [showSettings,    setShowSettings]    = useState(false);
-  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '' });
+  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '', invite_email_template: '' });
   const [settingsSaving,  setSettingsSaving]  = useState(false);
   const [resetting,       setResetting]       = useState(false);
   const [resetMsg,        setResetMsg]        = useState('');
@@ -3668,6 +3668,7 @@ function AdminView({ token, onSignOut }) {
           setSettingsForm({
             editable_year_from: d.settings.editable_year_from ?? '2003',
             editable_year_to:   d.settings.editable_year_to   ?? String(new Date().getFullYear()),
+            invite_email_template: d.settings.invite_email_template ?? '',
           });
         }
       })
@@ -3684,6 +3685,7 @@ function AdminView({ token, onSignOut }) {
         body: JSON.stringify({
           editable_year_from: settingsForm.editable_year_from,
           editable_year_to:   settingsForm.editable_year_to,
+          invite_email_template: settingsForm.invite_email_template,
         }),
       });
       setShowSettings(false);
@@ -4520,6 +4522,18 @@ function AdminView({ token, onSignOut }) {
                   </div>
                 </div>
               </div>
+              <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 16, marginTop: 4 }}>
+                <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Invite Email Template</p>
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: '#6B7280' }}>
+                  Variables: <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3 }}>{'{first_name}'}</code> <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3 }}>{'{inviter_name}'}</code> <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3 }}>{'{fleet_name}'}</code> <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3 }}>{'{email}'}</code> <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3 }}>{'{temp_password}'}</code>
+                </p>
+                <textarea
+                  rows={7}
+                  style={{ width: '100%', padding: '8px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 12, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }}
+                  value={settingsForm.invite_email_template}
+                  onChange={e => setSettingsForm(p => ({ ...p, invite_email_template: e.target.value }))}
+                />
+              </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
                 <button type="button" onClick={() => setShowSettings(false)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
                 <button type="submit" disabled={settingsSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
@@ -4681,6 +4695,63 @@ export default function App() {
     setTimeout(() => window.location.reload(), 0);
   };
 
+  // Team / invite state
+  const [showTeam, setShowTeam] = useState(false);
+  const [teamContacts, setTeamContacts] = useState([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [inviteRows, setInviteRows] = useState([{ first_name: '', last_name: '', email: '', phone: '' }]);
+  const [inviting, setInviting] = useState(false);
+  const [inviteResults, setInviteResults] = useState([]);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState('');
+
+  const fetchTeamContacts = async () => {
+    setTeamLoading(true);
+    try {
+      const r = await fetch('/api/fleet/contacts', { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) { const d = await r.json(); setTeamContacts(d.contacts || []); }
+    } catch {}
+    finally { setTeamLoading(false); }
+  };
+
+  const handleInvite = async (e) => {
+    e.preventDefault();
+    const toInvite = inviteRows.filter(r => r.email.trim());
+    if (!toInvite.length) return;
+    setInviting(true); setInviteResults([]);
+    try {
+      const r = await fetch('/api/fleet/invite', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ users: toInvite }),
+      });
+      const d = await r.json();
+      setInviteResults(d.results || []);
+      const anyOk = (d.results || []).some(r => r.ok);
+      if (anyOk) { setInviteRows([{ first_name: '', last_name: '', email: '', phone: '' }]); fetchTeamContacts(); }
+    } catch { setInviteResults([{ email: '—', ok: false, error: 'Network error' }]); }
+    finally { setInviting(false); }
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    if (pwForm.next !== pwForm.confirm) { setPwMsg('Passwords do not match'); return; }
+    setPwSaving(true); setPwMsg('');
+    try {
+      const r = await fetch('/api/user/password', {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: pwForm.current, new_password: pwForm.next }),
+      });
+      const d = await r.json();
+      if (r.ok) { setPwMsg('Password changed successfully.'); setPwForm({ current: '', next: '', confirm: '' }); }
+      else setPwMsg(d.error || 'Failed to change password');
+    } catch { setPwMsg('Network error'); }
+    finally { setPwSaving(false); }
+  };
+
   const handleSignOut = () => {
     localStorage.removeItem('token');
     setAuthed(false);
@@ -4717,6 +4788,7 @@ export default function App() {
           {[
             { id: 'dashboard', label: 'Data' },
             ...(!isNewFleet || submittedYears.length > 0 ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
+            { id: 'team', label: 'Team' },
           ].map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
               display: 'block', width: '100%', textAlign: 'left',
@@ -4736,6 +4808,7 @@ export default function App() {
               <div style={styles.fleetMeta}>{fleet?.hq}</div>
             </div>
           </div>
+          <button onClick={() => { setShowChangePassword(true); setPwMsg(''); }} style={{ background: 'none', border: 'none', color: '#9CA3AF', fontSize: 12, cursor: 'pointer', padding: '4px 0', textAlign: 'left', width: '100%' }}>Change password</button>
           <button style={styles.btnSignOut} onClick={() => setAuthed(false)}>Sign out</button>
         </div>
       </aside>
@@ -4743,6 +4816,95 @@ export default function App() {
       {/* Main content */}
       <main style={styles.main}>
         {page === 'benchmark' && <BenchmarkPage token={token} />}
+        {page === 'team' && (() => {
+          if (!showTeam) { setShowTeam(true); fetchTeamContacts(); }
+          return (
+            <div style={{ padding: '32px 40px', maxWidth: 860 }}>
+              <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>Team</h1>
+              <p style={{ color: '#6B7280', fontSize: 14, margin: '0 0 28px' }}>Manage who has access to your fleet's portal.</p>
+
+              {/* Current members */}
+              <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', marginBottom: 28 }}>
+                <div style={{ padding: '14px 20px', borderBottom: '1px solid #E5E7EB' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Current Members</span>
+                </div>
+                {teamLoading ? (
+                  <div style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>Loading…</div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                        <th style={{ padding: '10px 20px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Name</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Email</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Last Login</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teamContacts.map(c => (
+                        <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                          <td style={{ padding: '10px 20px', color: '#111827', fontWeight: 500 }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
+                          <td style={{ padding: '10px 12px', color: '#374151' }}>{c.email}</td>
+                          <td style={{ padding: '10px 12px', color: '#6B7280' }}>
+                            {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                          </td>
+                        </tr>
+                      ))}
+                      {teamContacts.length === 0 && (
+                        <tr><td colSpan={3} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No members yet.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* Invite users */}
+              <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB' }}>
+                <div style={{ padding: '14px 20px', borderBottom: '1px solid #E5E7EB' }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Invite Users</span>
+                </div>
+                <form onSubmit={handleInvite} style={{ padding: '16px 20px' }}>
+                  {inviteRows.map((row, i) => (
+                    <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                      <input placeholder="First name" value={row.first_name}
+                        onChange={e => setInviteRows(rows => rows.map((r, j) => j === i ? { ...r, first_name: e.target.value } : r))}
+                        style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }} />
+                      <input placeholder="Last name" value={row.last_name}
+                        onChange={e => setInviteRows(rows => rows.map((r, j) => j === i ? { ...r, last_name: e.target.value } : r))}
+                        style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }} />
+                      <input placeholder="Email *" required={i === 0} type="email" value={row.email}
+                        onChange={e => setInviteRows(rows => rows.map((r, j) => j === i ? { ...r, email: e.target.value } : r))}
+                        style={{ flex: 2, padding: '7px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }} />
+                      <input placeholder="Phone" value={row.phone}
+                        onChange={e => setInviteRows(rows => rows.map((r, j) => j === i ? { ...r, phone: e.target.value } : r))}
+                        style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }} />
+                      {inviteRows.length > 1 && (
+                        <button type="button" onClick={() => setInviteRows(rows => rows.filter((_, j) => j !== i))}
+                          style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 4px' }}>✕</button>
+                      )}
+                    </div>
+                  ))}
+                  <button type="button" onClick={() => setInviteRows(rows => [...rows, { first_name: '', last_name: '', email: '', phone: '' }])}
+                    style={{ background: 'none', border: 'none', color: '#1c3660', fontSize: 13, cursor: 'pointer', padding: '4px 0', marginBottom: 12 }}>
+                    + Add another
+                  </button>
+                  {inviteResults.length > 0 && (
+                    <div style={{ marginBottom: 12 }}>
+                      {inviteResults.map((r, i) => (
+                        <div key={i} style={{ fontSize: 12, color: r.ok ? '#059669' : '#DC2626', marginBottom: 2 }}>
+                          {r.email}: {r.ok ? 'Invited successfully' : r.error}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <button type="submit" disabled={inviting}
+                    style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+                    {inviting ? 'Sending…' : 'Send Invites'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          );
+        })()}
         {page === 'dashboard' && <>
         <header style={styles.mainHeader}>
             <div>
@@ -4948,6 +5110,42 @@ export default function App() {
         <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} isNewFleet={isNewFleet} />
         </>}
       </main>
+
+      {/* Change Password modal */}
+      {showChangePassword && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={e => { if (e.target === e.currentTarget) setShowChangePassword(false); }}>
+          <div style={{ background: '#fff', borderRadius: 10, padding: 28, width: 360, boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+            <h3 style={{ margin: '0 0 18px', fontSize: 16, color: '#111827' }}>Change Password</h3>
+            <form onSubmit={handleChangePassword} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Current Password</label>
+                <input type="password" required value={pwForm.current} onChange={e => setPwForm(p => ({ ...p, current: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>New Password</label>
+                <input type="password" required minLength={8} value={pwForm.next} onChange={e => setPwForm(p => ({ ...p, next: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 4 }}>Confirm New Password</label>
+                <input type="password" required value={pwForm.confirm} onChange={e => setPwForm(p => ({ ...p, confirm: e.target.value }))}
+                  style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13, boxSizing: 'border-box' }} />
+              </div>
+              {pwMsg && <p style={{ margin: 0, fontSize: 12, color: pwMsg.includes('success') ? '#059669' : '#DC2626' }}>{pwMsg}</p>}
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
+                <button type="button" onClick={() => setShowChangePassword(false)}
+                  style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
+                <button type="submit" disabled={pwSaving}
+                  style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
+                  {pwSaving ? 'Saving…' : 'Save'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* Data Entry Modal */}
       {entering && (
