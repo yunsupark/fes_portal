@@ -4804,8 +4804,7 @@ export default function App() {
       const anyOk = (d.results || []).some(r => r.ok);
       if (anyOk) {
         setInviteRows([{ first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }]);
-        setInviteEmailBody('');
-        setShowEmailPreview(false);
+        fetchInviteTemplate();
         fetchTeamContacts();
       }
     } catch { setInviteResults([{ email: '—', ok: false, error: 'Network error' }]); }
