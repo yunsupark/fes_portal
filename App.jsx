@@ -4072,6 +4072,7 @@ function AdminView({ token, onSignOut }) {
                                     <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'left' }}>Phone</th>
                                     <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'center' }}>Status</th>
                                     <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'center' }}>Allow Access</th>
+                                    <th style={{ fontWeight: 600, paddingBottom: 4, textAlign: 'center' }}>Role</th>
                                     <th></th>
                                   </tr>
                                 </thead>
@@ -4093,6 +4094,23 @@ function AdminView({ token, onSignOut }) {
                                           }} />
                                         ) : (
                                           <span style={{ fontSize: 11, color: c.portal_access ? '#059669' : '#9CA3AF', fontWeight: 600 }}>{c.portal_access ? 'Yes' : 'No'}</span>
+                                        )}
+                                      </td>
+                                      <td style={{ padding: '5px 0', textAlign: 'center' }}>
+                                        {isAdminRole ? (
+                                          <select value={c.fleet_role || 'fleet_user'}
+                                            onChange={async e => {
+                                              const r = await fetch(`/api/admin/contacts/${c.contact_id}/fleet-role`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ fleet_role: e.target.value }) });
+                                              const d = await r.json();
+                                              if (!r.ok) alert(d.error || 'Failed');
+                                              else fetchFleets();
+                                            }}
+                                            style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid #D1D5DB' }}>
+                                            <option value="fleet_admin">Admin</option>
+                                            <option value="fleet_user">User</option>
+                                          </select>
+                                        ) : (
+                                          <span style={{ fontSize: 11, color: '#6B7280' }}>{c.fleet_role === 'fleet_admin' ? 'Admin' : 'User'}</span>
                                         )}
                                       </td>
                                       {isAdminRole && <td style={{ padding: '5px 0', textAlign: 'right' }}>
@@ -4152,6 +4170,7 @@ function AdminView({ token, onSignOut }) {
                     <SortHeader label="Phone" field="phone" sort={contactSort} setSort={setContactSort} />
                     <SortHeader label="Last Login" field="last_login" sort={contactSort} setSort={setContactSort} />
                     <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Allow Access</th>
+                    <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Role</th>
                     <th style={{ ...thBase, padding: '8px 12px 8px 0' }}></th>
                   </tr>
                 </thead>
@@ -4176,13 +4195,30 @@ function AdminView({ token, onSignOut }) {
                           <span style={{ fontSize: 11, color: c.portal_access ? '#059669' : '#9CA3AF', fontWeight: 600 }}>{c.portal_access ? 'Yes' : 'No'}</span>
                         )}
                       </td>
+                      <td style={{ padding: '8px', textAlign: 'center' }}>
+                        {isAdminRole ? (
+                          <select value={c.fleet_role || 'fleet_user'}
+                            onChange={async e => {
+                              const r = await fetch(`/api/admin/contacts/${c.contact_id}/fleet-role`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ fleet_role: e.target.value }) });
+                              const d = await r.json();
+                              if (!r.ok) alert(d.error || 'Failed');
+                              else fetchFleets();
+                            }}
+                            style={{ fontSize: 11, padding: '2px 4px', borderRadius: 4, border: '1px solid #D1D5DB' }}>
+                            <option value="fleet_admin">Admin</option>
+                            <option value="fleet_user">User</option>
+                          </select>
+                        ) : (
+                          <span style={{ fontSize: 11, color: '#6B7280' }}>{c.fleet_role === 'fleet_admin' ? 'Admin' : 'User'}</span>
+                        )}
+                      </td>
                       {isAdminRole && <td style={{ padding: '8px 12px 8px 0', textAlign: 'right' }}>
                         <button style={editBtn} onClick={() => { setEditContact(c); setEditContactForm({ first_name: c.first_name || '', last_name: c.last_name || '', email: c.email, phone: c.phone || '', active: c.active !== 0, portal_access: !!c.portal_access }); }}>✎</button>
                       </td>}
                     </tr>
                   ))}
                   {sortedContacts.length === 0 && (
-                    <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No contacts found.</td></tr>
+                    <tr><td colSpan={8} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No contacts found.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -4679,12 +4715,12 @@ export default function App() {
   }, [token, selectedConfig]);
 
   // Decode fleet_id from JWT without a library (payload is base64 JSON)
-  const isAdmin = (() => {
-    if (!token) return false;
+  const { isAdmin, isFleetAdmin } = (() => {
+    if (!token) return { isAdmin: false, isFleetAdmin: false };
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
-      return payload.fleet_id === 0;
-    } catch { return false; }
+      return { isAdmin: payload.fleet_id === 0, isFleetAdmin: payload.fleet_role === 'fleet_admin' };
+    } catch { return { isAdmin: false, isFleetAdmin: false }; }
   })();
 
   const handleLogin = (tok, fleetObj) => {
@@ -4699,9 +4735,12 @@ export default function App() {
   const [showTeam, setShowTeam] = useState(false);
   const [teamContacts, setTeamContacts] = useState([]);
   const [teamLoading, setTeamLoading] = useState(false);
-  const [inviteRows, setInviteRows] = useState([{ first_name: '', last_name: '', email: '', phone: '' }]);
+  const [inviteRows, setInviteRows] = useState([{ first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }]);
   const [inviting, setInviting] = useState(false);
   const [inviteResults, setInviteResults] = useState([]);
+  const [inviteEmailBody, setInviteEmailBody] = useState('');
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
+  const [teamRoleChanging, setTeamRoleChanging] = useState(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
   const [pwSaving, setPwSaving] = useState(false);
@@ -4716,6 +4755,33 @@ export default function App() {
     finally { setTeamLoading(false); }
   };
 
+  const handleTeamRoleChange = async (contactId, newRole) => {
+    setTeamRoleChanging(contactId);
+    try {
+      const r = await fetch(`/api/fleet/contacts/${contactId}/role`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ role: newRole }),
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Failed to update role'); return; }
+      setTeamContacts(prev => prev.map(c => c.contact_id === contactId ? { ...c, fleet_role: newRole } : c));
+    } catch { alert('Network error'); }
+    finally { setTeamRoleChanging(null); }
+  };
+
+  const handleRemoveTeamMember = async (contactId) => {
+    if (!window.confirm('Remove this user from your fleet portal?')) return;
+    try {
+      const r = await fetch(`/api/fleet/contacts/${contactId}`, {
+        method: 'DELETE', headers: { Authorization: `Bearer ${token}` },
+      });
+      const d = await r.json();
+      if (!r.ok) { alert(d.error || 'Failed to remove user'); return; }
+      setTeamContacts(prev => prev.filter(c => c.contact_id !== contactId));
+    } catch { alert('Network error'); }
+  };
+
   const handleInvite = async (e) => {
     e.preventDefault();
     const toInvite = inviteRows.filter(r => r.email.trim());
@@ -4725,12 +4791,17 @@ export default function App() {
       const r = await fetch('/api/fleet/invite', {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ users: toInvite }),
+        body: JSON.stringify({ users: toInvite, ...(inviteEmailBody.trim() ? { email_body: inviteEmailBody } : {}) }),
       });
       const d = await r.json();
       setInviteResults(d.results || []);
       const anyOk = (d.results || []).some(r => r.ok);
-      if (anyOk) { setInviteRows([{ first_name: '', last_name: '', email: '', phone: '' }]); fetchTeamContacts(); }
+      if (anyOk) {
+        setInviteRows([{ first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }]);
+        setInviteEmailBody('');
+        setShowEmailPreview(false);
+        fetchTeamContacts();
+      }
     } catch { setInviteResults([{ email: '—', ok: false, error: 'Network error' }]); }
     finally { setInviting(false); }
   };
@@ -4788,7 +4859,7 @@ export default function App() {
           {[
             { id: 'dashboard', label: 'Data' },
             ...(!isNewFleet || submittedYears.length > 0 ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
-            { id: 'team', label: 'Team' },
+            ...(isFleetAdmin ? [{ id: 'team', label: 'Team' }] : []),
           ].map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
               display: 'block', width: '100%', textAlign: 'left',
@@ -4818,8 +4889,9 @@ export default function App() {
         {page === 'benchmark' && <BenchmarkPage token={token} />}
         {page === 'team' && (() => {
           if (!showTeam) { setShowTeam(true); fetchTeamContacts(); }
+          const fleetAdminCount = teamContacts.filter(c => c.fleet_role === 'fleet_admin').length;
           return (
-            <div style={{ padding: '32px 40px', maxWidth: 860 }}>
+            <div style={{ padding: '32px 40px', maxWidth: 900 }}>
               <h1 style={{ fontSize: 22, fontWeight: 700, color: '#111827', margin: '0 0 4px' }}>Team</h1>
               <p style={{ color: '#6B7280', fontSize: 14, margin: '0 0 28px' }}>Manage who has access to your fleet's portal.</p>
 
@@ -4837,20 +4909,40 @@ export default function App() {
                         <th style={{ padding: '10px 20px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Name</th>
                         <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Email</th>
                         <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Last Login</th>
+                        <th style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 600, color: '#6B7280', fontSize: 12 }}>Role</th>
+                        <th style={{ padding: '10px 12px' }}></th>
                       </tr>
                     </thead>
                     <tbody>
-                      {teamContacts.map(c => (
-                        <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
-                          <td style={{ padding: '10px 20px', color: '#111827', fontWeight: 500 }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
-                          <td style={{ padding: '10px 12px', color: '#374151' }}>{c.email}</td>
-                          <td style={{ padding: '10px 12px', color: '#6B7280' }}>
-                            {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
-                          </td>
-                        </tr>
-                      ))}
+                      {teamContacts.map(c => {
+                        const role = c.fleet_role || 'fleet_user';
+                        const isLastAdmin = role === 'fleet_admin' && fleetAdminCount === 1;
+                        return (
+                          <tr key={c.contact_id} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                            <td style={{ padding: '10px 20px', color: '#111827', fontWeight: 500 }}>{[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}</td>
+                            <td style={{ padding: '10px 12px', color: '#374151' }}>{c.email}</td>
+                            <td style={{ padding: '10px 12px', color: '#6B7280' }}>
+                              {c.last_login ? new Date(c.last_login).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '—'}
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <select value={role} disabled={teamRoleChanging === c.contact_id || isLastAdmin}
+                                onChange={e => handleTeamRoleChange(c.contact_id, e.target.value)}
+                                title={isLastAdmin ? 'Cannot remove last fleet admin' : ''}
+                                style={{ fontSize: 12, padding: '3px 6px', borderRadius: 4, border: '1px solid #D1D5DB', background: '#fff', cursor: isLastAdmin ? 'not-allowed' : 'pointer' }}>
+                                <option value="fleet_admin">Fleet Admin</option>
+                                <option value="fleet_user">Fleet User</option>
+                              </select>
+                            </td>
+                            <td style={{ padding: '10px 12px', textAlign: 'right' }}>
+                              <button onClick={() => handleRemoveTeamMember(c.contact_id)} disabled={isLastAdmin}
+                                title={isLastAdmin ? 'Cannot remove last fleet admin' : 'Remove user'}
+                                style={{ background: 'none', border: 'none', color: isLastAdmin ? '#D1D5DB' : '#DC2626', cursor: isLastAdmin ? 'not-allowed' : 'pointer', fontSize: 14, lineHeight: 1 }}>✕</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                       {teamContacts.length === 0 && (
-                        <tr><td colSpan={3} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No members yet.</td></tr>
+                        <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No members yet.</td></tr>
                       )}
                     </tbody>
                   </table>
@@ -4877,16 +4969,44 @@ export default function App() {
                       <input placeholder="Phone" value={row.phone}
                         onChange={e => setInviteRows(rows => rows.map((r, j) => j === i ? { ...r, phone: e.target.value } : r))}
                         style={{ flex: 1, padding: '7px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13 }} />
+                      <select value={row.fleet_role}
+                        onChange={e => setInviteRows(rows => rows.map((r, j) => j === i ? { ...r, fleet_role: e.target.value } : r))}
+                        style={{ padding: '7px 8px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 12 }}>
+                        <option value="fleet_user">Fleet User</option>
+                        <option value="fleet_admin">Fleet Admin</option>
+                      </select>
                       {inviteRows.length > 1 && (
                         <button type="button" onClick={() => setInviteRows(rows => rows.filter((_, j) => j !== i))}
                           style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 4px' }}>✕</button>
                       )}
                     </div>
                   ))}
-                  <button type="button" onClick={() => setInviteRows(rows => [...rows, { first_name: '', last_name: '', email: '', phone: '' }])}
-                    style={{ background: 'none', border: 'none', color: '#1c3660', fontSize: 13, cursor: 'pointer', padding: '4px 0', marginBottom: 12 }}>
-                    + Add another
-                  </button>
+                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
+                    <button type="button" onClick={() => setInviteRows(rows => [...rows, { first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }])}
+                      style={{ background: 'none', border: 'none', color: '#1c3660', fontSize: 13, cursor: 'pointer', padding: '4px 0' }}>
+                      + Add another
+                    </button>
+                    <button type="button" onClick={() => setShowEmailPreview(v => !v)}
+                      style={{ background: 'none', border: 'none', color: '#6B7280', fontSize: 12, cursor: 'pointer', padding: '4px 0', textDecoration: 'underline' }}>
+                      {showEmailPreview ? 'Hide email' : 'Edit invite email'}
+                    </button>
+                  </div>
+                  {showEmailPreview && (
+                    <div style={{ marginBottom: 12 }}>
+                      <p style={{ fontSize: 12, color: '#6B7280', margin: '0 0 6px' }}>
+                        Customize the message below. Leave blank to use the default.
+                        Variables: <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{first_name}'}</code>{' '}
+                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{inviter_name}'}</code>{' '}
+                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{fleet_name}'}</code>{' '}
+                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{email}'}</code>{' '}
+                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{temp_password}'}</code>
+                      </p>
+                      <textarea rows={7} value={inviteEmailBody}
+                        onChange={e => setInviteEmailBody(e.target.value)}
+                        placeholder="Leave blank to use the default invite message…"
+                        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }} />
+                    </div>
+                  )}
                   {inviteResults.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
                       {inviteResults.map((r, i) => (
