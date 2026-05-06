@@ -4739,7 +4739,6 @@ export default function App() {
   const [inviting, setInviting] = useState(false);
   const [inviteResults, setInviteResults] = useState([]);
   const [inviteEmailBody, setInviteEmailBody] = useState('');
-  const [showEmailPreview, setShowEmailPreview] = useState(false);
   const [teamRoleChanging, setTeamRoleChanging] = useState(null);
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
@@ -4753,6 +4752,13 @@ export default function App() {
       if (r.ok) { const d = await r.json(); setTeamContacts(d.contacts || []); }
     } catch {}
     finally { setTeamLoading(false); }
+  };
+
+  const fetchInviteTemplate = async () => {
+    try {
+      const r = await fetch('/api/fleet/invite-template', { headers: { Authorization: `Bearer ${token}` } });
+      if (r.ok) { const d = await r.json(); if (d.template) setInviteEmailBody(d.template); }
+    } catch {}
   };
 
   const handleTeamRoleChange = async (contactId, newRole) => {
@@ -4888,7 +4894,7 @@ export default function App() {
       <main style={styles.main}>
         {page === 'benchmark' && <BenchmarkPage token={token} />}
         {page === 'team' && (() => {
-          if (!showTeam) { setShowTeam(true); fetchTeamContacts(); }
+          if (!showTeam) { setShowTeam(true); fetchTeamContacts(); fetchInviteTemplate(); }
           const fleetAdminCount = teamContacts.filter(c => c.fleet_role === 'fleet_admin').length;
           return (
             <div style={{ padding: '32px 40px', maxWidth: 900 }}>
@@ -4981,32 +4987,22 @@ export default function App() {
                       )}
                     </div>
                   ))}
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 12 }}>
-                    <button type="button" onClick={() => setInviteRows(rows => [...rows, { first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }])}
-                      style={{ background: 'none', border: 'none', color: '#1c3660', fontSize: 13, cursor: 'pointer', padding: '4px 0' }}>
-                      + Add another
-                    </button>
-                    <button type="button" onClick={() => setShowEmailPreview(v => !v)}
-                      style={{ background: 'none', border: 'none', color: '#6B7280', fontSize: 12, cursor: 'pointer', padding: '4px 0', textDecoration: 'underline' }}>
-                      {showEmailPreview ? 'Hide email' : 'Edit invite email'}
-                    </button>
+                  <button type="button" onClick={() => setInviteRows(rows => [...rows, { first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }])}
+                    style={{ background: 'none', border: 'none', color: '#1c3660', fontSize: 13, cursor: 'pointer', padding: '4px 0', marginBottom: 16 }}>
+                    + Add another
+                  </button>
+                  <div style={{ marginBottom: 12 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#374151', margin: '0 0 4px' }}>Invite Email</p>
+                    <p style={{ fontSize: 12, color: '#6B7280', margin: '0 0 8px' }}>
+                      Edit the message that will be sent. Variables:{' '}
+                      {['{first_name}', '{inviter_name}', '{fleet_name}', '{email}', '{temp_password}'].map(v => (
+                        <code key={v} style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11, marginRight: 4 }}>{v}</code>
+                      ))}
+                    </p>
+                    <textarea rows={8} value={inviteEmailBody}
+                      onChange={e => setInviteEmailBody(e.target.value)}
+                      style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }} />
                   </div>
-                  {showEmailPreview && (
-                    <div style={{ marginBottom: 12 }}>
-                      <p style={{ fontSize: 12, color: '#6B7280', margin: '0 0 6px' }}>
-                        Customize the message below. Leave blank to use the default.
-                        Variables: <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{first_name}'}</code>{' '}
-                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{inviter_name}'}</code>{' '}
-                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{fleet_name}'}</code>{' '}
-                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{email}'}</code>{' '}
-                        <code style={{ background: '#F3F4F6', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>{'{temp_password}'}</code>
-                      </p>
-                      <textarea rows={7} value={inviteEmailBody}
-                        onChange={e => setInviteEmailBody(e.target.value)}
-                        placeholder="Leave blank to use the default invite message…"
-                        style={{ width: '100%', padding: '8px 10px', borderRadius: 6, border: '1px solid #D1D5DB', fontSize: 13, fontFamily: 'inherit', resize: 'vertical', boxSizing: 'border-box' }} />
-                    </div>
-                  )}
                   {inviteResults.length > 0 && (
                     <div style={{ marginBottom: 12 }}>
                       {inviteResults.map((r, i) => (

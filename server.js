@@ -414,6 +414,16 @@ app.get("/api/fleet/me", requireAuth, async (req, res) => {
   }
 });
 
+app.get("/api/fleet/invite-template", requireAuth, async (req, res) => {
+  try {
+    const [[row]] = await db.query(`SELECT setting_value FROM ffs_settings WHERE setting_key = 'invite_email_template'`);
+    res.json({ template: row?.setting_value || '' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
 app.get("/api/fleet/contacts", requireAuth, async (req, res) => {
   const { fleet_id } = req.user;
   if (fleet_id === 0) return res.status(403).json({ error: "Not a fleet user" });
@@ -523,12 +533,33 @@ app.post("/api/fleet/invite", requireAuth, async (req, res) => {
           .replace(/{email}/g, u.email)
           .replace(/{temp_password}/g, tempPassword);
 
+        const htmlBody = `<!DOCTYPE html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
+<body style="margin:0;padding:0;background:#f3f4f6;font-family:Arial,sans-serif">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 0">
+<tr><td align="center">
+<table width="560" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:8px;overflow:hidden;border:1px solid #e5e7eb">
+<tr><td style="background:#1c3660;padding:20px 32px">
+  <p style="margin:0;color:#ffffff;font-size:18px;font-weight:bold">Fleet Efficiency Study</p>
+</td></tr>
+<tr><td style="padding:32px">
+  <p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6">${body.replace(/\n/g, '</p><p style="margin:0 0 16px;font-size:15px;color:#111827;line-height:1.6">')}</p>
+</td></tr>
+<tr><td style="background:#f9fafb;padding:16px 32px;border-top:1px solid #e5e7eb">
+  <p style="margin:0;font-size:11px;color:#9ca3af">NACFE · 965 Lakeshore Drive, Golden, CO 80401</p>
+</td></tr>
+</table>
+</td></tr>
+</table>
+</body></html>`;
+
         const { error: sendErr } = await resend.emails.send({
           from: `Fleet Efficiency Study <${EMAIL_FROM}>`,
+          reply_to: EMAIL_FROM,
           to: u.email,
-          subject: `You've been added to ${fleet.fleet_name}'s Fleet Efficiency Study portal`,
+          subject: `Portal access: ${fleet.fleet_name} Fleet Efficiency Study`,
           text: body,
-          html: body.replace(/\n/g, '<br>'),
+          html: htmlBody,
         });
 
         if (sendErr) console.error('Email send error:', sendErr);
