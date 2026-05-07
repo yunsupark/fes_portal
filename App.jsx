@@ -100,7 +100,7 @@ function LoginScreen({ onLogin }) {
             </button>
             <button type="button" onClick={() => { setView('forgot'); setErr(''); }}
               style={{ background: 'none', border: 'none', color: '#6B7280', fontSize: 13, cursor: 'pointer', marginTop: 4 }}>
-              Forgot password?
+              Reset password
             </button>
           </form>
         )}
