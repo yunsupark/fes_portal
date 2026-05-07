@@ -1565,12 +1565,13 @@ app.put("/api/admin/fleets/:id", requireAuth, requireAdminRole, async (req, res)
  * Body: { fleet_id, first_name, last_name, email, phone }
  */
 app.post("/api/admin/contacts", requireAuth, requireAdminRole, async (req, res) => {
-  const { fleet_id, first_name, last_name, email, phone } = req.body;
+  const { fleet_id, first_name, last_name, email, phone, fleet_role } = req.body;
   if (!fleet_id || !email) return res.status(400).json({ error: "fleet_id and email required" });
+  const resolvedRole = parseInt(fleet_id) !== 0 && ['fleet_admin', 'fleet_user'].includes(fleet_role) ? fleet_role : null;
   try {
     const [result] = await db.query(
-      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active) VALUES (?, ?, ?, ?, ?, 1)`,
-      [fleet_id, first_name || null, last_name || null, email, phone || null]
+      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, fleet_role) VALUES (?, ?, ?, ?, ?, 1, ?)`,
+      [fleet_id, first_name || null, last_name || null, email, phone || null, resolvedRole]
     );
     res.json({ ok: true, contact_id: result.insertId });
   } catch (err) {

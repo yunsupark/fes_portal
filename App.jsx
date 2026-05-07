@@ -3564,7 +3564,7 @@ function AdminView({ token, onSignOut }) {
 
   // New Contact modal
   const [contactFleetId, setContactFleetId] = useState(null);
-  const [contactForm, setContactForm] = useState({ first_name: '', last_name: '', email: '', phone: '' });
+  const [contactForm, setContactForm] = useState({ first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' });
   const [contactSaving, setContactSaving] = useState(false);
 
   // Edit Contact modal
@@ -3779,7 +3779,7 @@ function AdminView({ token, onSignOut }) {
         method: 'POST', headers: authHeaders,
         body: JSON.stringify({ fleet_id: contactFleetId === 'pick' ? contactForm.fleet_id : contactFleetId, ...contactForm }),
       });
-      if (res.ok) { setContactFleetId(null); setContactForm({ first_name: '', last_name: '', email: '', phone: '' }); fetchFleets(); }
+      if (res.ok) { setContactFleetId(null); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }); fetchFleets(); }
     } finally { setContactSaving(false); }
   };
 
@@ -4122,7 +4122,7 @@ function AdminView({ token, onSignOut }) {
                               </table>
                             )}
                             {isAdminRole && <button
-                              onClick={e => { e.stopPropagation(); setContactFleetId(f.fleet_id); setContactForm({ first_name: '', last_name: '', email: '', phone: '' }); }}
+                              onClick={e => { e.stopPropagation(); setContactFleetId(f.fleet_id); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user' }); }}
                               style={{ background: '#fff', border: '1px solid #D1D5DB', borderRadius: 6, padding: '4px 10px', fontSize: 12, cursor: 'pointer', color: '#374151' }}
                             >+ Add Contact</button>}
                           </td>
@@ -4143,7 +4143,7 @@ function AdminView({ token, onSignOut }) {
               Fleet Contacts <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({sortedContacts.length})</span>
             </h2>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }} onClick={e => e.stopPropagation()}>
-              {isAdminRole && <button onClick={() => { setContactFleetId('pick'); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_id: '' }); }}
+              {isAdminRole && <button onClick={() => { setContactFleetId('pick'); setContactForm({ first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_user', fleet_id: '' }); }}
                 style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 12px', fontSize: 12, cursor: 'pointer', fontWeight: 600 }}>
                 + New Contact
               </button>}
@@ -4421,6 +4421,18 @@ function AdminView({ token, onSignOut }) {
                 <label style={labelStyle}>Phone</label>
                 <input style={inputStyle} value={contactForm.phone} onChange={e => setContactForm(p => ({ ...p, phone: e.target.value }))} placeholder="Optional" />
               </div>
+              {(() => {
+                const fid = contactFleetId === 'pick' ? contactForm.fleet_id : contactFleetId;
+                return fid && String(fid) !== '0' ? (
+                  <div>
+                    <label style={labelStyle}>Fleet Role</label>
+                    <select style={inputStyle} value={contactForm.fleet_role} onChange={e => setContactForm(p => ({ ...p, fleet_role: e.target.value }))}>
+                      <option value="fleet_user">Fleet User</option>
+                      <option value="fleet_admin">Fleet Admin</option>
+                    </select>
+                  </div>
+                ) : null;
+              })()}
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
                 <button type="button" onClick={() => setContactFleetId(null)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13 }}>Cancel</button>
                 <button type="submit" disabled={contactSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', cursor: 'pointer', fontSize: 13, fontWeight: 600 }}>
