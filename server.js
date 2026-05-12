@@ -1570,7 +1570,7 @@ app.post("/api/admin/contacts", requireAuth, requireAdminRole, async (req, res) 
   const resolvedRole = parseInt(fleet_id) !== 0 && ['fleet_admin', 'fleet_user'].includes(fleet_role) ? fleet_role : null;
   try {
     const [result] = await db.query(
-      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, fleet_role) VALUES (?, ?, ?, ?, ?, 1, ?)`,
+      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, portal_access, fleet_role) VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
       [fleet_id, first_name || null, last_name || null, email, phone || null, resolvedRole]
     );
     res.json({ ok: true, contact_id: result.insertId });
