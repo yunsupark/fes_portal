@@ -4727,12 +4727,16 @@ export default function App() {
   }, [token, selectedConfig]);
 
   // Decode fleet_id from JWT without a library (payload is base64 JSON)
-  const { isAdmin, isFleetAdmin } = (() => {
-    if (!token) return { isAdmin: false, isFleetAdmin: false };
+  const { isAdmin, isFleetAdmin, isDemo } = (() => {
+    if (!token) return { isAdmin: false, isFleetAdmin: false, isDemo: false };
     try {
       const payload = JSON.parse(atob(token.split('.')[1]));
-      return { isAdmin: payload.fleet_id === 0, isFleetAdmin: payload.fleet_role === 'fleet_admin' };
-    } catch { return { isAdmin: false, isFleetAdmin: false }; }
+      return {
+        isAdmin: payload.fleet_id === 0,
+        isFleetAdmin: payload.fleet_role === 'fleet_admin',
+        isDemo: payload.email === 'demo@nacfe.org',
+      };
+    } catch { return { isAdmin: false, isFleetAdmin: false, isDemo: false }; }
   })();
 
   const handleLogin = (tok, fleetObj) => {
@@ -4875,8 +4879,8 @@ export default function App() {
         <nav style={{ padding: '16px 0', display: 'flex', flexDirection: 'column', gap: 2 }}>
           {[
             { id: 'dashboard', label: 'Data' },
-            ...(!isNewFleet || submittedYears.length > 0 ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
-            ...(isFleetAdmin ? [{ id: 'team', label: 'Team' }] : []),
+            ...(!isDemo && (!isNewFleet || submittedYears.length > 0) ? [{ id: 'benchmark', label: 'Benchmarking' }] : []),
+            ...(!isDemo && isFleetAdmin ? [{ id: 'team', label: 'Team' }] : []),
           ].map(item => (
             <button key={item.id} onClick={() => setPage(item.id)} style={{
               display: 'block', width: '100%', textAlign: 'left',

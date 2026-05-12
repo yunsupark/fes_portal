@@ -249,7 +249,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const token = jwt.sign(
-      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id, first_name: row.first_name || '', last_name: row.last_name || '', admin_role: row.fleet_id === 0 ? (row.admin_role || 'user') : null, fleet_role: row.fleet_id !== 0 ? (row.fleet_role || 'fleet_user') : null },
+      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id, email: row.email, first_name: row.first_name || '', last_name: row.last_name || '', admin_role: row.fleet_id === 0 ? (row.admin_role || 'user') : null, fleet_role: row.fleet_id !== 0 ? (row.fleet_role || 'fleet_user') : null },
       JWT_SECRET,
       { expiresIn: "30d" }
     );
