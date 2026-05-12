@@ -3553,7 +3553,7 @@ function AdminView({ token, onSignOut }) {
   const [showFleetForm, setShowFleetForm] = useState(false);
   const [fleetForm, setFleetForm] = useState({
     fleet_name: '', fleet_city: '', fleet_state: '', default_duty_cycle: '',
-    first_name: '', last_name: '', email: '', phone: '',
+    first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_admin',
   });
   const [fleetSaving, setFleetSaving] = useState(false);
 
@@ -3752,10 +3752,10 @@ function AdminView({ token, onSignOut }) {
       const { fleet_id } = await fleetRes.json();
       await fetch('/api/admin/contacts', {
         method: 'POST', headers: authHeaders,
-        body: JSON.stringify({ fleet_id, first_name: fleetForm.first_name, last_name: fleetForm.last_name, email: fleetForm.email, phone: fleetForm.phone }),
+        body: JSON.stringify({ fleet_id, first_name: fleetForm.first_name, last_name: fleetForm.last_name, email: fleetForm.email, phone: fleetForm.phone, fleet_role: fleetForm.fleet_role }),
       });
       setShowFleetForm(false);
-      setFleetForm({ fleet_name: '', fleet_city: '', fleet_state: '', default_duty_cycle: '', first_name: '', last_name: '', email: '', phone: '' });
+      setFleetForm({ fleet_name: '', fleet_city: '', fleet_state: '', default_duty_cycle: '', first_name: '', last_name: '', email: '', phone: '', fleet_role: 'fleet_admin' });
       fetchFleets();
     } finally { setFleetSaving(false); }
   };
@@ -4329,6 +4329,13 @@ function AdminView({ token, onSignOut }) {
                 <div>
                   <label style={labelStyle}>Phone</label>
                   <input style={inputStyle} value={fleetForm.phone} onChange={e => setFleetForm(p => ({ ...p, phone: e.target.value }))} placeholder="Optional" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Fleet Role *</label>
+                  <select style={inputStyle} value={fleetForm.fleet_role} onChange={e => setFleetForm(p => ({ ...p, fleet_role: e.target.value }))}>
+                    <option value="fleet_admin">Fleet Admin</option>
+                    <option value="fleet_user">Fleet User</option>
+                  </select>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
