@@ -667,7 +667,6 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       [fleet_id]
     );
     const submittedYears = subRows.map(r => Number(r.survey_year));
-    const lastSubmitted  = submittedYears.length ? Math.max(...submittedYears) : null;
     // A fleet is "new" if it has no submissions with a submitted_at in the past (i.e. no real historical data)
     const isNewFleet = !subRows.some(r => r.submitted_at != null);
     // Editable: configurable window from ffs_settings
@@ -678,11 +677,11 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     const yrFrom = settingsMap.editable_year_from ?? 2003;
     const yrTo   = settingsMap.editable_year_to   ?? new Date().getFullYear();
     const editableYears = [];
-    const startYear = lastSubmitted ? Math.max(lastSubmitted + 1, yrFrom) : yrFrom;
-    for (let yr = startYear; yr <= yrTo; yr++) editableYears.push(yr);
+    for (let yr = yrFrom; yr <= yrTo; yr++) editableYears.push(yr);
 
-    // Use editableYears as the years to query for status
-    const years = editableYears.length ? editableYears : [new Date().getFullYear()];
+    // Query status for all display years (editable range + any submitted years outside it)
+    const years = [...new Set([...editableYears, ...submittedYears])].sort((a, b) => a - b);
+    if (!years.length) years.push(new Date().getFullYear());
 
     const [utilRows] = await db.query(
       `SELECT utilization_year AS yr, COUNT(*) AS cnt FROM ffs_equip_utilization
