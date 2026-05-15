@@ -151,11 +151,11 @@ const db = mysql.createPool({
         (LOWER(first_name) = 'yunsu' AND LOWER(last_name) = 'park')
       )
     `);
-    // Remove submission records where the fleet has no adoption AND no MPG data for that year
+    // Remove submission records where the fleet is missing a matching mpg_year OR adoption_year entry
     await db.query(`
       DELETE s FROM ffs_submission s
-      WHERE NOT EXISTS (SELECT 1 FROM ffs_adoption a WHERE a.fleet_id = s.fleet_id AND a.adoption_year = s.survey_year)
-        AND NOT EXISTS (SELECT 1 FROM ffs_mpg m WHERE m.fleet_id = s.fleet_id AND m.mpg_year = s.survey_year)
+      WHERE NOT EXISTS (SELECT 1 FROM ffs_mpg m WHERE m.fleet_id = s.fleet_id AND m.mpg_year = s.survey_year)
+         OR NOT EXISTS (SELECT 1 FROM ffs_adoption a WHERE a.fleet_id = s.fleet_id AND a.adoption_year = s.survey_year)
     `);
     // Backfill ffs_submission for years that have data in BOTH ffs_adoption and ffs_mpg
     await db.query(`
