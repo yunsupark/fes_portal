@@ -2191,6 +2191,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
   const [status, setStatus]           = useState(null);
   const [submitModal, setSubmitModal] = useState(null);
   const [submittingAll, setSubmittingAll] = useState(false);
+  const scrollRef = useRef(null);
   const YEARS = [...editableYears].sort((a, b) => a - b);
 
   const loadStatus = () => {
@@ -2201,6 +2202,9 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
       .catch(console.error);
   };
   useEffect(loadStatus, [token, saveCount]);
+  useEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollLeft = scrollRef.current.scrollWidth;
+  }, [YEARS.length]);
 
   const techThreshold = (yr, cabType) => status?.techTotals?.[yr]?.[cabType] ?? 0;
 
@@ -2326,7 +2330,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
   return (
     <div style={styles.chartCard}>
       <h3 style={{...styles.chartTitle, marginBottom:16}}>Submission Status</h3>
-      <div style={{overflowX:'auto', width:'100%'}}>
+      <div ref={scrollRef} style={{overflowX:'auto', width:'100%'}}>
       <table style={{borderCollapse:'collapse', minWidth: `${YEARS.length * 120 + 180}px`}}>
         <thead>
           <tr>

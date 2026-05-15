@@ -151,6 +151,16 @@ const db = mysql.createPool({
         (LOWER(first_name) = 'yunsu' AND LOWER(last_name) = 'park')
       )
     `);
+    // Backfill ffs_submission for every year that has adoption or MPG data
+    await db.query(`
+      INSERT IGNORE INTO ffs_submission (fleet_id, survey_year)
+      SELECT fleet_id, yr FROM (
+        SELECT fleet_id, adoption_year AS yr FROM ffs_adoption
+        UNION
+        SELECT fleet_id, mpg_year      AS yr FROM ffs_mpg
+      ) t
+      GROUP BY fleet_id, yr
+    `);
     // Add fleet_role column for fleet_id != 0 contacts
     const [[{ fleet_role_col }]] = await db.query(
       `SELECT COUNT(*) AS fleet_role_col FROM INFORMATION_SCHEMA.COLUMNS
