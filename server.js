@@ -151,15 +151,18 @@ const db = mysql.createPool({
         (LOWER(first_name) = 'yunsu' AND LOWER(last_name) = 'park')
       )
     `);
-    // Backfill ffs_submission for every year that has adoption or MPG data
+    // Remove submission records where the fleet has no adoption AND no MPG data for that year
+    await db.query(`
+      DELETE s FROM ffs_submission s
+      WHERE NOT EXISTS (SELECT 1 FROM ffs_adoption a WHERE a.fleet_id = s.fleet_id AND a.adoption_year = s.survey_year)
+        AND NOT EXISTS (SELECT 1 FROM ffs_mpg m WHERE m.fleet_id = s.fleet_id AND m.mpg_year = s.survey_year)
+    `);
+    // Backfill ffs_submission for years that have data in BOTH ffs_adoption and ffs_mpg
     await db.query(`
       INSERT IGNORE INTO ffs_submission (fleet_id, survey_year)
-      SELECT fleet_id, yr FROM (
-        SELECT fleet_id, adoption_year AS yr FROM ffs_adoption
-        UNION
-        SELECT fleet_id, mpg_year      AS yr FROM ffs_mpg
-      ) t
-      GROUP BY fleet_id, yr
+      SELECT DISTINCT a.fleet_id, a.adoption_year AS survey_year
+      FROM ffs_adoption a
+      WHERE EXISTS (SELECT 1 FROM ffs_mpg m WHERE m.fleet_id = a.fleet_id AND m.mpg_year = a.adoption_year)
     `);
     // Add fleet_role column for fleet_id != 0 contacts
     const [[{ fleet_role_col }]] = await db.query(

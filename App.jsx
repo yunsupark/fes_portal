@@ -2369,7 +2369,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
         <tfoot>
           {!isNewFleet && (
             <tr>
-              <td />
+              <td style={{position:'sticky', left:0, background:'#fff', zIndex:1}} />
               {YEARS.map(y => (
                 <td key={y} style={{padding:'10px 16px', textAlign:'center'}}>
                   <SubmitBtn yr={y} />
