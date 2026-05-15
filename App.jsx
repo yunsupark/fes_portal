@@ -1843,7 +1843,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
 }
 
 
-function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
+function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submittedYears = [] }) {
   const [techData, setTechData]         = useState({});
   const [otherTechData, setOtherTechData] = useState({});
   const [categories, setCategories]     = useState({});
@@ -2038,6 +2038,9 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
               <th style={{...styles.heatTh, minWidth:220, position:'sticky', left:0, zIndex:3, background:'#fff'}}>Technology</th>
               {readOnlyYears.map(y => <th key={y} style={styles.heatThYear}>{y}</th>)}
               {effectiveEditableYears.map(y => {
+                if (submittedYears.includes(y)) {
+                  return <th key={y} style={styles.heatThYear}>{y} ✓</th>;
+                }
                 const otherCab = selectedCabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
                 const hasPriorYear    = y - 1 >= 2003;
                 const hasPriorSame    = hasPriorYear && (
@@ -2082,7 +2085,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
                 </td>
               ))}
               {effectiveEditableYears.map(y => (
-                <td key={y} style={{...styles.heatCell, fontSize:12, color:'#374151', background:'#EFF6FF', fontWeight:500}}>
+                <td key={y} style={{...styles.heatCell, fontSize:12, color: submittedYears.includes(y) ? '#6B7280' : '#374151', background: submittedYears.includes(y) ? 'transparent' : '#EFF6FF', fontWeight:500}}>
                   {yearMeta[y]?.cab_type || selectedCabType}
                 </td>
               ))}
@@ -2121,32 +2124,44 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025] }) {
                           <HeatCell value={(techData[y] || {})[tech.label]} />
                         </td>
                       ))}
-                      {effectiveEditableYears.map(y => (
-                        <td key={y} style={{...styles.heatCell, background:'#F0F7FF', padding:'4px 8px'}}>
-                          <div style={styles.pctInputWrap}>
-                            <input
-                              style={{...styles.techInput, fontSize:12, padding:'4px 24px 4px 6px'}}
-                              type="number" min="0" max="100"
-                              value={((edits[selectedCabType] || {})[y] || {})[tech.label] ?? ''}
-                              onChange={e => {
-                                let val = e.target.value;
-                                if (val !== '' && val !== '-') {
-                                  const n = Number(val);
-                                  if (n < 0) val = '0';
-                                  else if (n > 100) val = '100';
-                                }
-                                setEdits(prev => {
-                                  const cabEdits = { ...(prev[selectedCabType] || {}) };
-                                  cabEdits[y] = { ...(cabEdits[y] || {}), [tech.label]: val };
-                                  return { ...prev, [selectedCabType]: cabEdits };
-                                });
-                              }}
-                              placeholder="—"
-                            />
-                            <span style={styles.pctSign}>%</span>
-                          </div>
-                        </td>
-                      ))}
+                      {effectiveEditableYears.map(y => {
+                        if (submittedYears.includes(y)) {
+                          const dbVal = (techData[y] || {})[tech.label];
+                          const editVal = ((edits[selectedCabType] || {})[y] || {})[tech.label];
+                          const displayVal = dbVal != null ? dbVal : (editVal !== '' && editVal != null ? Number(editVal) / 100 : null);
+                          return (
+                            <td key={y} style={styles.heatCell}>
+                              <HeatCell value={displayVal} />
+                            </td>
+                          );
+                        }
+                        return (
+                          <td key={y} style={{...styles.heatCell, background:'#F0F7FF', padding:'4px 8px'}}>
+                            <div style={styles.pctInputWrap}>
+                              <input
+                                style={{...styles.techInput, fontSize:12, padding:'4px 24px 4px 6px'}}
+                                type="number" min="0" max="100"
+                                value={((edits[selectedCabType] || {})[y] || {})[tech.label] ?? ''}
+                                onChange={e => {
+                                  let val = e.target.value;
+                                  if (val !== '' && val !== '-') {
+                                    const n = Number(val);
+                                    if (n < 0) val = '0';
+                                    else if (n > 100) val = '100';
+                                  }
+                                  setEdits(prev => {
+                                    const cabEdits = { ...(prev[selectedCabType] || {}) };
+                                    cabEdits[y] = { ...(cabEdits[y] || {}), [tech.label]: val };
+                                    return { ...prev, [selectedCabType]: cabEdits };
+                                  });
+                                }}
+                                placeholder="—"
+                              />
+                              <span style={styles.pctSign}>%</span>
+                            </div>
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 });
@@ -2240,6 +2255,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
 
   // Cell display helpers
   const sectionCell = (key, yr) => {
+    if (submittedYears.includes(yr)) return { text: '✓ Complete', color: '#16A34A' };
     if (!status) return { text: '—', color: '#374151' };
     const cnt = status[key]?.[yr] ?? 0;
     if (cnt === 0) return { text: 'Not Started', color: '#DC2626' };
@@ -2248,6 +2264,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
   };
 
   const fuelCellDisplay = (yr) => {
+    if (submittedYears.includes(yr)) return { text: '✓ Complete', color: '#16A34A' };
     if (!status) return { text: '—', color: '#374151' };
     const cnt = fuelCnt(yr);
     if (cnt === 0) return { text: 'Not Started', color: '#DC2626' };
@@ -2256,6 +2273,7 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
   };
 
   const techCellDisplay = (yr) => {
+    if (submittedYears.includes(yr)) return { text: '✓ Complete', color: '#16A34A' };
     if (!status) return { text: '—', color: '#374151' };
     const byType = status.tech?.[yr];
     const hasAny = byType && Object.keys(byType).length > 0;
@@ -5245,7 +5263,7 @@ export default function App() {
         <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
 
         {/* Tech Adoption Card */}
-        <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} isNewFleet={isNewFleet} />
+        <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} submittedYears={submittedYears} />
         </>}
       </main>
 
