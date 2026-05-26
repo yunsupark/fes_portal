@@ -1905,11 +1905,13 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
   const [saveMsg, setSaveMsg]           = useState('');
   const [openCats, setOpenCats]         = useState({});
   const [copySource, setCopySource]     = useState({});
+  const [minDataYear, setMinDataYear]   = useState(null);
 
+  const dataYears = new Set(Object.keys(techData).map(Number));
   const maxEditableYear = Math.max(...editableYears, 2025);
-  const hasDataForCabType = Object.keys(techData).length > 0;
+  const hasDataForCabType = dataYears.size > 0;
   const effectiveEditableYears = hasDataForCabType
-    ? editableYears
+    ? editableYears.filter(y => !minDataYear || y >= minDataYear)
     : Array.from({ length: maxEditableYear - 2003 + 1 }, (_, i) => 2003 + i);
 
   const allTechs = Object.entries(categories).flatMap(([cat, arr]) => arr.map(t => ({...t, category: cat})));
@@ -1938,13 +1940,18 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
       setCopySource({});
 
       // If no data for this cab type, make all years 2003–max editable (no slice)
-      const hasData = Object.keys(t.data || {}).length > 0;
+      const knownDataYears = Object.keys(t.data || {}).map(Number);
+      const hasData = knownDataYears.length > 0;
+      const minDataYr = hasData ? Math.min(...knownDataYears) : null;
+      setMinDataYear(minDataYr);
       const maxYr = Math.max(...editableYears, 2025);
       const effEditable = hasData
-        ? editableYears
+        ? editableYears.filter(y => !minDataYr || y >= minDataYr)
         : Array.from({ length: maxYr - 2003 + 1 }, (_, i) => 2003 + i);
-      const known = new Set([...Object.keys(t.data || {}).map(Number), ...effEditable]);
-      const sorted = [...known].sort((a, b) => b - a);
+      const known = new Set([...knownDataYears, ...effEditable]);
+      const sorted = [...known]
+        .filter(y => !minDataYr || y >= minDataYr)
+        .sort((a, b) => b - a);
       setYears(sorted);
 
       setOpenCats(prev => {
@@ -2090,6 +2097,9 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
                 if (submittedYears.includes(y)) {
                   return <th key={y} style={styles.heatThYear}>{y} ✓</th>;
                 }
+                if (dataYears.has(y)) {
+                  return <th key={y} style={styles.heatThYear}>{y}</th>;
+                }
                 const otherCab = selectedCabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
                 const hasPriorYear    = y - 1 >= 2003;
                 const hasPriorSame    = hasPriorYear && (
@@ -2133,11 +2143,14 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
                   {yearMeta[y]?.cab_type || '—'}
                 </td>
               ))}
-              {effectiveEditableYears.map(y => (
-                <td key={y} style={{...styles.heatCell, fontSize:12, color: submittedYears.includes(y) ? '#6B7280' : '#374151', background: submittedYears.includes(y) ? 'transparent' : '#EFF6FF', fontWeight:500}}>
-                  {yearMeta[y]?.cab_type || selectedCabType}
-                </td>
-              ))}
+              {effectiveEditableYears.map(y => {
+                const isReadOnly = submittedYears.includes(y) || dataYears.has(y);
+                return (
+                  <td key={y} style={{...styles.heatCell, fontSize:12, color: isReadOnly ? '#6B7280' : '#374151', background: isReadOnly ? 'transparent' : '#EFF6FF', fontWeight:500}}>
+                    {yearMeta[y]?.cab_type || selectedCabType}
+                  </td>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -2174,10 +2187,10 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
                         </td>
                       ))}
                       {effectiveEditableYears.map(y => {
-                        if (submittedYears.includes(y)) {
+                        if (submittedYears.includes(y) || dataYears.has(y)) {
                           const dbVal = (techData[y] || {})[tech.label];
                           const editVal = ((edits[selectedCabType] || {})[y] || {})[tech.label];
-                          const displayVal = dbVal != null ? dbVal : (editVal !== '' && editVal != null ? Number(editVal) / 100 : null);
+                          const displayVal = dbVal != null ? dbVal : (submittedYears.includes(y) && editVal !== '' && editVal != null ? Number(editVal) / 100 : 0);
                           return (
                             <td key={y} style={styles.heatCell}>
                               <HeatCell value={displayVal} />
