@@ -325,6 +325,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   const [fuelBenchmarks, setFuelBenchmarks] = useState({});
   const [categoriesCabType, setCategoriesCabType] = useState(null);
   const [pendingCabSwitch, setPendingCabSwitch] = useState(null); // { inputs, targetStep }
+  const [fuelMissingYears, setFuelMissingYears] = useState([]);
   const pctRefs = useRef([]);
 
   // ── Equipment steps state ──────────────────────────────────────────
@@ -511,6 +512,23 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
         finalEdits  = applyZeroToGroupEdits(grp, finalInputs, finalEdits);
       }
     }
+    // Clear values for years before the fleet's data start year (fuel firstYear)
+    const fleetFirstYear = Number((finalInputs['__fuel__'] || {}).firstYear || 0);
+    if (fleetFirstYear) {
+      finalEdits = Object.fromEntries(
+        Object.entries(finalEdits).map(([grp, yearMap]) => [
+          grp,
+          Object.fromEntries(
+            Object.entries(yearMap || {}).map(([yr, techs]) => [
+              yr,
+              Number(yr) < fleetFirstYear
+                ? Object.fromEntries(Object.keys(techs).map(k => [k, '']))
+                : techs,
+            ])
+          ),
+        ])
+      );
+    }
     return { finalInputs, finalEdits };
   };
 
@@ -547,10 +565,15 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
 
   // Fill zeros into computed groupEdits for all-blank tech values
   const applyZeroToGroupEdits = (groupName, inputs, editsMap) => {
+    const fleetFirstYear = Number((inputs['__fuel__'] || {}).firstYear || 0);
     const techs = getVisibleTechs(groupName);
     const ge = { ...(editsMap[groupName] || {}) };
     for (const yr of sortedYears) {
       ge[yr] = { ...(ge[yr] || {}) };
+      if (fleetFirstYear && Number(yr) < fleetFirstYear) {
+        for (const tech of techs) ge[yr][tech.label] = '';
+        continue;
+      }
       for (const tech of techs) {
         const inp = (inputs[groupName] || {})[tech.label];
         if (!inp || inp.pct === '' || inp.pct == null) {
@@ -1778,8 +1801,34 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
             )}
           </div>
 
+          {fuelMissingYears.length > 0 && (
+            <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '10px 14px' }}>
+              <p style={{ margin: '0 0 6px', fontSize: 13, fontWeight: 600, color: '#991B1B' }}>
+                MPG data required for {fuelMissingYears.join(', ')}
+              </p>
+              <p style={{ margin: 0, fontSize: 12, color: '#B91C1C' }}>
+                You have adoption data for these years but no fuel (IFTA) data. Please go back and enter fuel data starting from {Math.min(...fuelMissingYears)}.
+              </p>
+            </div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-            <button onClick={() => setStep('interview-complete')} style={bPrim}>Looks good →</button>
+            {fuelMissingYears.length > 0 && (
+              <button onClick={() => { setFuelMissingYears([]); setStep('fuel-setup'); }} style={bGhost}>← Fix fuel data</button>
+            )}
+            <button onClick={() => {
+              const fuelFirstYear = Number((groupInputs['__fuel__'] || {}).firstYear || 0);
+              const missing = fuelFirstYear
+                ? sortedYears.filter(yr =>
+                    Number(yr) < fuelFirstYear &&
+                    visibleGroups.some(grp =>
+                      Object.values(groupEdits[grp]?.[yr] || {}).some(v => v !== '' && v != null)
+                    )
+                  )
+                : [];
+              if (missing.length > 0) { setFuelMissingYears(missing); return; }
+              setFuelMissingYears([]);
+              setStep('interview-complete');
+            }} style={bPrim}>Looks good →</button>
           </div>
         </div>
       </div>
@@ -2259,28 +2308,40 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
 
   // Cell display helpers
   const sectionCell = (key, yr) => {
-    if (submittedYears.includes(yr)) return { text: '✓ Complete', color: '#16A34A' };
     if (!status) return { text: '—', color: '#374151' };
     const cnt = status[key]?.[yr] ?? 0;
+    if (submittedYears.includes(yr)) {
+      return cnt > 0
+        ? { text: '✓ Complete', color: '#16A34A' }
+        : { text: 'Not entered', color: '#9CA3AF' };
+    }
     if (cnt === 0) return { text: 'Not Started', color: '#DC2626' };
     const color = allFilled(yr) ? '#16A34A' : '#D97706';
     return { text: cnt === 1 ? '1 entry' : `${cnt} entries`, color };
   };
 
   const fuelCellDisplay = (yr) => {
-    if (submittedYears.includes(yr)) return { text: '✓ Complete', color: '#16A34A' };
     if (!status) return { text: '—', color: '#374151' };
     const cnt = fuelCnt(yr);
+    if (submittedYears.includes(yr)) {
+      return cnt > 0
+        ? { text: '✓ Complete', color: '#16A34A' }
+        : { text: 'Not entered', color: '#9CA3AF' };
+    }
     if (cnt === 0) return { text: 'Not Started', color: '#DC2626' };
     const color = allFilled(yr) ? '#16A34A' : '#D97706';
     return { text: status.fuel[yr].fuel_types || (cnt === 1 ? '1 entry' : `${cnt} entries`), color };
   };
 
   const techCellDisplay = (yr) => {
-    if (submittedYears.includes(yr)) return { text: '✓ Complete', color: '#16A34A' };
     if (!status) return { text: '—', color: '#374151' };
     const byType = status.tech?.[yr];
     const hasAny = byType && Object.keys(byType).length > 0;
+    if (submittedYears.includes(yr)) {
+      return hasAny
+        ? { text: '✓ Complete', color: '#16A34A' }
+        : { text: 'Not entered', color: '#9CA3AF' };
+    }
     if (!hasAny) return { text: 'Not Started', color: '#DC2626' };
     const text = Object.entries(byType).sort(([a],[b]) => a.localeCompare(b)).map(([ct, n]) => `${ct}: ${n}/${techThreshold(yr, ct)}`).join(', ');
     const color = allFilled(yr) ? '#16A34A' : '#D97706';
