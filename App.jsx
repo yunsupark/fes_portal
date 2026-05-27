@@ -5446,7 +5446,6 @@ function SubmitPanel({ token, editableYears, submittedYears, saveCount, onSubmit
   const [loadedCount, setLoadedCount] = useState(0);
 
   const neededYears = [...editableYears].sort((a, b) => a - b);
-  const requiredYears = neededYears.slice(-2); // most recent 2
 
   useEffect(() => {
     if (!token) return;
@@ -5470,12 +5469,24 @@ function SubmitPanel({ token, editableYears, submittedYears, saveCount, onSubmit
     }).catch(() => {});
   }, [token, saveCount]);
 
+  // Years where the fleet actually has data (MPG or tech adoption).
+  // Using the full editable range as the base so we don't miss years outside the default window.
+  const dataYears = neededYears.filter(yr => mpgYears[yr] != null || techYears[yr] != null);
+
+  // Required = the 2 most recent years WITH any fleet data (not the 2 most recent editable years).
+  // This prevents blocking submission when the last editable year (e.g. 2026) has no data yet.
+  const requiredYears = dataYears.length >= 2 ? dataYears.slice(-2)
+                      : dataYears.length === 1 ? dataYears.slice()
+                      : neededYears.slice(-2); // fallback: nothing loaded yet
+
   const missingRequired = requiredYears.filter(yr =>
     (mpgYears[yr] == null) || (techYears[yr] == null)
   );
-  const canSubmit = missingRequired.length === 0;
-  const alreadySubmitted = requiredYears.every(yr => submittedYears.includes(yr));
-  const unsubmitted = neededYears.filter(yr => !submittedYears.includes(yr));
+  // Must have at least some data AND the required years must be complete
+  const canSubmit = dataYears.length > 0 && missingRequired.length === 0;
+  const alreadySubmitted = dataYears.length > 0 && requiredYears.every(yr => submittedYears.includes(yr));
+  // Only create submission records for years that actually have data
+  const unsubmitted = dataYears.filter(yr => !submittedYears.includes(yr));
 
   const doSubmit = async () => {
     setStatus('submitting');
