@@ -1914,7 +1914,7 @@ app.get("/api/chart-data", requireAuth, async (req, res) => {
              WHERE default_duty_cycle = ? AND fleet_id != ? AND fleet_id NOT IN (0,45,46)
            )
            GROUP BY fleet_id, mpg_year HAVING SUM(ifta_fuel) > 0
-         ) sub GROUP BY mpg_year ORDER BY mpg_year`,
+         ) sub GROUP BY mpg_year HAVING COUNT(*) >= 3 ORDER BY mpg_year`,
         [fleetRow.default_duty_cycle, fleet_id]
       );
       peerRows.forEach(r => { if (r.avg_mpg != null) peerMpg[r.mpg_year] = parseFloat(parseFloat(r.avg_mpg).toFixed(2)); });

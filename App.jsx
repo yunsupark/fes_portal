@@ -5634,7 +5634,7 @@ function BenchmarkPage({ token }) {
 
   const avgOf = (vals) => {
     const clean = vals.filter(v => v != null);
-    return clean.length ? parseFloat((clean.reduce((s, v) => s + v, 0) / clean.length).toFixed(2)) : null;
+    return clean.length >= 3 ? parseFloat((clean.reduce((s, v) => s + v, 0) / clean.length).toFixed(2)) : null;
   };
 
   const mpgData = benchData ? years.map(yr => ({
