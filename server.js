@@ -156,13 +156,6 @@ const db = mysql.createPool({
         (LOWER(first_name) = 'yunsu' AND LOWER(last_name) = 'park')
       )
     `);
-    // Remove pre-2020 zero/null adoption rows for fleet 53 (Melton) — data begins 2020;
-    // zeros from earlier years were noise from the interview form. Non-zero rows are left intact.
-    await db.query(`
-      DELETE FROM ffs_adoption
-      WHERE fleet_id = 53 AND adoption_year < 2020
-        AND (adoption_percent = 0 OR adoption_percent IS NULL)
-    `);
     // Backfill ffs_submission for years that have data in BOTH ffs_adoption and ffs_mpg
     await db.query(`
       INSERT IGNORE INTO ffs_submission (fleet_id, survey_year)

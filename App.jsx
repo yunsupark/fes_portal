@@ -2078,12 +2078,13 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
             <option value='Sleeper'>Sleeper</option>
           </select>
           {saveMsg && <span style={{fontSize:13, color: saveMsg === 'Saved!' ? '#16A34A' : '#DC2626'}}>{saveMsg}</span>}
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}}>
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          {effectiveEditableYears.every(y => submittedYears.includes(y)) ? (
+            <button style={{...styles.btnPrimary, opacity: 0.5}} disabled>Submitted</button>
+          ) : (
+            <button onClick={handleSave} disabled={saving} style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -2525,7 +2526,7 @@ const EMPTY_UTIL_ROW = () => ({
   grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
 });
 
-function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
+function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [] }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
@@ -2557,9 +2558,13 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
     setData(d);
     // Build year list: DB years + 2024/2025, sorted descending, take NUM_YEARS
     const dbYears = Object.keys(d).map(Number);
-    const yrList  = [...new Set([...dbYears, ...editableYears])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, editableYears.length + 3));
+    const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
+    const visibleEditable = submittedYears.length > 0 && oldestDbYear != null
+      ? editableYears.filter(y => y >= oldestDbYear)
+      : editableYears;
+    const yrList  = [...new Set([...dbYears, ...visibleEditable])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, visibleEditable.length + 3));
     setYears(yrList);
-    const editableInList = yrList.filter(y => editableYears.includes(y));
+    const editableInList = yrList.filter(y => visibleEditable.includes(y));
     setSelectedYear(prev => prev ?? (editableInList.length ? Math.min(...editableInList) : yrList[0]));
     // Seed edits for all displayed years
     const init = {};
@@ -2663,6 +2668,7 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
     );
 
   const utilRows = (edits[selectedYear] || {}).utilization || [];
+  const isSelectedEditable = editableYears.includes(selectedYear) && !submittedYears.includes(selectedYear);
 
   return (
     <div style={styles.chartCard}>
@@ -2671,23 +2677,27 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Equipment Utilization</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           {[...years].sort((a, b) => a - b).map(yr => {
-            const isEditable = editableYears.includes(yr);
+            const yrEditable = editableYears.includes(yr) && !submittedYears.includes(yr);
             const isSelected = yr === selectedYear;
             return (
               <button key={yr} onClick={() => setSelectedYear(yr)} style={{
                 padding:'4px 14px', borderRadius:6, border:'1px solid',
                 fontSize:13, cursor:'pointer', fontWeight: isSelected ? 700 : 400,
-                borderColor: isSelected ? '#1c3660' : isEditable ? '#1c3660' : '#D1D5DB',
-                background:  isSelected ? '#1c3660' : isEditable ? '#EFF6FF' : '#fff',
-                color:       isSelected ? '#fff'    : isEditable ? '#1c3660' : '#374151',
-              }}>{yr}{isEditable ? ' ✎' : ''}</button>
+                borderColor: isSelected ? '#1c3660' : yrEditable ? '#1c3660' : '#D1D5DB',
+                background:  isSelected ? '#1c3660' : yrEditable ? '#EFF6FF' : '#fff',
+                color:       isSelected ? '#fff'    : yrEditable ? '#1c3660' : '#374151',
+              }}>{yr}{yrEditable ? ' ✎' : ''}</button>
             );
           })}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
-          <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          {submittedYears.includes(selectedYear) ? (
+            <button style={{...styles.btnPrimary, opacity: 0.5}} disabled>Submitted</button>
+          ) : (
+            <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving || !isSelectedEditable}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -2706,7 +2716,7 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
               : utilRows.map((row, idx) => (
                 <tr key={idx} style={row._remove ? {opacity:0.45} : {}}>
                   <td style={{...styles.detailTd, textAlign:'center'}}>
-                    {selectedYear >= 2024 && (
+                    {isSelectedEditable && (
                       <button onClick={() => removeRow(selectedYear, idx)} style={{
                         background: row._remove ? '#FEF3C7' : '#FEE2E2',
                         border: `1px solid ${row._remove ? '#FCD34D' : '#FECACA'}`,
@@ -2718,7 +2728,8 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
                   <td style={{...styles.detailTdLabel, ...styles.detailTdEditable}}>
                     <select style={{...styles.detailInput, textAlign:'left'}}
                       value={row.application}
-                      onChange={e => setUtilCell(selectedYear, idx, 'application', e.target.value)}>
+                      onChange={e => setUtilCell(selectedYear, idx, 'application', e.target.value)}
+                      disabled={!isSelectedEditable}>
                       <option value="">— select —</option>
                       {APPLICATION_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                     </select>
@@ -2728,7 +2739,7 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
                       <input style={styles.detailInput} type="number"
                         value={row[col.key] ?? ''}
                         onChange={e => setUtilCell(selectedYear, idx, col.key, e.target.value)}
-                        placeholder="—" />
+                        placeholder="—" disabled={!isSelectedEditable} />
                     </td>
                   ))}
                 </tr>
@@ -2739,7 +2750,7 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
       </div>
 
       {/* Add / Copy row controls */}
-      <div style={{display:'flex', gap:8, marginBottom:20, alignItems:'flex-start'}}>
+      {isSelectedEditable && <div style={{display:'flex', gap:8, marginBottom:20, alignItems:'flex-start'}}>
         <button onClick={() => addRow(selectedYear)} style={{...styles.btnGhost, fontSize:13}}>+ Add Row</button>
         <div style={{position:'relative'}}>
           <button onClick={() => setShowCopyPicker(p => !p)} style={{...styles.btnGhost, fontSize:13}}>
@@ -2777,7 +2788,7 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025] }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
 
     </div>
   );
@@ -2788,7 +2799,7 @@ const FUEL_OPTIONS    = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
 
 const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: '' });
 
-function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
+function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [] }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
@@ -2806,9 +2817,13 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
     const data = await r.json();
     setRows(data);
     const dbYears = [...new Set(data.map(r => r.year))];
-    const yrList  = [...new Set([...dbYears, ...editableYears])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, editableYears.length + 3));
+    const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
+    const visibleEditable = submittedYears.length > 0 && oldestDbYear != null
+      ? editableYears.filter(y => y >= oldestDbYear)
+      : editableYears;
+    const yrList  = [...new Set([...dbYears, ...visibleEditable])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, visibleEditable.length + 3));
     setYears(yrList);
-    setSelectedYear(prev => prev ?? Math.min(...editableYears));
+    setSelectedYear(prev => prev ?? Math.min(...(visibleEditable.length ? visibleEditable : yrList)));
     // Seed edits for editable years from existing data
     const init = {};
     editableYears.forEach(yr => {
@@ -2835,7 +2850,7 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
       .catch(() => {});
   }, [token]);
 
-  const isEditable = editableYears.includes(selectedYear);
+  const isEditable = editableYears.includes(selectedYear) && !submittedYears.includes(selectedYear);
 
   const setCell = (yr, idx, field, val) =>
     setEdits(prev => {
@@ -2897,25 +2912,27 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025] }) {
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fuel (IFTA)</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           {[...years].sort((a, b) => a - b).map(yr => {
-            const isEditable = editableYears.includes(yr);
+            const yrEditable = editableYears.includes(yr) && !submittedYears.includes(yr);
             const isSelected = yr === selectedYear;
             return (
               <button key={yr} onClick={() => setSelectedYear(yr)} style={{
                 padding:'4px 14px', borderRadius:6, border:'1px solid',
                 fontSize:13, cursor:'pointer', fontWeight: isSelected ? 700 : 400,
-                borderColor: isSelected ? '#1c3660' : isEditable ? '#1c3660' : '#D1D5DB',
-                background:  isSelected ? '#1c3660' : isEditable ? '#EFF6FF' : '#fff',
-                color:       isSelected ? '#fff'    : isEditable ? '#1c3660' : '#374151',
-              }}>{yr}{isEditable ? ' ✎' : ''}</button>
+                borderColor: isSelected ? '#1c3660' : yrEditable ? '#1c3660' : '#D1D5DB',
+                background:  isSelected ? '#1c3660' : yrEditable ? '#EFF6FF' : '#fff',
+                color:       isSelected ? '#fff'    : yrEditable ? '#1c3660' : '#374151',
+              }}>{yr}{yrEditable ? ' ✎' : ''}</button>
             );
           })}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
-          {isEditable && (
+          {submittedYears.includes(selectedYear) ? (
+            <button style={{...styles.btnPrimary, opacity: 0.5}} disabled>Submitted</button>
+          ) : isEditable ? (
             <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
               {saving ? 'Saving…' : 'Save Changes'}
             </button>
-          )}
+          ) : null}
         </div>
       </div>
 
@@ -3040,7 +3057,7 @@ const NA_MODELS = new Set(['Freightliner:eCascadia', 'Kenworth:T680e']);
 
 // Reusable dropdown that falls back to a text input when "Other" is chosen.
 // External resets are handled by re-keying EquipCell, which remounts this component.
-function SelectOrOther({ options, value, onChange, placeholder = '—', inputType = 'text', width }) {
+function SelectOrOther({ options, value, onChange, placeholder = '—', inputType = 'text', width, disabled = false }) {
   const [isOther, setIsOther] = useState(() => value !== '' && value != null && !options.includes(value));
   const inputStyle = { border:'1px solid #D1D5DB', borderRadius:4, padding:'3px 6px', fontSize:13, background:'#fff', width: width || '100%', boxSizing:'border-box' };
 
@@ -3049,14 +3066,14 @@ function SelectOrOther({ options, value, onChange, placeholder = '—', inputTyp
       <select value={isOther ? '__other__' : (value || '')} onChange={e => {
         if (e.target.value === '__other__') { setIsOther(true); }
         else { setIsOther(false); onChange(e.target.value); }
-      }} style={inputStyle}>
+      }} style={inputStyle} disabled={disabled}>
         <option value="">{placeholder}</option>
         {options.map(o => <option key={o} value={o}>{o}</option>)}
         <option value="__other__">Other</option>
       </select>
       {isOther && (
         <input type={inputType} value={value} onChange={e => onChange(e.target.value)}
-          placeholder="Enter manually…" style={{...inputStyle, borderColor:'#A41C24'}} autoFocus />
+          placeholder="Enter manually…" style={{...inputStyle, borderColor:'#A41C24'}} autoFocus disabled={disabled} />
       )}
     </div>
   );
@@ -3077,7 +3094,7 @@ const EQUIP_COLS = [
   { key: 'axle_ratio',         label: 'Axle Ratio',    width: 90  },
 ];
 
-function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
+function EquipCell({ colKey, row, onChange, makeModels, engineModels, disabled = false }) {
   const tractorMake = row.tractor_make;
   const engineMake  = row.engine_make;
   const isNA        = ENGINE_MAKE_LIMITS[tractorMake] === null || NA_MODELS.has(`${tractorMake}:${row.tractor_model}`);
@@ -3085,44 +3102,44 @@ function EquipCell({ colKey, row, onChange, makeModels, engineModels }) {
 
   if (colKey === 'qty') {
     return <input type="number" value={row.qty ?? ''} onChange={e => onChange(e.target.value)}
-      placeholder="0" style={{...inputStyle, textAlign:'center'}} />;
+      placeholder="0" style={{...inputStyle, textAlign:'center'}} disabled={disabled} />;
   }
   if (colKey === 'cab_type') {
-    return <SelectOrOther options={['Day Cab', 'Sleeper']} value={row.cab_type} onChange={onChange} placeholder="— select —" />;
+    return <SelectOrOther options={['Day Cab', 'Sleeper']} value={row.cab_type} onChange={onChange} placeholder="— select —" disabled={disabled} />;
   }
   if (colKey === 'tractor_make') {
     const makes = [...new Set(makeModels.map(m => m.make))];
-    return <SelectOrOther options={makes} value={row.tractor_make} onChange={onChange} placeholder="— select —" />;
+    return <SelectOrOther options={makes} value={row.tractor_make} onChange={onChange} placeholder="— select —" disabled={disabled} />;
   }
   if (colKey === 'tractor_model') {
     const models = makeModels.filter(m => m.make === tractorMake).map(m => m.model);
     return models.length
-      ? <SelectOrOther options={models} value={row.tractor_model} onChange={onChange} placeholder="— select —" />
-      : <input type="text" value={row.tractor_model ?? ''} onChange={e => onChange(e.target.value)} placeholder="Model" style={inputStyle} />;
+      ? <SelectOrOther options={models} value={row.tractor_model} onChange={onChange} placeholder="— select —" disabled={disabled} />
+      : <input type="text" value={row.tractor_model ?? ''} onChange={e => onChange(e.target.value)} placeholder="Model" style={inputStyle} disabled={disabled} />;
   }
   if (colKey === 'engine_make') {
     if (isNA) return <span style={{color:'#9CA3AF', fontSize:13}}>N/A</span>;
     const restricted = ENGINE_MAKE_LIMITS[tractorMake];
     const allMakes   = [...new Set(engineModels.map(e => e.make))];
-    return <SelectOrOther options={restricted || allMakes} value={row.engine_make} onChange={onChange} placeholder="— select —" />;
+    return <SelectOrOther options={restricted || allMakes} value={row.engine_make} onChange={onChange} placeholder="— select —" disabled={disabled} />;
   }
   if (colKey === 'engine_model') {
     if (isNA) return <span style={{color:'#9CA3AF', fontSize:13}}>N/A</span>;
     const models = engineModels.filter(e => e.make === engineMake).map(e => e.model);
     return models.length
-      ? <SelectOrOther options={models} value={row.engine_model} onChange={onChange} placeholder="— select —" />
-      : <input type="text" value={row.engine_model ?? ''} onChange={e => onChange(e.target.value)} placeholder="Model" style={inputStyle} />;
+      ? <SelectOrOther options={models} value={row.engine_model} onChange={onChange} placeholder="— select —" disabled={disabled} />
+      : <input type="text" value={row.engine_model ?? ''} onChange={e => onChange(e.target.value)} placeholder="Model" style={inputStyle} disabled={disabled} />;
   }
   if (colKey === 'axle_ratio') {
     return <input type="number" step="0.01" value={row.axle_ratio ?? ''} onChange={e => onChange(e.target.value)}
-      placeholder="0.00" style={{...inputStyle, textAlign:'center'}} />;
+      placeholder="0.00" style={{...inputStyle, textAlign:'center'}} disabled={disabled} />;
   }
   // default: free text
   return <input type="text" value={row[colKey] ?? ''} onChange={e => onChange(e.target.value)}
-    placeholder="—" style={inputStyle} />;
+    placeholder="—" style={inputStyle} disabled={disabled} />;
 }
 
-function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
+function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [] }) {
   const editableYearsKey = editableYears.join(',');
   const [data,         setData]         = useState({});
   const [edits,        setEdits]        = useState({});
@@ -3148,9 +3165,13 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
     const d = await equipRes.json();
     setData(d);
     const dbYears = Object.keys(d).map(Number);
-    const yrList = [...new Set([...dbYears, ...editableYears])].sort((a, b) => b - a);
+    const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
+    const visibleEditable = submittedYears.length > 0 && oldestDbYear != null
+      ? editableYears.filter(y => y >= oldestDbYear)
+      : editableYears;
+    const yrList = [...new Set([...dbYears, ...visibleEditable])].sort((a, b) => b - a);
     setYears(yrList);
-    setSelectedYear(prev => prev ?? Math.min(...editableYears));
+    setSelectedYear(prev => prev ?? Math.min(...(visibleEditable.length ? visibleEditable : yrList)));
     const init = {};
     yrList.forEach(yr => { init[yr] = (d[yr] || []).map(row => ({ ...row })); });
     editableYears.forEach(yr => { if (!init[yr] || init[yr].length === 0) init[yr] = [EMPTY_EQUIP_ROW()]; });
@@ -3235,8 +3256,9 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
     setShowCopyPicker(false);
   };
 
-  const displayRows     = edits[selectedYear] || data[selectedYear] || [];
-  const allYearsForTabs = [...new Set([...years, ...editableYears])].sort((a, b) => a - b);
+  const displayRows       = edits[selectedYear] || data[selectedYear] || [];
+  const allYearsForTabs   = [...new Set([...years, ...editableYears])].sort((a, b) => a - b);
+  const isSelectedEditable = editableYears.includes(selectedYear) && !submittedYears.includes(selectedYear);
 
   return (
     <div style={styles.chartCard}>
@@ -3244,23 +3266,27 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
         <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Equipment</h3>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           {allYearsForTabs.map(yr => {
-            const isEditable = editableYears.includes(yr);
+            const yrEditable = editableYears.includes(yr) && !submittedYears.includes(yr);
             const isSelected = yr === selectedYear;
             return (
               <button key={yr} onClick={() => setSelectedYear(yr)} style={{
                 padding:'4px 14px', borderRadius:6, border:'1px solid',
                 fontSize:13, cursor:'pointer', fontWeight: isSelected ? 700 : 400,
-                borderColor: isSelected ? '#1c3660' : isEditable ? '#1c3660' : '#D1D5DB',
-                background:  isSelected ? '#1c3660' : isEditable ? '#EFF6FF' : '#fff',
-                color:       isSelected ? '#fff'    : isEditable ? '#1c3660' : '#374151',
-              }}>{yr}{isEditable ? ' ✎' : ''}</button>
+                borderColor: isSelected ? '#1c3660' : yrEditable ? '#1c3660' : '#D1D5DB',
+                background:  isSelected ? '#1c3660' : yrEditable ? '#EFF6FF' : '#fff',
+                color:       isSelected ? '#fff'    : yrEditable ? '#1c3660' : '#374151',
+              }}>{yr}{yrEditable ? ' ✎' : ''}</button>
             );
           })}
           {status === 'saved' && <span style={{color:'#16a34a', fontSize:13}}>Saved.</span>}
           {status === 'error'  && <span style={{color:'#dc2626', fontSize:13}}>Error saving.</span>}
-          <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          {submittedYears.includes(selectedYear) ? (
+            <button style={{...styles.btnPrimary, opacity: 0.5}} disabled>Submitted</button>
+          ) : (
+            <button style={{...styles.btnPrimary, opacity: saving ? 0.7 : 1}} onClick={handleSave} disabled={saving || !isSelectedEditable}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -3278,7 +3304,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
               : displayRows.map((row, idx) => (
                 <tr key={idx} style={row._remove ? {opacity:0.45} : {}}>
                   <td style={{...styles.detailTd, textAlign:'center'}}>
-                    {selectedYear >= 2024 && (
+                    {isSelectedEditable && (
                       <button onClick={() => removeRow(selectedYear, idx)} style={{
                         background: row._remove ? '#FEF3C7' : '#FEE2E2',
                         border: `1px solid ${row._remove ? '#FCD34D' : '#FECACA'}`,
@@ -3296,6 +3322,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
                         onChange={val => setCell(selectedYear, idx, col.key, val)}
                         makeModels={makeModels}
                         engineModels={engineModels}
+                        disabled={!isSelectedEditable}
                       />
                     </td>
                   ))}
@@ -3307,7 +3334,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
       </div>
 
       {/* Add row / Copy row controls */}
-      <div style={{display:'flex', gap:8, marginTop:12, alignItems:'flex-start'}}>
+      {isSelectedEditable && <div style={{display:'flex', gap:8, marginTop:12, alignItems:'flex-start'}}>
         <button onClick={() => addRow(selectedYear)} style={{...styles.btnGhost, fontSize:13}}>+ Add Row</button>
         <div style={{position:'relative'}}>
           <button onClick={() => setShowCopyPicker(p => !p)} style={{...styles.btnGhost, fontSize:13}}>
@@ -3347,7 +3374,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025] }) {
             </div>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   );
 }
@@ -5004,7 +5031,7 @@ export default function App() {
             </div>
           </div>
           <button onClick={() => { setShowChangePassword(true); setPwMsg(''); }} style={{ background: 'none', border: 'none', color: '#9CA3AF', fontSize: 12, cursor: 'pointer', padding: '4px 0', textAlign: 'left', width: '100%' }}>Change password</button>
-          <button style={styles.btnSignOut} onClick={() => setAuthed(false)}>Sign out</button>
+          <button style={styles.btnSignOut} onClick={handleSignOut}>Sign out</button>
         </div>
       </aside>
 
