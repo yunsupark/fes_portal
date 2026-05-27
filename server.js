@@ -141,6 +141,11 @@ const db = mysql.createPool({
       await db.query(`ALTER TABLE ffs_contact ADD COLUMN admin_role VARCHAR(20) NULL DEFAULT 'user'`);
       console.log("Added admin_role column to ffs_contact");
     }
+    // Ensure yunsu.park@nacfe.org is fleet_id=0 (NACFE admin), regardless of any prior fleet association
+    await db.query(`
+      UPDATE ffs_contact SET fleet_id = 0, admin_role = 'admin'
+      WHERE LOWER(email) = 'yunsu.park@nacfe.org'
+    `);
     // Seed known admins by name
     await db.query(`
       UPDATE ffs_contact SET admin_role = 'admin'
@@ -150,6 +155,13 @@ const db = mysql.createPool({
         (LOWER(first_name) = 'mike'  AND LOWER(last_name) = 'roeth')    OR
         (LOWER(first_name) = 'yunsu' AND LOWER(last_name) = 'park')
       )
+    `);
+    // Remove pre-2020 zero/null adoption rows for fleet 53 (Melton) — data begins 2020;
+    // zeros from earlier years were noise from the interview form. Non-zero rows are left intact.
+    await db.query(`
+      DELETE FROM ffs_adoption
+      WHERE fleet_id = 53 AND adoption_year < 2020
+        AND (adoption_percent = 0 OR adoption_percent IS NULL)
     `);
     // Backfill ffs_submission for years that have data in BOTH ffs_adoption and ffs_mpg
     await db.query(`
