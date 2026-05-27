@@ -3260,7 +3260,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submitte
   };
 
   const displayRows       = edits[selectedYear] || data[selectedYear] || [];
-  const allYearsForTabs   = [...new Set([...years, ...editableYears])].sort((a, b) => a - b);
+  const allYearsForTabs   = [...years].sort((a, b) => a - b);
   const isSelectedEditable = editableYears.includes(selectedYear) && !submittedYears.includes(selectedYear);
 
   return (
