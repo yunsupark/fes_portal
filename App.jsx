@@ -2381,8 +2381,22 @@ function SubmissionHistory({ token, saveCount, submittedYears = [], editableYear
   const labelStyle = { padding:'8px 12px', fontSize:13, fontWeight:600, color:'#374151', borderBottom:'1px solid #F3F4F6', position:'sticky', left:0, background:'#fff', whiteSpace:'nowrap' };
 
   const SubmitBtn = ({ yr }) => {
+    const hasAnyData = fuelCnt(yr) > 0
+      || Object.keys(status?.tech?.[yr] || {}).length > 0
+      || (status?.utilization?.[yr] || 0) > 0
+      || (status?.fleetEquip?.[yr]  || 0) > 0;
+
     if (submittedYears.includes(yr)) {
-      return <span style={{color:'#16A34A', fontWeight:700, fontSize:13}}>✓ Submitted</span>;
+      // A submission record exists for this year.  Only show "Submitted" if the
+      // year actually has data — otherwise it's a phantom record and should read
+      // "Not completed" so the fleet knows to still enter data for that year.
+      return hasAnyData
+        ? <span style={{color:'#16A34A', fontWeight:700, fontSize:13}}>✓ Submitted</span>
+        : <span style={{color:'#9CA3AF', fontSize:13}}>Not completed</span>;
+    }
+    if (!hasAnyData) {
+      // No submission record AND no data — just show a dash, no submit button
+      return <span style={{color:'#D1D5DB', fontSize:13}}>—</span>;
     }
     const yellow = isYellow(yr);
     const green  = isGreen(yr);
@@ -2579,7 +2593,7 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submit
     setEdits(init);
   };
 
-  useEffect(() => { if (token) loadData(); }, [token, editableYearsKey]);
+  useEffect(() => { if (token) loadData(); }, [token, editableYearsKey, minDataYear]);
 
   useEffect(() => {
     if (selectedYear == null) return;
@@ -3181,7 +3195,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submitte
     setEdits(init);
   };
 
-  useEffect(() => { if (token) loadData(); }, [token, editableYearsKey]);
+  useEffect(() => { if (token) loadData(); }, [token, editableYearsKey, minDataYear]);
 
   useEffect(() => {
     if (selectedYear == null) return;
@@ -4745,10 +4759,12 @@ export default function App() {
   const [chartData, setChartData] = useState({});
   const [saveCount, setSaveCount] = useState(0);
   const notifySave = () => setSaveCount(n => n + 1);
-  const [submittedYears, setSubmittedYears] = useState([]);
-  const [editableYears,  setEditableYears]  = useState([2024, 2025]);
-  const [isNewFleet,     setIsNewFleet]     = useState(false);
-  const [minDataYear,    setMinDataYear]    = useState(null);
+  const [submittedYears,      setSubmittedYears]      = useState([]);
+  const [utilSubmittedYears,  setUtilSubmittedYears]  = useState([]); // years locked in utilization table
+  const [equipSubmittedYears, setEquipSubmittedYears] = useState([]); // years locked in fleet equip table
+  const [editableYears,       setEditableYears]       = useState([2024, 2025]);
+  const [isNewFleet,          setIsNewFleet]          = useState(false);
+  const [minDataYear,         setMinDataYear]         = useState(null);
   const [showInterview,  setShowInterview]  = useState(false);
   const [interviewProgress, setInterviewProgress] = useState(null);
   const [interviewProgressLoaded, setInterviewProgressLoaded] = useState(false);
@@ -4761,15 +4777,26 @@ export default function App() {
       .then(r => r.ok ? r.json() : null)
       .then(d => {
         if (d) {
-          setSubmittedYears(d.submittedYears || []);
+          const submitted = d.submittedYears || [];
+          setSubmittedYears(submitted);
           setEditableYears(d.editableYears  || [2024, 2025]);
           setIsNewFleet(!!d.isNewFleet);
+
+          // Per-table submitted years: only lock a year in a specific table when
+          // that table actually has data for that year.  Using the global
+          // submittedYears everywhere would lock empty tables (e.g. utilization
+          // that has no rows) just because MPG/tech was submitted for the same year.
+          setUtilSubmittedYears(submitted.filter(yr => (d.utilization?.[yr] || 0) > 0));
+          setEquipSubmittedYears(submitted.filter(yr => (d.fleetEquip?.[yr]  || 0) > 0));
+
+          // minDataYear is derived only from actual data rows, NOT submission records.
+          // Including submission records could pull the floor back to years where
+          // a fleet has no data at all (e.g. phantom records created by old code).
           const dataYrs = [
             ...Object.keys(d.tech        || {}),
             ...Object.keys(d.fuel        || {}),
             ...Object.keys(d.utilization || {}),
             ...Object.keys(d.fleetEquip  || {}),
-            ...(d.submittedYears || []).map(String),
           ].map(Number).filter(n => !isNaN(n));
           setMinDataYear(dataYrs.length > 0 ? Math.min(...dataYrs) : null);
         }
@@ -5371,10 +5398,10 @@ export default function App() {
         )}
 
         {/* Fleet Details Table */}
-        <FleetDetailsTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} minDataYear={minDataYear} />
+        <FleetDetailsTable token={token} onSave={notifySave} submittedYears={utilSubmittedYears} editableYears={editableYears} minDataYear={minDataYear} />
 
         {/* Fleet Equipment Table */}
-        <FleetEquipTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} minDataYear={minDataYear} />
+        <FleetEquipTable token={token} onSave={notifySave} submittedYears={equipSubmittedYears} editableYears={editableYears} minDataYear={minDataYear} />
 
         {/* Fuel Table */}
         <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} minDataYear={minDataYear} />
