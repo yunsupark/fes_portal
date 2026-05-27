@@ -2559,8 +2559,9 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submit
     // Build year list: DB years + 2024/2025, sorted descending, take NUM_YEARS
     const dbYears = Object.keys(d).map(Number);
     const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
-    const visibleEditable = submittedYears.length > 0 && oldestDbYear != null
-      ? editableYears.filter(y => y >= oldestDbYear)
+    const floorYear = oldestDbYear ?? (submittedYears.length > 0 ? Math.min(...submittedYears) : null);
+    const visibleEditable = floorYear != null
+      ? editableYears.filter(y => y >= floorYear)
       : editableYears;
     const yrList  = [...new Set([...dbYears, ...visibleEditable])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, visibleEditable.length + 3));
     setYears(yrList);
@@ -2818,8 +2819,9 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
     setRows(data);
     const dbYears = [...new Set(data.map(r => r.year))];
     const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
-    const visibleEditable = submittedYears.length > 0 && oldestDbYear != null
-      ? editableYears.filter(y => y >= oldestDbYear)
+    const floorYear = oldestDbYear ?? (submittedYears.length > 0 ? Math.min(...submittedYears) : null);
+    const visibleEditable = floorYear != null
+      ? editableYears.filter(y => y >= floorYear)
       : editableYears;
     const yrList  = [...new Set([...dbYears, ...visibleEditable])].sort((a, b) => b - a).slice(0, Math.max(NUM_YEARS, visibleEditable.length + 3));
     setYears(yrList);
@@ -3166,8 +3168,9 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submitte
     setData(d);
     const dbYears = Object.keys(d).map(Number);
     const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
-    const visibleEditable = submittedYears.length > 0 && oldestDbYear != null
-      ? editableYears.filter(y => y >= oldestDbYear)
+    const floorYear = oldestDbYear ?? (submittedYears.length > 0 ? Math.min(...submittedYears) : null);
+    const visibleEditable = floorYear != null
+      ? editableYears.filter(y => y >= floorYear)
       : editableYears;
     const yrList = [...new Set([...dbYears, ...visibleEditable])].sort((a, b) => b - a);
     setYears(yrList);
