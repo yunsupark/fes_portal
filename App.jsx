@@ -2526,7 +2526,7 @@ const EMPTY_UTIL_ROW = () => ({
   grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
 });
 
-function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [] }) {
+function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [], minDataYear = null }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
@@ -2559,7 +2559,7 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submit
     // Build year list: DB years + 2024/2025, sorted descending, take NUM_YEARS
     const dbYears = Object.keys(d).map(Number);
     const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
-    const floorYear = oldestDbYear ?? (submittedYears.length > 0 ? Math.min(...submittedYears) : null);
+    const floorYear = oldestDbYear ?? minDataYear;
     const visibleEditable = floorYear != null
       ? editableYears.filter(y => y >= floorYear)
       : editableYears;
@@ -2800,7 +2800,7 @@ const FUEL_OPTIONS    = ['Diesel', 'Biodiesel', 'CNG', 'LNG'];
 
 const EMPTY_FUEL_ROW  = () => ({ fuel_type: 'Diesel', ifta_miles: '', volume: '' });
 
-function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [] }) {
+function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [], minDataYear = null }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
@@ -2819,7 +2819,7 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
     setRows(data);
     const dbYears = [...new Set(data.map(r => r.year))];
     const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
-    const floorYear = oldestDbYear ?? (submittedYears.length > 0 ? Math.min(...submittedYears) : null);
+    const floorYear = oldestDbYear ?? minDataYear;
     const visibleEditable = floorYear != null
       ? editableYears.filter(y => y >= floorYear)
       : editableYears;
@@ -3141,7 +3141,7 @@ function EquipCell({ colKey, row, onChange, makeModels, engineModels, disabled =
     placeholder="—" style={inputStyle} disabled={disabled} />;
 }
 
-function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [] }) {
+function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [], minDataYear = null }) {
   const editableYearsKey = editableYears.join(',');
   const [data,         setData]         = useState({});
   const [edits,        setEdits]        = useState({});
@@ -3168,7 +3168,7 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submitte
     setData(d);
     const dbYears = Object.keys(d).map(Number);
     const oldestDbYear = dbYears.length > 0 ? Math.min(...dbYears) : null;
-    const floorYear = oldestDbYear ?? (submittedYears.length > 0 ? Math.min(...submittedYears) : null);
+    const floorYear = oldestDbYear ?? minDataYear;
     const visibleEditable = floorYear != null
       ? editableYears.filter(y => y >= floorYear)
       : editableYears;
@@ -4748,6 +4748,7 @@ export default function App() {
   const [submittedYears, setSubmittedYears] = useState([]);
   const [editableYears,  setEditableYears]  = useState([2024, 2025]);
   const [isNewFleet,     setIsNewFleet]     = useState(false);
+  const [minDataYear,    setMinDataYear]    = useState(null);
   const [showInterview,  setShowInterview]  = useState(false);
   const [interviewProgress, setInterviewProgress] = useState(null);
   const [interviewProgressLoaded, setInterviewProgressLoaded] = useState(false);
@@ -4763,6 +4764,14 @@ export default function App() {
           setSubmittedYears(d.submittedYears || []);
           setEditableYears(d.editableYears  || [2024, 2025]);
           setIsNewFleet(!!d.isNewFleet);
+          const dataYrs = [
+            ...Object.keys(d.tech        || {}),
+            ...Object.keys(d.fuel        || {}),
+            ...Object.keys(d.utilization || {}),
+            ...Object.keys(d.fleetEquip  || {}),
+            ...(d.submittedYears || []).map(String),
+          ].map(Number).filter(n => !isNaN(n));
+          setMinDataYear(dataYrs.length > 0 ? Math.min(...dataYrs) : null);
         }
       })
       .catch(console.error);
@@ -5362,13 +5371,13 @@ export default function App() {
         )}
 
         {/* Fleet Details Table */}
-        <FleetDetailsTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
+        <FleetDetailsTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} minDataYear={minDataYear} />
 
         {/* Fleet Equipment Table */}
-        <FleetEquipTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
+        <FleetEquipTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} minDataYear={minDataYear} />
 
         {/* Fuel Table */}
-        <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} />
+        <FuelTable token={token} onSave={notifySave} submittedYears={submittedYears} editableYears={editableYears} minDataYear={minDataYear} />
 
         {/* Tech Adoption Card */}
         <TechAdoptionCard token={token} onSave={notifySave} editableYears={editableYears} submittedYears={submittedYears} />
