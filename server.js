@@ -186,6 +186,23 @@ const db = mysql.createPool({
         INDEX idx_contact (contact_id)
       )
     `);
+    // ── Multi-fleet support ──────────────────────────────────────────────────
+    // Junction table: one contact can belong to multiple fleets.
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ffs_contact_fleet (
+        contact_id INT NOT NULL,
+        fleet_id   INT NOT NULL,
+        fleet_role VARCHAR(20) NOT NULL DEFAULT 'fleet_user',
+        PRIMARY KEY (contact_id, fleet_id)
+      )
+    `);
+    // Seed from existing ffs_contact rows so existing contacts keep working.
+    await db.query(`
+      INSERT IGNORE INTO ffs_contact_fleet (contact_id, fleet_id, fleet_role)
+      SELECT contact_id, fleet_id, COALESCE(fleet_role, 'fleet_user')
+      FROM ffs_contact
+      WHERE fleet_id != 0
+    `);
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -226,57 +243,141 @@ app.post("/api/auth/login", async (req, res) => {
   if (!password) return res.status(400).json({ error: "password required" });
 
   try {
-    const [rows] = await db.query(
-      `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state,
-              c.contact_id AS user_contact_id, c.first_name, c.last_name, c.email, c.password_hash,
-              c.admin_role, c.fleet_role
-       FROM ffs_contact c
-       JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
-       WHERE c.email = ? LIMIT 1`,
+    // Step 1: authenticate the contact (no fleet join needed here)
+    const [[contact]] = await db.query(
+      `SELECT contact_id, fleet_id, first_name, last_name, email, password_hash,
+              admin_role, fleet_role, COALESCE(portal_access, 0) AS portal_access
+       FROM ffs_contact WHERE email = ? LIMIT 1`,
       [email]
     );
-    const row = rows[0];
-    if (!row) return res.status(401).json({ error: "Invalid email or password" });
-
-    if (!row.password_hash) {
-      return res.status(401).json({ error: "no_password" });
-    }
-    const match = await bcrypt.compare(password, row.password_hash);
+    if (!contact) return res.status(401).json({ error: "Invalid email or password" });
+    if (!contact.password_hash) return res.status(401).json({ error: "no_password" });
+    const match = await bcrypt.compare(password, contact.password_hash);
     if (!match) return res.status(401).json({ error: "Invalid email or password" });
 
-    // Admins (fleet_id=0) always have access; others must have portal_access=1
-    if (row.fleet_id !== 0) {
-      try {
-        const [[accessRow]] = await db.query(
-          `SELECT COALESCE(portal_access, 0) AS portal_access FROM ffs_contact WHERE contact_id = ?`,
-          [row.user_contact_id]
-        );
-        if (!accessRow?.portal_access) {
-          return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
-        }
-      } catch (e) {
-        // portal_access column not yet created — deny non-admin access
-        return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
-      }
+    await db.query(`UPDATE ffs_contact SET last_login = NOW() WHERE contact_id = ?`, [contact.contact_id]);
+
+    // Step 2: NACFE admin path (fleet_id = 0) — issue token immediately
+    if (contact.fleet_id === 0) {
+      const token = jwt.sign(
+        { fleet_id: 0, fleet_name: 'NACFE', contact_id: contact.contact_id,
+          email: contact.email, first_name: contact.first_name || '', last_name: contact.last_name || '',
+          admin_role: contact.admin_role || 'user', fleet_role: null },
+        JWT_SECRET, { expiresIn: "30d" }
+      );
+      return res.json({
+        token,
+        fleet: { id: 0, name: 'NACFE', contact: `${contact.first_name||''} ${contact.last_name||''}`.trim(), email: contact.email, hq: null },
+      });
     }
 
-    const token = jwt.sign(
-      { fleet_id: row.fleet_id, fleet_name: row.fleet_name, contact_id: row.user_contact_id, email: row.email, first_name: row.first_name || '', last_name: row.last_name || '', admin_role: row.fleet_id === 0 ? (row.admin_role || 'user') : null, fleet_role: row.fleet_id !== 0 ? (row.fleet_role || 'fleet_user') : null },
-      JWT_SECRET,
-      { expiresIn: "30d" }
+    // Step 3: Fleet contact — check portal access
+    if (!contact.portal_access) {
+      return res.status(403).json({ error: "Access to this portal is not yet available for your fleet." });
+    }
+
+    // Step 4: Query ffs_contact_fleet for all fleet associations
+    const [cfRows] = await db.query(
+      `SELECT cf.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state, cf.fleet_role
+       FROM ffs_contact_fleet cf
+       JOIN ffs_fleet f ON cf.fleet_id = f.fleet_id
+       WHERE cf.contact_id = ?
+       ORDER BY f.fleet_name`,
+      [contact.contact_id]
     );
 
-    // Record last login time
-    await db.query(`UPDATE ffs_contact SET last_login = NOW() WHERE contact_id = ?`, [row.user_contact_id]);
+    // Fall back to legacy ffs_contact.fleet_id if junction table has no entries yet
+    let fleets = cfRows;
+    if (fleets.length === 0 && contact.fleet_id) {
+      const [[f]] = await db.query(
+        `SELECT fleet_id, fleet_name, fleet_city, fleet_state FROM ffs_fleet WHERE fleet_id = ?`,
+        [contact.fleet_id]
+      );
+      if (f) fleets = [{ ...f, fleet_role: contact.fleet_role || 'fleet_user' }];
+    }
+    if (fleets.length === 0) {
+      return res.status(403).json({ error: "No fleet access found for this account." });
+    }
 
+    const makeFleetToken = (fleet) => jwt.sign(
+      { fleet_id: fleet.fleet_id, fleet_name: fleet.fleet_name, contact_id: contact.contact_id,
+        email: contact.email, first_name: contact.first_name || '', last_name: contact.last_name || '',
+        admin_role: null, fleet_role: fleet.fleet_role || 'fleet_user' },
+      JWT_SECRET, { expiresIn: "30d" }
+    );
+    const fleetObj = (fleet) => ({
+      id:      fleet.fleet_id,
+      name:    fleet.fleet_name,
+      contact: `${contact.first_name||''} ${contact.last_name||''}`.trim(),
+      email:   contact.email,
+      hq:      fleet.fleet_city ? `${fleet.fleet_city}, ${fleet.fleet_state}` : null,
+    });
+
+    // Single fleet — issue JWT directly (same as before)
+    if (fleets.length === 1) {
+      return res.json({ token: makeFleetToken(fleets[0]), fleet: fleetObj(fleets[0]) });
+    }
+
+    // Multiple fleets — return a short-lived interim token and the fleet list
+    const interimToken = jwt.sign(
+      { contact_id: contact.contact_id, fleet_selection: true },
+      JWT_SECRET, { expiresIn: "5m" }
+    );
+    return res.json({
+      needs_fleet_selection: true,
+      interim_token: interimToken,
+      fleets: fleets.map(f => ({
+        fleet_id: f.fleet_id, fleet_name: f.fleet_name,
+        fleet_city: f.fleet_city || null, fleet_state: f.fleet_state || null,
+      })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * POST /api/auth/select-fleet
+ * Body: { interim_token, fleet_id }
+ * Exchanges a multi-fleet interim token + a chosen fleet_id for a full JWT.
+ */
+app.post("/api/auth/select-fleet", async (req, res) => {
+  const { interim_token, fleet_id } = req.body;
+  if (!interim_token || !fleet_id) return res.status(400).json({ error: "interim_token and fleet_id required" });
+  try {
+    let payload;
+    try { payload = jwt.verify(interim_token, JWT_SECRET); }
+    catch { return res.status(401).json({ error: "Invalid or expired selection token. Please log in again." }); }
+    if (!payload.fleet_selection) return res.status(401).json({ error: "Invalid token type" });
+
+    const fid = parseInt(fleet_id);
+    const [[cfRow]] = await db.query(
+      `SELECT cf.fleet_role, f.fleet_name, f.fleet_city, f.fleet_state
+       FROM ffs_contact_fleet cf
+       JOIN ffs_fleet f ON cf.fleet_id = f.fleet_id
+       WHERE cf.contact_id = ? AND cf.fleet_id = ?`,
+      [payload.contact_id, fid]
+    );
+    if (!cfRow) return res.status(403).json({ error: "You do not have access to that fleet." });
+
+    const [[contact]] = await db.query(
+      `SELECT contact_id, first_name, last_name, email FROM ffs_contact WHERE contact_id = ?`,
+      [payload.contact_id]
+    );
+    const token = jwt.sign(
+      { fleet_id: fid, fleet_name: cfRow.fleet_name, contact_id: contact.contact_id,
+        email: contact.email, first_name: contact.first_name || '', last_name: contact.last_name || '',
+        admin_role: null, fleet_role: cfRow.fleet_role || 'fleet_user' },
+      JWT_SECRET, { expiresIn: "30d" }
+    );
     res.json({
       token,
       fleet: {
-        id:      row.fleet_id,
-        name:    row.fleet_name,
-        contact: `${row.first_name || ''} ${row.last_name || ''}`.trim(),
-        email:   row.email,
-        hq:      row.fleet_city ? `${row.fleet_city}, ${row.fleet_state}` : null,
+        id: fid, name: cfRow.fleet_name,
+        contact: `${contact.first_name||''} ${contact.last_name||''}`.trim(),
+        email: contact.email,
+        hq: cfRow.fleet_city ? `${cfRow.fleet_city}, ${cfRow.fleet_state}` : null,
       },
     });
   } catch (err) {
@@ -295,10 +396,7 @@ app.post("/api/auth/forgot-password", async (req, res) => {
   if (!email) return res.status(400).json({ error: "email required" });
   try {
     const [[contact]] = await db.query(
-      `SELECT c.contact_id, c.first_name
-       FROM ffs_contact c
-       JOIN ffs_fleet f ON c.fleet_id = f.fleet_id
-       WHERE c.email = ? LIMIT 1`,
+      `SELECT contact_id, first_name FROM ffs_contact WHERE email = ? LIMIT 1`,
       [email]
     );
     if (contact) {
@@ -1503,15 +1601,18 @@ app.get("/api/admin/fleets", requireAuth, requireAdmin, async (req, res) => {
        GROUP BY f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state, f.default_duty_cycle
        ORDER BY f.fleet_name`
     );
+    // Use junction table so a contact that belongs to multiple fleets
+    // appears under each fleet they are associated with.
     const [contactRows] = await db.query(
-      `SELECT contact_id, fleet_id, first_name, last_name, email, phone,
-              COALESCE(active, 1) AS active,
-              COALESCE(portal_access, 0) AS portal_access,
-              last_login,
-              COALESCE(fleet_role, 'fleet_user') AS fleet_role
-       FROM ffs_contact
-       WHERE fleet_id NOT IN (0, 45, 46)
-       ORDER BY fleet_id, last_name, first_name`
+      `SELECT c.contact_id, cf.fleet_id, c.first_name, c.last_name, c.email, c.phone,
+              COALESCE(c.active, 1) AS active,
+              COALESCE(c.portal_access, 0) AS portal_access,
+              c.last_login,
+              COALESCE(cf.fleet_role, 'fleet_user') AS fleet_role
+       FROM ffs_contact_fleet cf
+       JOIN ffs_contact c ON cf.contact_id = c.contact_id
+       WHERE cf.fleet_id NOT IN (0, 45, 46)
+       ORDER BY cf.fleet_id, c.last_name, c.first_name`
     );
     const contactsByFleet = {};
     contactRows.forEach(c => {
@@ -1584,7 +1685,15 @@ app.post("/api/admin/contacts", requireAuth, requireAdminRole, async (req, res) 
       `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, portal_access, fleet_role) VALUES (?, ?, ?, ?, ?, 1, 1, ?)`,
       [fleet_id, first_name || null, last_name || null, email, phone || null, resolvedRole]
     );
-    res.json({ ok: true, contact_id: result.insertId });
+    const newId = result.insertId;
+    // Also insert into junction table so multi-fleet logic works immediately
+    if (parseInt(fleet_id) !== 0) {
+      await db.query(
+        `INSERT IGNORE INTO ffs_contact_fleet (contact_id, fleet_id, fleet_role) VALUES (?, ?, ?)`,
+        [newId, fleet_id, resolvedRole || 'fleet_user']
+      );
+    }
+    res.json({ ok: true, contact_id: newId });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to create contact" });
@@ -1631,23 +1740,95 @@ app.put("/api/admin/contacts/:id", requireAuth, requireAdminRole, async (req, re
  */
 app.patch("/api/admin/contacts/:id/fleet-role", requireAuth, requireAdminRole, async (req, res) => {
   const id = parseInt(req.params.id);
-  const { fleet_role } = req.body;
+  const { fleet_role, fleet_id } = req.body;
   if (!['fleet_admin', 'fleet_user'].includes(fleet_role)) return res.status(400).json({ error: "Invalid fleet_role" });
   try {
-    if (fleet_role === 'fleet_user') {
-      const [[contact]] = await db.query(`SELECT fleet_id FROM ffs_contact WHERE contact_id = ?`, [id]);
-      if (!contact) return res.status(404).json({ error: "Contact not found" });
+    const fid = fleet_id ? parseInt(fleet_id) : null;
+    if (fleet_role === 'fleet_user' && fid) {
+      // Enforce at-least-one-admin per fleet using the junction table
       const [[{ admin_count }]] = await db.query(
-        `SELECT COUNT(*) AS admin_count FROM ffs_contact WHERE fleet_id = ? AND fleet_role = 'fleet_admin' AND contact_id != ?`,
-        [contact.fleet_id, id]
+        `SELECT COUNT(*) AS admin_count FROM ffs_contact_fleet
+         WHERE fleet_id = ? AND fleet_role = 'fleet_admin' AND contact_id != ?`,
+        [fid, id]
       );
       if (admin_count === 0) return res.status(400).json({ error: "Cannot remove the last fleet admin" });
     }
+    // Update junction table (authoritative for login)
+    if (fid) {
+      await db.query(
+        `UPDATE ffs_contact_fleet SET fleet_role = ? WHERE contact_id = ? AND fleet_id = ?`,
+        [fleet_role, id, fid]
+      );
+    }
+    // Keep ffs_contact.fleet_role in sync (backward compat)
     await db.query(`UPDATE ffs_contact SET fleet_role = ? WHERE contact_id = ?`, [fleet_role, id]);
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * GET /api/admin/contacts/:id/fleets
+ * Returns all fleet associations for a contact (for the edit-contact modal).
+ */
+app.get("/api/admin/contacts/:id/fleets", requireAuth, requireAdmin, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    const [rows] = await db.query(
+      `SELECT cf.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state, cf.fleet_role
+       FROM ffs_contact_fleet cf
+       JOIN ffs_fleet f ON cf.fleet_id = f.fleet_id
+       WHERE cf.contact_id = ?
+       ORDER BY f.fleet_name`, [id]
+    );
+    res.json({ fleets: rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * POST /api/admin/contacts/:id/fleets
+ * Adds (or updates the role for) a fleet association for a contact.
+ * Body: { fleet_id, fleet_role }
+ */
+app.post("/api/admin/contacts/:id/fleets", requireAuth, requireAdminRole, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { fleet_id, fleet_role } = req.body;
+  if (!fleet_id) return res.status(400).json({ error: "fleet_id required" });
+  const role = ['fleet_admin', 'fleet_user'].includes(fleet_role) ? fleet_role : 'fleet_user';
+  try {
+    await db.query(
+      `INSERT INTO ffs_contact_fleet (contact_id, fleet_id, fleet_role) VALUES (?, ?, ?)
+       ON DUPLICATE KEY UPDATE fleet_role = VALUES(fleet_role)`,
+      [id, fleet_id, role]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to add fleet association" });
+  }
+});
+
+/**
+ * DELETE /api/admin/contacts/:id/fleets/:fleet_id
+ * Removes a fleet association for a contact.
+ */
+app.delete("/api/admin/contacts/:id/fleets/:fleet_id", requireAuth, requireAdminRole, async (req, res) => {
+  const contactId = parseInt(req.params.id);
+  const fleetId   = parseInt(req.params.fleet_id);
+  try {
+    await db.query(
+      `DELETE FROM ffs_contact_fleet WHERE contact_id = ? AND fleet_id = ?`,
+      [contactId, fleetId]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to remove fleet association" });
   }
 });
 

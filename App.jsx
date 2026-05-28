@@ -18,11 +18,14 @@ function getMpgAlert(mpg, benchmarks, fuelType) {
 // ─── Components ───────────────────────────────────────────────────────────────
 
 function LoginScreen({ onLogin }) {
-  const [view, setView]       = useState('login'); // 'login' | 'forgot' | 'check-email'
-  const [email, setEmail]     = useState("");
-  const [password, setPassword] = useState("");
-  const [err, setErr]         = useState("");
-  const [loading, setLoading] = useState(false);
+  const [view, setView]           = useState('login'); // 'login' | 'forgot' | 'check-email'
+  const [email, setEmail]         = useState("");
+  const [password, setPassword]   = useState("");
+  const [err, setErr]             = useState("");
+  const [loading, setLoading]     = useState(false);
+  // Multi-fleet state: when login returns >1 fleet, show the picker instead of portal
+  const [pendingFleets, setPendingFleets] = useState(null);  // array of fleet objects
+  const [interimToken,  setInterimToken]  = useState(null);  // short-lived selection token
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -43,7 +46,36 @@ function LoginScreen({ onLogin }) {
         } else {
           setErr(body.error || 'Login failed');
         }
-        setLoading(false);
+        return;
+      }
+      if (body.needs_fleet_selection) {
+        // Contact belongs to more than one fleet — show the picker
+        setPendingFleets(body.fleets);
+        setInterimToken(body.interim_token);
+        return;
+      }
+      onLogin(body.token, body.fleet);
+    } catch (err) {
+      setErr(err.message || 'Network error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleFleetSelect = async (fleet) => {
+    setLoading(true);
+    setErr("");
+    try {
+      const res = await fetch('/api/auth/select-fleet', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interim_token: interimToken, fleet_id: fleet.fleet_id }),
+      });
+      const body = await res.json();
+      if (!res.ok) {
+        setErr(body.error || 'Failed to select fleet. Please sign in again.');
+        setPendingFleets(null);
+        setInterimToken(null);
         return;
       }
       onLogin(body.token, body.fleet);
@@ -82,7 +114,43 @@ function LoginScreen({ onLogin }) {
         <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
         <p style={styles.loginSub}>Fleet Portal</p>
 
-        {view === 'login' && (
+        {/* Fleet picker — shown after login when a contact belongs to multiple fleets */}
+        {pendingFleets && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <p style={{ margin: '0 0 4px', fontSize: 13, color: '#374151', textAlign: 'center' }}>
+              Select which fleet to open:
+            </p>
+            {pendingFleets.map(f => (
+              <button
+                key={f.fleet_id}
+                onClick={() => handleFleetSelect(f)}
+                disabled={loading}
+                style={{
+                  background: '#fff', border: '1px solid #D1D5DB', borderRadius: 8,
+                  padding: '10px 16px', cursor: loading ? 'not-allowed' : 'pointer',
+                  textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2,
+                  opacity: loading ? 0.7 : 1,
+                  transition: 'border-color 0.15s',
+                }}
+                onMouseEnter={e => { if (!loading) e.currentTarget.style.borderColor = '#1c3660'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = '#D1D5DB'; }}
+              >
+                <span style={{ fontWeight: 700, fontSize: 13, color: '#111827' }}>{f.fleet_name}</span>
+                {f.fleet_city && (
+                  <span style={{ fontSize: 12, color: '#6B7280' }}>{f.fleet_city}{f.fleet_state ? `, ${f.fleet_state}` : ''}</span>
+                )}
+              </button>
+            ))}
+            {err && <p style={styles.errMsg}>{err}</p>}
+            <button type="button"
+              onClick={() => { setPendingFleets(null); setInterimToken(null); setErr(''); }}
+              style={{ background: 'none', border: 'none', color: '#6B7280', fontSize: 13, cursor: 'pointer', marginTop: 4 }}>
+              ← Back to sign in
+            </button>
+          </div>
+        )}
+
+        {!pendingFleets && view === 'login' && (
           <form onSubmit={handleLogin} style={styles.loginForm}>
             <div style={styles.fieldGroup}>
               <label style={styles.label}>Email</label>
@@ -3711,6 +3779,11 @@ function AdminView({ token, onSignOut }) {
   const [editContact, setEditContact] = useState(null); // contact object with fleet_name
   const [editContactForm, setEditContactForm] = useState({});
   const [editContactSaving, setEditContactSaving] = useState(false);
+  // Fleet associations for the edit-contact modal
+  const [contactFleetAssocs, setContactFleetAssocs] = useState([]);
+  const [addFleetId,   setAddFleetId]   = useState('');
+  const [addFleetRole, setAddFleetRole] = useState('fleet_user');
+  const [assocSaving,  setAssocSaving]  = useState(false);
 
   // Technology card
   const [techs, setTechs] = useState([]);
@@ -3779,6 +3852,15 @@ function AdminView({ token, onSignOut }) {
   };
 
   useEffect(() => { fetchFleets(); fetchAdminContacts(); }, [token]);
+
+  // Load fleet associations when the edit-contact modal opens
+  useEffect(() => {
+    if (!editContact) { setContactFleetAssocs([]); return; }
+    fetch(`/api/admin/contacts/${editContact.contact_id}/fleets`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { fleets: [] })
+      .then(d => { setContactFleetAssocs(d.fleets || []); setAddFleetId(''); })
+      .catch(() => setContactFleetAssocs([]));
+  }, [editContact?.contact_id]);
 
   const authHeaders = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
 
@@ -4240,7 +4322,7 @@ function AdminView({ token, onSignOut }) {
                                         {isAdminRole ? (
                                           <select value={c.fleet_role || 'fleet_user'}
                                             onChange={async e => {
-                                              const r = await fetch(`/api/admin/contacts/${c.contact_id}/fleet-role`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ fleet_role: e.target.value }) });
+                                              const r = await fetch(`/api/admin/contacts/${c.contact_id}/fleet-role`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ fleet_role: e.target.value, fleet_id: f.fleet_id }) });
                                               const d = await r.json();
                                               if (!r.ok) alert(d.error || 'Failed');
                                               else fetchFleets();
@@ -4339,7 +4421,7 @@ function AdminView({ token, onSignOut }) {
                         {isAdminRole ? (
                           <select value={c.fleet_role || 'fleet_user'}
                             onChange={async e => {
-                              const r = await fetch(`/api/admin/contacts/${c.contact_id}/fleet-role`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ fleet_role: e.target.value }) });
+                              const r = await fetch(`/api/admin/contacts/${c.contact_id}/fleet-role`, { method: 'PATCH', headers: authHeaders, body: JSON.stringify({ fleet_role: e.target.value, fleet_id: c.fleet_id }) });
                               const d = await r.json();
                               if (!r.ok) alert(d.error || 'Failed');
                               else fetchFleets();
@@ -4594,9 +4676,8 @@ function AdminView({ token, onSignOut }) {
       {/* ── Edit Contact Modal ── */}
       {editContact && (
         <div style={modalOverlay} onClick={e => { if (e.target === e.currentTarget) setEditContact(null); }}>
-          <div style={modalBox}>
+          <div style={{ ...modalBox, maxWidth: 480 }}>
             <h3 style={{ margin: '0 0 4px', fontSize: 16, color: '#111827' }}>Edit Contact</h3>
-            <div style={{ color: '#6B7280', fontSize: 12, marginBottom: 16 }}>{editContact.fleet_name}</div>
             <form onSubmit={handleEditContact} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div style={{ display: 'flex', gap: 8 }}>
                 <div style={{ flex: 1 }}>
@@ -4638,6 +4719,73 @@ function AdminView({ token, onSignOut }) {
                 </button>
               </div>
             </form>
+
+            {/* Fleet Access section — manage which fleets this contact can access */}
+            <div style={{ borderTop: '1px solid #E5E7EB', marginTop: 16, paddingTop: 14 }}>
+              <p style={{ margin: '0 0 8px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Fleet Access</p>
+              {contactFleetAssocs.length === 0 && (
+                <p style={{ margin: '0 0 8px', fontSize: 12, color: '#9CA3AF' }}>No fleet associations yet.</p>
+              )}
+              {contactFleetAssocs.map(fa => (
+                <div key={fa.fleet_id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <span style={{ flex: 1, fontSize: 12, color: '#111827', fontWeight: 500 }}>{fa.fleet_name}</span>
+                  <span style={{ fontSize: 11, color: '#6B7280', background: '#F3F4F6', borderRadius: 4, padding: '2px 6px' }}>
+                    {fa.fleet_role === 'fleet_admin' ? 'Admin' : 'User'}
+                  </span>
+                  <button
+                    onClick={async () => {
+                      if (!window.confirm(`Remove ${editContact.first_name || 'this contact'} from ${fa.fleet_name}?`)) return;
+                      setAssocSaving(true);
+                      await fetch(`/api/admin/contacts/${editContact.contact_id}/fleets/${fa.fleet_id}`, { method: 'DELETE', headers: authHeaders });
+                      const d = await fetch(`/api/admin/contacts/${editContact.contact_id}/fleets`, { headers: authHeaders }).then(r => r.json());
+                      setContactFleetAssocs(d.fleets || []);
+                      fetchFleets();
+                      setAssocSaving(false);
+                    }}
+                    disabled={assocSaving}
+                    style={{ background: 'none', border: 'none', color: '#DC2626', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
+                    title="Remove from this fleet"
+                  >✕</button>
+                </div>
+              ))}
+
+              {/* Add to another fleet */}
+              {isAdminRole && (() => {
+                const available = fleets.filter(f => !contactFleetAssocs.some(a => a.fleet_id === f.fleet_id));
+                if (available.length === 0) return null;
+                return (
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 8 }}>
+                    <select value={addFleetId} onChange={e => setAddFleetId(e.target.value)}
+                      style={{ ...inputStyle, flex: 1, fontSize: 12, padding: '4px 6px' }}>
+                      <option value="">— Select fleet —</option>
+                      {available.map(f => <option key={f.fleet_id} value={f.fleet_id}>{f.fleet_name}</option>)}
+                    </select>
+                    <select value={addFleetRole} onChange={e => setAddFleetRole(e.target.value)}
+                      style={{ ...inputStyle, width: 80, fontSize: 12, padding: '4px 6px' }}>
+                      <option value="fleet_user">User</option>
+                      <option value="fleet_admin">Admin</option>
+                    </select>
+                    <button
+                      onClick={async () => {
+                        if (!addFleetId) return;
+                        setAssocSaving(true);
+                        await fetch(`/api/admin/contacts/${editContact.contact_id}/fleets`, {
+                          method: 'POST', headers: authHeaders,
+                          body: JSON.stringify({ fleet_id: parseInt(addFleetId), fleet_role: addFleetRole }),
+                        });
+                        const d = await fetch(`/api/admin/contacts/${editContact.contact_id}/fleets`, { headers: authHeaders }).then(r => r.json());
+                        setContactFleetAssocs(d.fleets || []);
+                        setAddFleetId('');
+                        fetchFleets();
+                        setAssocSaving(false);
+                      }}
+                      disabled={!addFleetId || assocSaving}
+                      style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: addFleetId ? 'pointer' : 'not-allowed', opacity: addFleetId ? 1 : 0.5 }}
+                    >Add</button>
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </div>
       )}
