@@ -5863,6 +5863,19 @@ function BenchmarkPage({ token }) {
   const peerLabels = labels.filter(l => l !== 'You');
   const years      = (benchData?.years || []).slice(-10);
 
+  // For the tech-adoption table, only show columns for labels that have at least
+  // one data point for the current cabType.  Peer fleets that entered data for a
+  // different cab type would otherwise produce a column of all dashes.
+  // "You" is always included (it's informative even when empty).
+  const tableLabels = benchData
+    ? labels.filter(lbl => {
+        if (lbl === 'You') return true;
+        return Object.keys(benchData.adoption || {}).some(tech =>
+          Object.values(benchData.adoption[tech]?.[cabType]?.[lbl] || {}).some(v => v != null)
+        );
+      })
+    : labels;
+
   const avgOf = (vals) => {
     const clean = vals.filter(v => v != null);
     return clean.length >= 3 ? parseFloat((clean.reduce((s, v) => s + v, 0) / clean.length).toFixed(2)) : null;
@@ -6067,7 +6080,7 @@ function BenchmarkPage({ token }) {
                       <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 600, color: '#374151', minWidth: 220, position: 'sticky', left: 0, background: '#F3F4F6', zIndex: 1 }}>
                         Technology
                       </th>
-                      {labels.map((lbl, i) => (
+                      {tableLabels.map((lbl, i) => (
                         <th key={lbl} style={{
                           padding: '9px 14px', textAlign: 'center', fontWeight: 700,
                           color: BENCH_COLORS[i % BENCH_COLORS.length], minWidth: 90,
@@ -6091,7 +6104,7 @@ function BenchmarkPage({ token }) {
                             <td style={{ ...styles.heatCatRow, position: 'sticky', left: 0, zIndex: 2 }}>
                               {isOpen ? '▼' : '▶'} {group}
                             </td>
-                            {labels.map((lbl) => (
+                            {tableLabels.map((lbl) => (
                               <td key={lbl} style={{ background: '#F3F4F6', borderLeft: '1px solid #E5E7EB' }} />
                             ))}
                           </tr>
@@ -6103,7 +6116,7 @@ function BenchmarkPage({ token }) {
                                 <td style={{ padding: '7px 14px', color: '#111827', position: 'sticky', left: 0, background: rowBg, zIndex: 1 }}>
                                   {tech}
                                 </td>
-                                {labels.map((lbl, i) => {
+                                {tableLabels.map((lbl, i) => {
                                   const byYear = benchData.adoption[tech]?.[cabType]?.[lbl] || {};
                                   const latestWithData = [...years].reverse().find(y => byYear[y] != null);
                                   const val = latestWithData != null ? byYear[latestWithData] : null;
