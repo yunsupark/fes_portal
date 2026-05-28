@@ -285,12 +285,17 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
   const {
     ownMpg = {}, peerMpg = {},
     sleeperAdoption = {}, dayCabAdoption = {},
-    allFleetSleeperAdoption = {}, allFleetDayCabAdoption = {},
+    peerSleeperAdoption = {}, peerDayCabAdoption = {},
     dutyCycle = null,
   } = cd;
 
   const hasSleeper = Object.keys(sleeperAdoption).length > 0;
   const hasDayCab  = Object.keys(dayCabAdoption).length > 0;
+  // Show peer adoption bars only for the cab type relevant to this fleet's duty cycle.
+  // LH fleets benchmark against sleeper-cab peers; RH against day-cab peers.
+  // If duty cycle is unknown, show whichever peer data exists.
+  const showPeerSleeper = hasSleeper && (dutyCycle === 'LH' || (!dutyCycle && Object.keys(peerSleeperAdoption).length > 0));
+  const showPeerDayCab  = hasDayCab  && (dutyCycle === 'RH' || (!dutyCycle && Object.keys(peerDayCabAdoption).length  > 0));
 
   const allYears = [...new Set([
     ...Object.keys(ownMpg), ...Object.keys(peerMpg),
@@ -300,24 +305,25 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
 
   const data = displayYears.map(y => ({
     year: String(y),
-    mpg:                 ownMpg[y]                  ?? null,
-    peerMpg:             peerMpg[y]                 ?? null,
-    sleeperAdoption:     sleeperAdoption[y]          ?? null,
-    dayCabAdoption:      dayCabAdoption[y]           ?? null,
-    ffsSleeperAdoption:  allFleetSleeperAdoption[y] ?? null,
-    ffsDayCabAdoption:   allFleetDayCabAdoption[y]  ?? null,
+    mpg:                ownMpg[y]               ?? null,
+    peerMpg:            peerMpg[y]              ?? null,
+    sleeperAdoption:    sleeperAdoption[y]       ?? null,
+    dayCabAdoption:     dayCabAdoption[y]        ?? null,
+    peerSleeperAdoption: peerSleeperAdoption[y]  ?? null,
+    peerDayCabAdoption:  peerDayCabAdoption[y]   ?? null,
   }));
 
   const fmtPct = v => `${Math.round(v)}%`;
-  const peerLabel = dutyCycle === 'LH' ? 'LH Average' : dutyCycle === 'RH' ? 'RH Average' : 'Peer MPG';
+  const dcLabel = dutyCycle === 'LH' ? 'LH' : dutyCycle === 'RH' ? 'RH' : 'Peer';
+  const peerLabel = `${dcLabel} Avg MPG`;
   const ownLabel  = fleetName ? `${fleetName} MPG` : 'Fleet MPG';
   const nameMap = {
-    mpg:                ownLabel,
-    peerMpg:            peerLabel,
-    sleeperAdoption:    'Sleeper adoption',
-    dayCabAdoption:     'Day Cab adoption',
-    ffsSleeperAdoption: 'Ave. Sleeper adoption',
-    ffsDayCabAdoption:  'Ave. Day Cab adoption',
+    mpg:                 ownLabel,
+    peerMpg:             peerLabel,
+    sleeperAdoption:     'Sleeper adoption',
+    dayCabAdoption:      'Day Cab adoption',
+    peerSleeperAdoption: `${dcLabel} Avg Sleeper adopt.`,
+    peerDayCabAdoption:  `${dcLabel} Avg Day Cab adopt.`,
   };
 
   return (
@@ -340,10 +346,10 @@ function MpgChart({ chartData: cd = {}, fleetName }) {
           <Legend formatter={key => nameMap[key] || key} wrapperStyle={{fontSize:10}} />
           <Line yAxisId="left"  dataKey="mpg"     name="mpg"     type="monotone" stroke="#A41C24" strokeWidth={2} dot={{r:3}} connectNulls />
           <Line yAxisId="left"  dataKey="peerMpg" name="peerMpg" type="monotone" stroke="#757373" strokeWidth={2} strokeDasharray="5 3" dot={{r:3}} connectNulls />
-          {hasSleeper && <Bar yAxisId="right" dataKey="sleeperAdoption"    name="sleeperAdoption"    fill="#3B82F6" />}
-          {hasDayCab  && <Bar yAxisId="right" dataKey="dayCabAdoption"     name="dayCabAdoption"     fill="#10B981" />}
-          {hasSleeper && <Bar yAxisId="right" dataKey="ffsSleeperAdoption" name="ffsSleeperAdoption" fill="#93C5FD" />}
-          {hasDayCab  && <Bar yAxisId="right" dataKey="ffsDayCabAdoption"  name="ffsDayCabAdoption"  fill="#6EE7B7" />}
+          {hasSleeper     && <Bar yAxisId="right" dataKey="sleeperAdoption"     name="sleeperAdoption"     fill="#3B82F6" />}
+          {hasDayCab      && <Bar yAxisId="right" dataKey="dayCabAdoption"      name="dayCabAdoption"      fill="#10B981" />}
+          {showPeerSleeper && <Bar yAxisId="right" dataKey="peerSleeperAdoption" name="peerSleeperAdoption" fill="#93C5FD" />}
+          {showPeerDayCab  && <Bar yAxisId="right" dataKey="peerDayCabAdoption"  name="peerDayCabAdoption"  fill="#6EE7B7" />}
         </ComposedChart>
       </ResponsiveContainer>
     </div>
@@ -5786,6 +5792,12 @@ function BenchmarkPage({ token }) {
   const [cabType, setCabType]           = useState('Sleeper');
   const [openGroups, setOpenGroups]     = useState({});
 
+  // Decode own fleet_id from the JWT so we can exclude self from the fleet picker
+  const ownFleetId = (() => {
+    try { return JSON.parse(atob(token.split('.')[1])).fleet_id; }
+    catch { return null; }
+  })();
+
   // Load list of comparable fleets on mount
   useEffect(() => {
     if (!token) return;
@@ -5793,10 +5805,18 @@ function BenchmarkPage({ token }) {
       .then(r => r.json())
       .then(d => {
         setDutyCycle(d.dutyCycle);
-        setAvailableFleets(d.fleets || []);
+        setAvailableFleets((d.fleets || []).filter(f => f.fleet_id !== ownFleetId));
       })
       .catch(() => {});
   }, [token]);
+
+  // Auto-select the cab type that matches the fleet's duty cycle:
+  //   Line Haul   → Sleeper  (sleeper trucks dominate long-haul)
+  //   Regional Haul → Day Cab (day cabs dominate regional/LTL)
+  useEffect(() => {
+    if (dutyCycle === 'RH') setCabType('Day Cab');
+    else setCabType('Sleeper');
+  }, [dutyCycle]);
 
   const MIN_PEERS = 3;
   const enoughForAll = availableFleets.length >= MIN_PEERS;
@@ -5815,6 +5835,19 @@ function BenchmarkPage({ token }) {
       const d = await r.json();
       if (!r.ok) throw new Error(d.error || 'Failed');
       setBenchData(d);
+
+      // After data loads, check whether "You" has adoption data for the current cab type.
+      // If not (e.g. RH fleet with day-cab data but cabType is still 'Sleeper'), auto-switch
+      // to whichever cab type "You" actually has data for.
+      const youHasData = (ct) =>
+        Object.keys(d.adoption || {}).some(tech =>
+          d.adoption[tech]?.[ct]?.['You'] != null
+        );
+      setCabType(prev => {
+        if (youHasData(prev)) return prev;
+        const other = prev === 'Sleeper' ? 'Day Cab' : 'Sleeper';
+        return youHasData(other) ? other : prev;
+      });
     } catch (e) {
       setError(e.message);
     } finally {

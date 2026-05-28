@@ -2115,23 +2115,31 @@ app.get("/api/chart-data", requireAuth, async (req, res) => {
       else dayCabAdoption[r.adoption_year] = v;
     });
 
-    // All-fleet average adoption % by cab type (all fleets, not just same duty cycle)
-    const [allAdoptionRows] = await db.query(
-      `SELECT adoption_year, cab_type, AVG(adoption_percent)*100 AS avg_pct
-       FROM ffs_adoption
-       WHERE fleet_id NOT IN (0,45,46) AND cab_type IN ('Sleeper','Day Cab')
-       GROUP BY adoption_year, cab_type ORDER BY adoption_year`
-    );
-    const allFleetSleeperAdoption = {}, allFleetDayCabAdoption = {};
-    allAdoptionRows.forEach(r => {
-      const v = parseFloat(parseFloat(r.avg_pct).toFixed(1));
-      if (r.cab_type === 'Sleeper') allFleetSleeperAdoption[r.adoption_year] = v;
-      else allFleetDayCabAdoption[r.adoption_year] = v;
-    });
+    // Peer-average adoption % by cab type — same duty cycle only, excluding self
+    const peerSleeperAdoption = {}, peerDayCabAdoption = {};
+    if (fleetRow?.default_duty_cycle) {
+      const [peerAdoptRows] = await db.query(
+        `SELECT adoption_year, cab_type, AVG(adoption_percent)*100 AS avg_pct
+         FROM ffs_adoption
+         WHERE fleet_id IN (
+           SELECT fleet_id FROM ffs_fleet
+           WHERE default_duty_cycle = ? AND fleet_id != ? AND fleet_id NOT IN (0,45,46)
+         )
+         AND cab_type IN ('Sleeper','Day Cab')
+         GROUP BY adoption_year, cab_type ORDER BY adoption_year`,
+        [fleetRow.default_duty_cycle, fleet_id]
+      );
+      peerAdoptRows.forEach(r => {
+        const v = parseFloat(parseFloat(r.avg_pct).toFixed(1));
+        if (r.cab_type === 'Sleeper') peerSleeperAdoption[r.adoption_year] = v;
+        else peerDayCabAdoption[r.adoption_year] = v;
+      });
+    }
 
     const dutyCycle = fleetRow?.default_duty_cycle || null;
 
-    res.json({ ownMpg, peerMpg, sleeperAdoption, dayCabAdoption, allFleetSleeperAdoption, allFleetDayCabAdoption, dutyCycle });
+    res.json({ ownMpg, peerMpg, sleeperAdoption, dayCabAdoption,
+               peerSleeperAdoption, peerDayCabAdoption, dutyCycle });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to fetch chart data" });
@@ -2192,8 +2200,9 @@ app.get("/api/benchmark/data", requireAuth, async (req, res) => {
 
     const [validRows] = await db.query(
       `SELECT fleet_id FROM ffs_fleet
-       WHERE fleet_id IN (?) AND default_duty_cycle = ? AND fleet_id NOT IN (0, 45, 46)`,
-      [rawIds, fleetRow.default_duty_cycle]
+       WHERE fleet_id IN (?) AND default_duty_cycle = ? AND fleet_id NOT IN (0, 45, 46)
+         AND fleet_id != ?`,
+      [rawIds, fleetRow.default_duty_cycle, fleet_id]  // exclude self even if it slips in
     );
     const validIds = validRows.map(r => r.fleet_id);
     const allIds = [fleet_id, ...validIds];
