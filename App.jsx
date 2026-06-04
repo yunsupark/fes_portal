@@ -3848,6 +3848,24 @@ function AdminChartsPage({ token }) {
     <div style={{ padding: 40, color: '#DC2626', fontSize: 13 }}>Error loading charts: {err}</div>
   );
 
+  // ── Diagnostic view ── (remove once charts render correctly)
+  const techGroupList = Object.keys(groupData);
+  return (
+    <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px', fontSize: 13, color: '#374151', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div style={{ background: '#fff', borderRadius: 8, padding: '16px 20px', border: '1px solid #E5E7EB' }}>
+        <strong>Data summary (diagnostic):</strong>
+        <ul style={{ margin: '8px 0 0', paddingLeft: 20, lineHeight: 1.8 }}>
+          <li>MPG rows: {mpgRows.length}</li>
+          <li>Category groups: {catData.groups.join(', ') || '(none)'}</li>
+          <li>Tech groups: {techGroupList.join(', ') || '(none)'}</li>
+          {techGroupList.map(g => (
+            <li key={g}>{g}: {groupData[g].techs.length} techs, {groupData[g].data.length} years</li>
+          ))}
+        </ul>
+      </div>
+    </div>
+  );
+
   const CC = CHART_COLORS_30;
   const fmtPct = v => `${Math.round(v)}%`;
   const fmtMpg = v => `${parseFloat(v).toFixed(2)}`;
