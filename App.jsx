@@ -3726,6 +3726,239 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
   );
 }
 
+// ─── Admin Charts ─────────────────────────────────────────────────────────────
+
+const CHART_COLORS_30 = [
+  '#1f77b4','#ff7f0e','#2ca02c','#d62728','#9467bd',
+  '#8c564b','#e377c2','#7f7f7f','#bcbd22','#17becf',
+  '#393b79','#637939','#8c6d31','#843c39','#7b4173',
+  '#3182bd','#e6550d','#31a354','#756bb1','#636363',
+  '#6baed6','#fd8d3c','#74c476','#9e9ac8','#969696',
+  '#5254a3','#6b6ecf','#9c9ede','#cedb9c','#b5cf6b',
+];
+
+/** Wraps a Recharts chart with a title bar and ↓ PNG download button. */
+function AdminChartCard({ title, children }) {
+  const ref = useRef(null);
+  const download = () => {
+    const svg = ref.current?.querySelector('svg');
+    if (!svg) return;
+    const { width, height } = svg.getBoundingClientRect();
+    const scale = 2;
+    const canvas = document.createElement('canvas');
+    canvas.width  = width  * scale;
+    canvas.height = height * scale;
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale);
+      ctx.drawImage(img, 0, 0, width, height);
+      Object.assign(document.createElement('a'), {
+        download: `${title}.png`, href: canvas.toDataURL('image/png'),
+      }).click();
+    };
+    img.src = URL.createObjectURL(
+      new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' })
+    );
+  };
+  return (
+    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '18px 22px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#111827' }}>{title}</h3>
+        <button onClick={download} title="Download as PNG"
+          style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6,
+                   padding: '4px 10px', fontSize: 11, cursor: 'pointer', color: '#374151' }}>
+          ↓ PNG
+        </button>
+      </div>
+      <div ref={ref}>{children}</div>
+    </div>
+  );
+}
+
+function AdminChartsPage({ token }) {
+  const [groupData, setGroupData] = useState({});   // { group: { techs[], data[] } }
+  const [catData,   setCatData]   = useState({ groups: [], data: [] });
+  const [mpgRows,   setMpgRows]   = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [err,       setErr]       = useState(null);
+
+  useEffect(() => {
+    const hdrs = { Authorization: `Bearer ${token}` };
+    Promise.all([
+      fetch('/api/admin/charts/adoption', { headers: hdrs }).then(r => r.json()),
+      fetch('/api/admin/charts/mpg',      { headers: hdrs }).then(r => r.json()),
+    ]).then(([adData, mpgData]) => {
+      const techRows = adData.techRows || [];
+      const catRows  = adData.catRows  || [];
+
+      // Sorted year list from tech data
+      const years = [...new Set(techRows.map(r => r.year))].sort((a, b) => a - b);
+
+      // --- per-group datasets ---
+      const byGrp = {};
+      for (const r of techRows) {
+        if (!byGrp[r.tech_group]) byGrp[r.tech_group] = {};
+        if (!byGrp[r.tech_group][r.technology]) byGrp[r.tech_group][r.technology] = {};
+        byGrp[r.tech_group][r.technology][r.year] = parseFloat(r.adoption);
+      }
+      const grpData = {};
+      for (const [grp, techMap] of Object.entries(byGrp)) {
+        const techs = Object.keys(techMap).sort();
+        grpData[grp] = {
+          techs,
+          data: years.map(yr => {
+            const pt = { year: String(yr) };
+            for (const t of techs) pt[t] = techMap[t][yr] ?? null;
+            return pt;
+          }),
+        };
+      }
+      setGroupData(grpData);
+
+      // --- category data ---
+      const catYrMap = {};
+      for (const r of catRows) {
+        if (!catYrMap[r.year]) catYrMap[r.year] = { year: String(r.year) };
+        catYrMap[r.year][r.tech_group] = parseFloat(r.adoption);
+      }
+      const catGroups = [...new Set(catRows.map(r => r.tech_group))].sort();
+      setCatData({ groups: catGroups, data: years.map(yr => catYrMap[yr] || { year: String(yr) }) });
+
+      // --- MPG / FHWA data ---
+      setMpgRows((mpgData.rows || []).map(r => ({
+        year:                  String(r.year),
+        'Average MPG':         r.fleet_mpg  != null ? parseFloat(r.fleet_mpg)  : null,
+        'All US Trucks (FHWA)': r.fhwa_mpg  != null ? parseFloat(r.fhwa_mpg)   : null,
+        'Business as Usual':   r.bau_mpg    != null ? parseFloat(r.bau_mpg)    : null,
+        adoption:              r.adoption   != null ? parseFloat(r.adoption)   : null,
+      })));
+      setLoading(false);
+    }).catch(e => { setErr(e.message); setLoading(false); });
+  }, [token]);
+
+  if (loading) return (
+    <div style={{ padding: 80, textAlign: 'center', color: '#6B7280', fontSize: 14 }}>
+      Loading chart data…
+    </div>
+  );
+  if (err) return (
+    <div style={{ padding: 40, color: '#DC2626', fontSize: 13 }}>Error loading charts: {err}</div>
+  );
+
+  const CC = CHART_COLORS_30;
+  const fmtPct = v => `${Math.round(v)}%`;
+  const fmtMpg = v => `${parseFloat(v).toFixed(2)}`;
+  const hasBau = mpgRows.some(r => r['Business as Usual'] != null);
+
+  // Axis label helpers
+  const yPctLabel  = { value: 'Average Adoption (%)', angle: -90, position: 'insideLeft', dx: -8, style: { fontSize: 10, fill: '#6B7280' } };
+  const xYearLabel = { value: 'Years', position: 'insideBottom', offset: -8, style: { fontSize: 10, fill: '#6B7280' } };
+
+  // Display order for tech group charts
+  const groupOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
+                      'Chassis','Idle Reduction','Practices'];
+  const sortedGroups = [
+    ...groupOrder.filter(g => groupData[g]),
+    ...Object.keys(groupData).filter(g => !groupOrder.includes(g)).sort(),
+  ];
+
+  const CH = 300; // default chart area height
+  const BH = 360; // taller for groups with many lines
+
+  return (
+    <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
+                  display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── MPG charts (side by side) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px,1fr))', gap: 20 }}>
+
+        <AdminChartCard title="IFTA MPG">
+          <ResponsiveContainer width="100%" height={CH}>
+            <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 8, bottom: 28 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} label={xYearLabel} />
+              <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft', dx: -4, style: { fontSize: 10, fill: '#6B7280' } }} />
+              <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="Average MPG"          stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
+              {hasBau && <Line type="monotone" dataKey="Business as Usual" stroke="#d62728" strokeWidth={1.5} strokeDasharray="5 3" dot={false} connectNulls />}
+            </LineChart>
+          </ResponsiveContainer>
+        </AdminChartCard>
+
+        <AdminChartCard title="IFTA MPG and Adoption">
+          <ResponsiveContainer width="100%" height={CH}>
+            <ComposedChart data={mpgRows} margin={{ top: 8, right: 50, left: 8, bottom: 28 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} label={xYearLabel} />
+              <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft', dx: -4, style: { fontSize: 10, fill: '#6B7280' } }} />
+              <YAxis yAxisId="right" orientation="right" stroke="#2ca02c" tick={{ fontSize: 10 }}
+                tickFormatter={fmtPct}
+                label={{ value: 'Adoption', angle: 90, position: 'insideRight', dx: 12, style: { fontSize: 10, fill: '#2ca02c' } }} />
+              <Tooltip formatter={(v, n) => {
+                if (n === 'Adoption') return [v != null ? fmtPct(v) : '—', n];
+                return [v != null ? `${fmtMpg(v)} mpg` : '—', n];
+              }} contentStyle={{ fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line yAxisId="left"  type="monotone" dataKey="Average MPG"          stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="right" type="monotone" dataKey="adoption" name="Adoption" stroke="#2ca02c" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </AdminChartCard>
+      </div>
+
+      {/* ── Adoption by Category ── */}
+      <AdminChartCard title="Adoption Percent by Technology Category">
+        <ResponsiveContainer width="100%" height={CH}>
+          <LineChart data={catData.data} margin={{ top: 8, right: 20, left: 14, bottom: 28 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+            <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} label={xYearLabel} />
+            <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }} label={yPctLabel} />
+            <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 11 }} />
+            <Legend wrapperStyle={{ fontSize: 11 }} />
+            {catData.groups.map((grp, i) => (
+              <Line key={grp} type="monotone" dataKey={grp}
+                stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </AdminChartCard>
+
+      {/* ── Per-group charts (2-column grid) ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(540px,1fr))', gap: 20 }}>
+        {sortedGroups.map(grp => {
+          const { techs, data } = groupData[grp];
+          const h = techs.length > 10 ? BH : CH;
+          return (
+            <AdminChartCard key={grp} title={grp}>
+              <ResponsiveContainer width="100%" height={h}>
+                <LineChart data={data} margin={{ top: 8, right: 20, left: 14, bottom: 28 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 9 }} label={xYearLabel} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 9 }} label={yPctLabel} />
+                  <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
+                  <Legend wrapperStyle={{ fontSize: 10 }} />
+                  {techs.map((tech, i) => (
+                    <Line key={tech} type="monotone" dataKey={tech}
+                      stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function AdminView({ token, onSignOut }) {
   const { adminName, isAdminRole } = (() => {
     try {
@@ -3790,6 +4023,9 @@ function AdminView({ token, onSignOut }) {
   const [addFleetId,   setAddFleetId]   = useState('');
   const [addFleetRole, setAddFleetRole] = useState('fleet_user');
   const [assocSaving,  setAssocSaving]  = useState(false);
+
+  // Page switcher: 'data' (management) | 'charts'
+  const [adminPage, setAdminPage] = useState('data');
 
   // FHWA reference data card
   const [fhwaRows,        setFhwaRows]        = useState([]);
@@ -4255,6 +4491,24 @@ function AdminView({ token, onSignOut }) {
         </button>
       </div>
 
+      {/* ── Page tabs ── */}
+      <div style={{ background: '#fff', borderBottom: '2px solid #E5E7EB' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 20px', display: 'flex' }}>
+          {[['data', 'Management'], ['charts', 'Charts']].map(([key, label]) => (
+            <button key={key} onClick={() => setAdminPage(key)} style={{
+              background: 'none', border: 'none', padding: '10px 20px',
+              fontSize: 13, fontWeight: adminPage === key ? 700 : 400,
+              color: adminPage === key ? '#1c3660' : '#6B7280',
+              borderBottom: adminPage === key ? '2px solid #1c3660' : '2px solid transparent',
+              marginBottom: -2, cursor: 'pointer',
+            }}>{label}</button>
+          ))}
+        </div>
+      </div>
+
+      {adminPage === 'charts' && <AdminChartsPage token={token} />}
+
+      {adminPage === 'data' && <>
       <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
 
         {/* ── Fleets Card ── */}
@@ -4664,6 +4918,8 @@ function AdminView({ token, onSignOut }) {
           )}
         </div>
       </div>
+
+      </>}
 
       {/* ── New Fleet Modal ── */}
       {showFleetForm && (

@@ -2388,6 +2388,89 @@ app.get("/api/benchmark/data", requireAuth, async (req, res) => {
   }
 });
 
+// ─── Admin Charts ─────────────────────────────────────────────────────────────
+
+/**
+ * GET /api/admin/charts/adoption
+ * Returns two datasets for the charts page:
+ *   techRows  – per-technology per-year average adoption % across all study fleets
+ *   catRows   – per-tech-group per-year average adoption % across all study fleets
+ * fleet_id 0/45/46 are excluded (NACFE admin, FHWA reference, BAU reference).
+ * adoption values are returned as percentages (0–100).
+ */
+app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [techRows] = await db.query(`
+      SELECT a.tech_id, t.tech_group, t.technology,
+             a.adoption_year AS year,
+             AVG(a.adoption_percent) * 100 AS adoption
+      FROM ffs_adoption a
+      JOIN ffs_tech t ON a.tech_id = t.tech_id
+      WHERE a.fleet_id NOT IN (0, 45, 46)
+      GROUP BY a.tech_id, t.tech_group, t.technology, a.adoption_year
+      ORDER BY t.tech_group, t.technology, a.adoption_year
+    `);
+    const [catRows] = await db.query(`
+      SELECT t.tech_group,
+             a.adoption_year AS year,
+             AVG(a.adoption_percent) * 100 AS adoption
+      FROM ffs_adoption a
+      JOIN ffs_tech t ON a.tech_id = t.tech_id
+      WHERE a.fleet_id NOT IN (0, 45, 46)
+      GROUP BY t.tech_group, a.adoption_year
+      ORDER BY t.tech_group, a.adoption_year
+    `);
+    res.json({
+      techRows: techRows.map(r => ({ ...r, adoption: parseFloat(r.adoption) })),
+      catRows:  catRows.map(r => ({ ...r, adoption: parseFloat(r.adoption) })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch adoption chart data" });
+  }
+});
+
+/**
+ * GET /api/admin/charts/mpg
+ * Returns per-year: fleet-average IFTA MPG, FHWA MPG (fleet 45), BAU MPG (fleet 46),
+ * and overall average adoption % — all for the combined IFTA MPG & Adoption chart.
+ */
+app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [fleetRows] = await db.query(`
+      SELECT mpg_year AS year,
+             ROUND(AVG(multiplier * ifta_miles / NULLIF(ifta_fuel + COALESCE(nat_gas_dge,0), 0)), 3) AS fleet_mpg
+      FROM ffs_mpg
+      WHERE mpg_quarter = '' AND fleet_id NOT IN (0, 45, 46)
+        AND ifta_fuel > 0 AND ifta_miles > 0
+      GROUP BY mpg_year ORDER BY mpg_year
+    `);
+    const [fhwaRows] = await db.query(`
+      SELECT mpg_year AS year, ROUND(ifta_miles / NULLIF(ifta_fuel, 0), 3) AS mpg
+      FROM ffs_mpg WHERE fleet_id = 45 AND mpg_quarter = '' ORDER BY mpg_year
+    `);
+    const [bauRows] = await db.query(`
+      SELECT mpg_year AS year, ROUND(ifta_miles / NULLIF(ifta_fuel, 0), 3) AS mpg
+      FROM ffs_mpg WHERE fleet_id = 46 AND mpg_quarter = '' ORDER BY mpg_year
+    `);
+    const [adoptRows] = await db.query(`
+      SELECT adoption_year AS year, AVG(adoption_percent) * 100 AS adoption
+      FROM ffs_adoption WHERE fleet_id NOT IN (0, 45, 46)
+      GROUP BY adoption_year ORDER BY adoption_year
+    `);
+    const map = {};
+    fleetRows.forEach(r => { map[r.year] = { year: r.year, fleet_mpg:  parseFloat(r.fleet_mpg) }; });
+    fhwaRows.forEach(r  => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].fhwa_mpg  = parseFloat(r.mpg); });
+    bauRows.forEach(r   => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].bau_mpg   = parseFloat(r.mpg); });
+    adoptRows.forEach(r => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].adoption  = parseFloat(r.adoption); });
+    const rows = Object.values(map).sort((a, b) => a.year - b.year);
+    res.json({ rows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch MPG chart data" });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {
