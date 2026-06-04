@@ -3853,11 +3853,6 @@ function AdminChartsPage({ token }) {
   const fmtMpg = v => `${parseFloat(v).toFixed(2)}`;
   const hasBau = mpgRows.some(r => r['Business as Usual'] != null);
 
-  // Axis label helpers
-  const yPctLabel  = { value: 'Average Adoption (%)', angle: -90, position: 'insideLeft', dx: -8, style: { fontSize: 10, fill: '#6B7280' } };
-  const xYearLabel = { value: 'Years', position: 'insideBottom', offset: -8, style: { fontSize: 10, fill: '#6B7280' } };
-
-  // Display order for tech group charts
   const groupOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
                       'Chassis','Idle Reduction','Practices'];
   const sortedGroups = [
@@ -3865,8 +3860,8 @@ function AdminChartsPage({ token }) {
     ...Object.keys(groupData).filter(g => !groupOrder.includes(g)).sort(),
   ];
 
-  const CH = 300; // default chart area height
-  const BH = 360; // taller for groups with many lines
+  const CH = 300;
+  const BH = 360;
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
@@ -3877,11 +3872,10 @@ function AdminChartsPage({ token }) {
 
         <AdminChartCard title="IFTA MPG">
           <ResponsiveContainer width="100%" height={CH}>
-            <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 8, bottom: 28 }}>
+            <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 0, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} label={xYearLabel} />
-              <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                label={{ value: 'MPG', angle: -90, position: 'insideLeft', dx: -4, style: { fontSize: 10, fill: '#6B7280' } }} />
+              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+              <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }} />
               <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Line type="monotone" dataKey="Average MPG"          stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
@@ -3893,14 +3887,11 @@ function AdminChartsPage({ token }) {
 
         <AdminChartCard title="IFTA MPG and Adoption">
           <ResponsiveContainer width="100%" height={CH}>
-            <ComposedChart data={mpgRows} margin={{ top: 8, right: 50, left: 8, bottom: 28 }}>
+            <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 0, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} label={xYearLabel} />
-              <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                label={{ value: 'MPG', angle: -90, position: 'insideLeft', dx: -4, style: { fontSize: 10, fill: '#6B7280' } }} />
-              <YAxis yAxisId="right" orientation="right" stroke="#2ca02c" tick={{ fontSize: 10 }}
-                tickFormatter={fmtPct}
-                label={{ value: 'Adoption', angle: 90, position: 'insideRight', dx: 12, style: { fontSize: 10, fill: '#2ca02c' } }} />
+              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+              <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+              <YAxis yAxisId="right" orientation="right" stroke="#2ca02c" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
               <Tooltip formatter={(v, n) => {
                 if (n === 'Adoption') return [v != null ? fmtPct(v) : '—', n];
                 return [v != null ? `${fmtMpg(v)} mpg` : '—', n];
@@ -3917,10 +3908,10 @@ function AdminChartsPage({ token }) {
       {/* ── Adoption by Category ── */}
       <AdminChartCard title="Adoption Percent by Technology Category">
         <ResponsiveContainer width="100%" height={CH}>
-          <LineChart data={catData.data} margin={{ top: 8, right: 20, left: 14, bottom: 28 }}>
+          <LineChart data={catData.data} margin={{ top: 8, right: 20, left: 0, bottom: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-            <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} label={xYearLabel} />
-            <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }} label={yPctLabel} />
+            <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+            <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
             <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 11 }} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
             {catData.groups.map((grp, i) => (
@@ -3939,10 +3930,10 @@ function AdminChartsPage({ token }) {
           return (
             <AdminChartCard key={grp} title={grp}>
               <ResponsiveContainer width="100%" height={h}>
-                <LineChart data={data} margin={{ top: 8, right: 20, left: 14, bottom: 28 }}>
+                <LineChart data={data} margin={{ top: 8, right: 20, left: 0, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 9 }} label={xYearLabel} />
-                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 9 }} label={yPctLabel} />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 9 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 9 }} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
                   <Legend wrapperStyle={{ fontSize: 10 }} />
                   {techs.map((tech, i) => (
