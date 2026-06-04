@@ -939,19 +939,17 @@ app.get("/api/admin/fhwa-mpg", requireAuth, requireAdmin, async (_req, res) => {
  */
 app.post("/api/admin/fhwa-mpg", requireAuth, requireAdminRole, async (req, res) => {
   const { contact_id } = req.user;
-  const { mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier } = req.body;
+  const { mpg_year, ifta_miles, ifta_fuel } = req.body;
   if (!mpg_year) return res.status(400).json({ error: "mpg_year required" });
   try {
     await db.query(
       `INSERT INTO ffs_mpg (fleet_id, mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier, contact_id)
-       VALUES (45, ?, ?, ?, ?, ?, ?)`,
+       VALUES (45, ?, '', ?, ?, 1, ?)`,
       [
         parseInt(mpg_year),
-        mpg_quarter ?? '',
-        ifta_miles  != null ? parseFloat(ifta_miles)  : null,
-        ifta_fuel   != null ? parseFloat(ifta_fuel)   : null,
-        multiplier  != null ? parseFloat(multiplier)  : 1,
-        contact_id  ?? null,
+        ifta_miles != null ? parseFloat(ifta_miles) : null,
+        ifta_fuel  != null ? parseFloat(ifta_fuel)  : null,
+        contact_id ?? null,
       ]
     );
     res.json({ ok: true });
@@ -969,20 +967,18 @@ app.post("/api/admin/fhwa-mpg", requireAuth, requireAdminRole, async (req, res) 
 app.put("/api/admin/fhwa-mpg/:id", requireAuth, requireAdminRole, async (req, res) => {
   const { contact_id } = req.user;
   const id = parseInt(req.params.id);
-  const { mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier } = req.body;
+  const { mpg_year, ifta_miles, ifta_fuel } = req.body;
   if (!mpg_year) return res.status(400).json({ error: "mpg_year required" });
   try {
     await db.query(
-      `UPDATE ffs_mpg SET mpg_year=?, mpg_quarter=?, ifta_miles=?, ifta_fuel=?,
-                          multiplier=?, contact_id=?
+      `UPDATE ffs_mpg SET mpg_year=?, mpg_quarter='', ifta_miles=?, ifta_fuel=?,
+                          multiplier=1, contact_id=?
        WHERE mpg_id = ? AND fleet_id = 45`,
       [
         parseInt(mpg_year),
-        mpg_quarter ?? '',
-        ifta_miles  != null ? parseFloat(ifta_miles)  : null,
-        ifta_fuel   != null ? parseFloat(ifta_fuel)   : null,
-        multiplier  != null ? parseFloat(multiplier)  : 1,
-        contact_id  ?? null,
+        ifta_miles != null ? parseFloat(ifta_miles) : null,
+        ifta_fuel  != null ? parseFloat(ifta_fuel)  : null,
+        contact_id ?? null,
         id,
       ]
     );
