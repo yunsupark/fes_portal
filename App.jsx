@@ -3791,6 +3791,14 @@ function AdminView({ token, onSignOut }) {
   const [addFleetRole, setAddFleetRole] = useState('fleet_user');
   const [assocSaving,  setAssocSaving]  = useState(false);
 
+  // FHWA reference data card
+  const [fhwaRows,        setFhwaRows]        = useState([]);
+  const [fhwaCollapsed,   setFhwaCollapsed]   = useState(true);
+  const [fhwaForm,        setFhwaForm]        = useState({ mpg_year: '', mpg_quarter: '', ifta_miles: '', ifta_fuel: '', multiplier: '1' });
+  const [fhwaEditId,      setFhwaEditId]      = useState(null); // mpg_id being edited
+  const [fhwaSaving,      setFhwaSaving]      = useState(false);
+  const [fhwaMsg,         setFhwaMsg]         = useState('');
+
   // Technology card
   const [techs, setTechs] = useState([]);
   const [techsLoading, setTechsLoading] = useState(true);
@@ -3858,6 +3866,41 @@ function AdminView({ token, onSignOut }) {
   };
 
   useEffect(() => { fetchFleets(); fetchAdminContacts(); }, [token]);
+
+  const fetchFhwa = () => {
+    fetch('/api/admin/fhwa-mpg', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { rows: [] })
+      .then(d => setFhwaRows(d.rows || []))
+      .catch(console.error);
+  };
+  useEffect(() => { if (!fhwaCollapsed) fetchFhwa(); }, [fhwaCollapsed, token]);
+
+  const handleFhwaSubmit = async (e) => {
+    e.preventDefault();
+    setFhwaSaving(true); setFhwaMsg('');
+    try {
+      const url  = fhwaEditId ? `/api/admin/fhwa-mpg/${fhwaEditId}` : '/api/admin/fhwa-mpg';
+      const meth = fhwaEditId ? 'PUT' : 'POST';
+      const r = await fetch(url, { method: meth, headers: authHeaders, body: JSON.stringify(fhwaForm) });
+      const d = await r.json();
+      if (!r.ok) { setFhwaMsg(d.error || 'Failed'); return; }
+      setFhwaForm({ mpg_year: '', mpg_quarter: '', ifta_miles: '', ifta_fuel: '', multiplier: '1' });
+      setFhwaEditId(null);
+      setFhwaMsg(fhwaEditId ? 'Updated.' : 'Added.');
+      fetchFhwa();
+      setTimeout(() => setFhwaMsg(''), 3000);
+    } catch (err) {
+      setFhwaMsg('Error: ' + err.message);
+    } finally {
+      setFhwaSaving(false);
+    }
+  };
+
+  const handleFhwaDelete = async (id) => {
+    if (!window.confirm('Delete this FHWA row?')) return;
+    await fetch(`/api/admin/fhwa-mpg/${id}`, { method: 'DELETE', headers: authHeaders });
+    fetchFhwa();
+  };
 
   // Load fleet associations when the edit-contact modal opens
   useEffect(() => {
@@ -4508,6 +4551,132 @@ function AdminView({ token, onSignOut }) {
               </table>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* ── FHWA Reference Data Card ── */}
+      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setFhwaCollapsed(c => !c)}>
+            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
+              FHWA IFTA Reference Data
+              <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF', marginLeft: 8 }}>
+                ({fhwaRows.length} row{fhwaRows.length !== 1 ? 's' : ''})
+              </span>
+            </h2>
+            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{fhwaCollapsed ? '▶' : '▼'}</span>
+          </div>
+
+          {!fhwaCollapsed && (
+            <div style={{ padding: '0 0 16px' }}>
+              {/* Entry / Edit form */}
+              <form onSubmit={handleFhwaSubmit}
+                style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end', padding: '16px 0 16px', borderBottom: '1px solid #F3F4F6' }}>
+                <div>
+                  <label style={labelStyle}>Year *</label>
+                  <input style={{ ...inputStyle, width: 80 }} type="number" min="2000" max="2099" required
+                    value={fhwaForm.mpg_year}
+                    onChange={e => setFhwaForm(p => ({ ...p, mpg_year: e.target.value }))}
+                    placeholder={String(new Date().getFullYear())} />
+                </div>
+                <div>
+                  <label style={labelStyle}>Quarter</label>
+                  <select style={{ ...inputStyle, width: 100 }}
+                    value={fhwaForm.mpg_quarter}
+                    onChange={e => setFhwaForm(p => ({ ...p, mpg_quarter: e.target.value }))}>
+                    <option value="">Annual</option>
+                    <option value="Q1">Q1</option>
+                    <option value="Q2">Q2</option>
+                    <option value="Q3">Q3</option>
+                    <option value="Q4">Q4</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={labelStyle}>IFTA Miles *</label>
+                  <input style={{ ...inputStyle, width: 130 }} type="number" min="0" step="1" required
+                    value={fhwaForm.ifta_miles}
+                    onChange={e => setFhwaForm(p => ({ ...p, ifta_miles: e.target.value }))}
+                    placeholder="e.g. 195758" />
+                </div>
+                <div>
+                  <label style={labelStyle}>IFTA Fuel (gal) *</label>
+                  <input style={{ ...inputStyle, width: 130 }} type="number" min="0" step="1" required
+                    value={fhwaForm.ifta_fuel}
+                    onChange={e => setFhwaForm(p => ({ ...p, ifta_fuel: e.target.value }))}
+                    placeholder="e.g. 29297" />
+                </div>
+                <div>
+                  <label style={labelStyle}>Multiplier</label>
+                  <input style={{ ...inputStyle, width: 80 }} type="number" min="0" step="0.01"
+                    value={fhwaForm.multiplier}
+                    onChange={e => setFhwaForm(p => ({ ...p, multiplier: e.target.value }))} />
+                </div>
+                <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+                  <button type="submit" disabled={fhwaSaving}
+                    style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: fhwaSaving ? 0.7 : 1 }}>
+                    {fhwaSaving ? 'Saving…' : fhwaEditId ? 'Update' : 'Add Row'}
+                  </button>
+                  {fhwaEditId && (
+                    <button type="button"
+                      onClick={() => { setFhwaEditId(null); setFhwaForm({ mpg_year: '', mpg_quarter: '', ifta_miles: '', ifta_fuel: '', multiplier: '1' }); }}
+                      style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 14px', fontSize: 13, cursor: 'pointer' }}>
+                      Cancel
+                    </button>
+                  )}
+                  {fhwaMsg && <span style={{ fontSize: 12, color: fhwaMsg.startsWith('Error') ? '#DC2626' : '#059669' }}>{fhwaMsg}</span>}
+                </div>
+              </form>
+
+              {/* Existing rows table */}
+              {fhwaRows.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#9CA3AF', padding: '12px 0 0' }}>No FHWA data entered yet.</p>
+              ) : (
+                <div style={{ overflowX: 'auto', marginTop: 12 }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                    <thead>
+                      <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                        {['Year','Quarter','IFTA Miles','IFTA Fuel (gal)','MPG','Mult.',''].map(h => (
+                          <th key={h} style={{ ...thBase, padding: '8px 12px', textAlign: h === '' ? 'right' : ['IFTA Miles','IFTA Fuel (gal)','MPG','Mult.'].includes(h) ? 'right' : 'left' }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {fhwaRows.map(row => {
+                        const mpg = row.ifta_miles != null && row.ifta_fuel > 0
+                          ? (row.ifta_miles / row.ifta_fuel).toFixed(3)
+                          : '—';
+                        const isEditing = fhwaEditId === row.mpg_id;
+                        return (
+                          <tr key={row.mpg_id} style={{ borderBottom: '1px solid #F3F4F6', background: isEditing ? '#EFF6FF' : 'transparent' }}>
+                            <td style={{ padding: '7px 12px', color: '#111827', fontWeight: 600 }}>{row.mpg_year}</td>
+                            <td style={{ padding: '7px 12px', color: '#6B7280' }}>{row.mpg_quarter || 'Annual'}</td>
+                            <td style={{ padding: '7px 12px', color: '#374151', textAlign: 'right' }}>{row.ifta_miles?.toLocaleString() ?? '—'}</td>
+                            <td style={{ padding: '7px 12px', color: '#374151', textAlign: 'right' }}>{row.ifta_fuel?.toLocaleString()  ?? '—'}</td>
+                            <td style={{ padding: '7px 12px', color: '#374151', textAlign: 'right', fontWeight: 600 }}>{mpg}</td>
+                            <td style={{ padding: '7px 12px', color: '#9CA3AF', textAlign: 'right' }}>{row.multiplier}</td>
+                            <td style={{ padding: '7px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                              <button onClick={() => {
+                                setFhwaEditId(row.mpg_id);
+                                setFhwaForm({
+                                  mpg_year:    String(row.mpg_year),
+                                  mpg_quarter: row.mpg_quarter || '',
+                                  ifta_miles:  row.ifta_miles  != null ? String(row.ifta_miles)  : '',
+                                  ifta_fuel:   row.ifta_fuel   != null ? String(row.ifta_fuel)   : '',
+                                  multiplier:  String(row.multiplier),
+                                });
+                              }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1c3660', fontSize: 14, marginRight: 6 }}>✎</button>
+                              <button onClick={() => handleFhwaDelete(row.mpg_id)}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14 }}>✕</button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

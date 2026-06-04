@@ -906,6 +906,109 @@ app.post("/api/submit-all", requireAuth, async (req, res) => {
 });
 
 /**
+ * GET /api/admin/fhwa-mpg
+ * Returns all ffs_mpg rows for the FHWA reference fleet (fleet_id=45),
+ * sorted newest first.
+ */
+app.get("/api/admin/fhwa-mpg", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT mpg_id, mpg_year, COALESCE(mpg_quarter,'') AS mpg_quarter,
+              ifta_miles, ifta_fuel, COALESCE(multiplier,1) AS multiplier
+       FROM ffs_mpg WHERE fleet_id = 45
+       ORDER BY mpg_year DESC, mpg_quarter ASC, mpg_id DESC`
+    );
+    res.json({ rows: rows.map(r => ({
+      mpg_id:      r.mpg_id,
+      mpg_year:    r.mpg_year,
+      mpg_quarter: r.mpg_quarter,
+      ifta_miles:  r.ifta_miles  != null ? parseFloat(r.ifta_miles)  : null,
+      ifta_fuel:   r.ifta_fuel   != null ? parseFloat(r.ifta_fuel)   : null,
+      multiplier:  parseFloat(r.multiplier),
+    })) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch FHWA data" });
+  }
+});
+
+/**
+ * POST /api/admin/fhwa-mpg
+ * Inserts a new FHWA IFTA row.
+ * Body: { mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier }
+ */
+app.post("/api/admin/fhwa-mpg", requireAuth, requireAdminRole, async (req, res) => {
+  const { contact_id } = req.user;
+  const { mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier } = req.body;
+  if (!mpg_year) return res.status(400).json({ error: "mpg_year required" });
+  try {
+    await db.query(
+      `INSERT INTO ffs_mpg (fleet_id, mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier, contact_id)
+       VALUES (45, ?, ?, ?, ?, ?, ?)`,
+      [
+        parseInt(mpg_year),
+        mpg_quarter ?? '',
+        ifta_miles  != null ? parseFloat(ifta_miles)  : null,
+        ifta_fuel   != null ? parseFloat(ifta_fuel)   : null,
+        multiplier  != null ? parseFloat(multiplier)  : 1,
+        contact_id  ?? null,
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to insert FHWA row" });
+  }
+});
+
+/**
+ * PUT /api/admin/fhwa-mpg/:id
+ * Updates an existing FHWA IFTA row by mpg_id.
+ * Body: { mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier }
+ */
+app.put("/api/admin/fhwa-mpg/:id", requireAuth, requireAdminRole, async (req, res) => {
+  const { contact_id } = req.user;
+  const id = parseInt(req.params.id);
+  const { mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier } = req.body;
+  if (!mpg_year) return res.status(400).json({ error: "mpg_year required" });
+  try {
+    await db.query(
+      `UPDATE ffs_mpg SET mpg_year=?, mpg_quarter=?, ifta_miles=?, ifta_fuel=?,
+                          multiplier=?, contact_id=?
+       WHERE mpg_id = ? AND fleet_id = 45`,
+      [
+        parseInt(mpg_year),
+        mpg_quarter ?? '',
+        ifta_miles  != null ? parseFloat(ifta_miles)  : null,
+        ifta_fuel   != null ? parseFloat(ifta_fuel)   : null,
+        multiplier  != null ? parseFloat(multiplier)  : 1,
+        contact_id  ?? null,
+        id,
+      ]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update FHWA row" });
+  }
+});
+
+/**
+ * DELETE /api/admin/fhwa-mpg/:id
+ * Deletes a FHWA IFTA row by mpg_id.
+ */
+app.delete("/api/admin/fhwa-mpg/:id", requireAuth, requireAdminRole, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    await db.query("DELETE FROM ffs_mpg WHERE mpg_id = ? AND fleet_id = 45", [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete FHWA row" });
+  }
+});
+
+/**
  * POST /api/admin/reset-example-fleet
  * Deletes all input data for the example fleet (fleet_id from ffs_settings).
  */
