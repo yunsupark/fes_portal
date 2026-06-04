@@ -4587,14 +4587,14 @@ function AdminView({ token, onSignOut }) {
                     placeholder={String(new Date().getFullYear())} />
                 </div>
                 <div>
-                  <label style={labelStyle}>IFTA Miles *</label>
+                  <label style={labelStyle}>Miles of Travel *</label>
                   <input style={{ ...inputStyle, width: 140 }} type="number" min="0" step="1" required
                     value={fhwaForm.ifta_miles}
                     onChange={e => setFhwaForm(p => ({ ...p, ifta_miles: e.target.value }))}
                     placeholder="e.g. 195758" />
                 </div>
                 <div>
-                  <label style={labelStyle}>IFTA Fuel (gal) *</label>
+                  <label style={labelStyle}>Fuel Consumed (gal) *</label>
                   <input style={{ ...inputStyle, width: 140 }} type="number" min="0" step="1" required
                     value={fhwaForm.ifta_fuel}
                     onChange={e => setFhwaForm(p => ({ ...p, ifta_fuel: e.target.value }))}
@@ -4624,8 +4624,8 @@ function AdminView({ token, onSignOut }) {
                   <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                     <thead>
                       <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-                        {['Year','IFTA Miles','IFTA Fuel (gal)','MPG',''].map(h => (
-                          <th key={h} style={{ ...thBase, padding: '8px 12px', textAlign: h === '' ? 'right' : ['IFTA Miles','IFTA Fuel (gal)','MPG'].includes(h) ? 'right' : 'left' }}>{h}</th>
+                        {['Year','Miles of Travel','Fuel Consumed (gal)','MPG',''].map(h => (
+                          <th key={h} style={{ ...thBase, padding: '8px 12px', textAlign: h === '' ? 'right' : ['Miles of Travel','Fuel Consumed (gal)','MPG'].includes(h) ? 'right' : 'left' }}>{h}</th>
                         ))}
                       </tr>
                     </thead>
