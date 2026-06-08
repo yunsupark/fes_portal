@@ -913,22 +913,27 @@ app.post("/api/submit-all", requireAuth, async (req, res) => {
 app.get("/api/admin/fhwa-mpg", requireAuth, requireAdmin, async (_req, res) => {
   try {
     const [rows] = await db.query(
-      `SELECT mpg_id, mpg_year, COALESCE(mpg_quarter,'') AS mpg_quarter,
-              ifta_miles, ifta_fuel, COALESCE(multiplier,1) AS multiplier
-       FROM ffs_mpg WHERE fleet_id = 45
-       ORDER BY mpg_year DESC, mpg_quarter ASC, mpg_id DESC`
+      `SELECT m.mpg_id, m.mpg_year, COALESCE(m.mpg_quarter,'') AS mpg_quarter,
+              m.ifta_miles, m.ifta_fuel, COALESCE(m.multiplier,1) AS multiplier,
+              d.avg_diesel_price
+       FROM ffs_mpg m
+       LEFT JOIN ffs_mpg d
+         ON d.fleet_id = 0 AND d.mpg_year = m.mpg_year AND d.mpg_quarter = ''
+       WHERE m.fleet_id = 45
+       ORDER BY m.mpg_year DESC, m.mpg_quarter ASC, m.mpg_id DESC`
     );
     res.json({ rows: rows.map(r => ({
-      mpg_id:      r.mpg_id,
-      mpg_year:    r.mpg_year,
-      mpg_quarter: r.mpg_quarter,
-      ifta_miles:  r.ifta_miles  != null ? parseFloat(r.ifta_miles)  : null,
-      ifta_fuel:   r.ifta_fuel   != null ? parseFloat(r.ifta_fuel)   : null,
-      multiplier:  parseFloat(r.multiplier),
+      mpg_id:            r.mpg_id,
+      mpg_year:          r.mpg_year,
+      mpg_quarter:       r.mpg_quarter,
+      ifta_miles:        r.ifta_miles        != null ? parseFloat(r.ifta_miles)        : null,
+      ifta_fuel:         r.ifta_fuel         != null ? parseFloat(r.ifta_fuel)         : null,
+      multiplier:        parseFloat(r.multiplier),
+      avg_diesel_price:  r.avg_diesel_price  != null ? parseFloat(r.avg_diesel_price)  : null,
     })) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to fetch FHWA data" });
+    res.status(500).json({ error: "Failed to fetch reference data" });
   }
 });
 
@@ -939,9 +944,10 @@ app.get("/api/admin/fhwa-mpg", requireAuth, requireAdmin, async (_req, res) => {
  */
 app.post("/api/admin/fhwa-mpg", requireAuth, requireAdminRole, async (req, res) => {
   const { contact_id } = req.user;
-  const { mpg_year, ifta_miles, ifta_fuel } = req.body;
+  const { mpg_year, ifta_miles, ifta_fuel, avg_diesel_price } = req.body;
   if (!mpg_year) return res.status(400).json({ error: "mpg_year required" });
   try {
+    // Miles + fuel → fleet_id = 45
     await db.query(
       `INSERT INTO ffs_mpg (fleet_id, mpg_year, mpg_quarter, ifta_miles, ifta_fuel, multiplier, fuel_type, contact_id)
        VALUES (45, ?, '', ?, ?, 1, 'Diesel', ?)`,
@@ -952,10 +958,29 @@ app.post("/api/admin/fhwa-mpg", requireAuth, requireAdminRole, async (req, res) 
         contact_id ?? null,
       ]
     );
+    // Avg diesel price → fleet_id = 0
+    if (avg_diesel_price != null && avg_diesel_price !== '') {
+      const [[existing]] = await db.query(
+        `SELECT mpg_id FROM ffs_mpg WHERE fleet_id = 0 AND mpg_year = ? AND mpg_quarter = ''`,
+        [parseInt(mpg_year)]
+      );
+      if (existing) {
+        await db.query(
+          `UPDATE ffs_mpg SET avg_diesel_price = ?, contact_id = ? WHERE mpg_id = ?`,
+          [parseFloat(avg_diesel_price), contact_id ?? null, existing.mpg_id]
+        );
+      } else {
+        await db.query(
+          `INSERT INTO ffs_mpg (fleet_id, mpg_year, mpg_quarter, avg_diesel_price, contact_id)
+           VALUES (0, ?, '', ?, ?)`,
+          [parseInt(mpg_year), parseFloat(avg_diesel_price), contact_id ?? null]
+        );
+      }
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to insert FHWA row" });
+    res.status(500).json({ error: "Failed to insert reference row" });
   }
 });
 
@@ -967,9 +992,10 @@ app.post("/api/admin/fhwa-mpg", requireAuth, requireAdminRole, async (req, res) 
 app.put("/api/admin/fhwa-mpg/:id", requireAuth, requireAdminRole, async (req, res) => {
   const { contact_id } = req.user;
   const id = parseInt(req.params.id);
-  const { mpg_year, ifta_miles, ifta_fuel } = req.body;
+  const { mpg_year, ifta_miles, ifta_fuel, avg_diesel_price } = req.body;
   if (!mpg_year) return res.status(400).json({ error: "mpg_year required" });
   try {
+    // Miles + fuel → fleet_id = 45
     await db.query(
       `UPDATE ffs_mpg SET mpg_year=?, mpg_quarter='', ifta_miles=?, ifta_fuel=?,
                           multiplier=1, fuel_type='Diesel', contact_id=?
@@ -982,10 +1008,29 @@ app.put("/api/admin/fhwa-mpg/:id", requireAuth, requireAdminRole, async (req, re
         id,
       ]
     );
+    // Avg diesel price → fleet_id = 0 (upsert by year)
+    if (avg_diesel_price != null && avg_diesel_price !== '') {
+      const [[existing]] = await db.query(
+        `SELECT mpg_id FROM ffs_mpg WHERE fleet_id = 0 AND mpg_year = ? AND mpg_quarter = ''`,
+        [parseInt(mpg_year)]
+      );
+      if (existing) {
+        await db.query(
+          `UPDATE ffs_mpg SET avg_diesel_price = ?, contact_id = ? WHERE mpg_id = ?`,
+          [parseFloat(avg_diesel_price), contact_id ?? null, existing.mpg_id]
+        );
+      } else {
+        await db.query(
+          `INSERT INTO ffs_mpg (fleet_id, mpg_year, mpg_quarter, avg_diesel_price, contact_id)
+           VALUES (0, ?, '', ?, ?)`,
+          [parseInt(mpg_year), parseFloat(avg_diesel_price), contact_id ?? null]
+        );
+      }
+    }
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: "Failed to update FHWA row" });
+    res.status(500).json({ error: "Failed to update reference row" });
   }
 });
 
