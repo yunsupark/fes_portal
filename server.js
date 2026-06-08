@@ -918,7 +918,7 @@ app.get("/api/admin/fhwa-mpg", requireAuth, requireAdmin, async (_req, res) => {
               d.avg_diesel_price
        FROM ffs_mpg m
        LEFT JOIN ffs_mpg d
-         ON d.fleet_id = 0 AND d.mpg_year = m.mpg_year AND d.mpg_quarter = ''
+         ON d.fleet_id = 0 AND d.mpg_year = m.mpg_year AND COALESCE(d.mpg_quarter, '') = ''
        WHERE m.fleet_id = 45
        ORDER BY m.mpg_year DESC, m.mpg_quarter ASC, m.mpg_id DESC`
     );
@@ -961,7 +961,7 @@ app.post("/api/admin/fhwa-mpg", requireAuth, requireAdminRole, async (req, res) 
     // Avg diesel price → fleet_id = 0
     if (avg_diesel_price != null && avg_diesel_price !== '') {
       const [[existing]] = await db.query(
-        `SELECT mpg_id FROM ffs_mpg WHERE fleet_id = 0 AND mpg_year = ? AND mpg_quarter = ''`,
+        `SELECT mpg_id FROM ffs_mpg WHERE fleet_id = 0 AND mpg_year = ? AND COALESCE(mpg_quarter, '') = ''`,
         [parseInt(mpg_year)]
       );
       if (existing) {
@@ -1011,7 +1011,7 @@ app.put("/api/admin/fhwa-mpg/:id", requireAuth, requireAdminRole, async (req, re
     // Avg diesel price → fleet_id = 0 (upsert by year)
     if (avg_diesel_price != null && avg_diesel_price !== '') {
       const [[existing]] = await db.query(
-        `SELECT mpg_id FROM ffs_mpg WHERE fleet_id = 0 AND mpg_year = ? AND mpg_quarter = ''`,
+        `SELECT mpg_id FROM ffs_mpg WHERE fleet_id = 0 AND mpg_year = ? AND COALESCE(mpg_quarter, '') = ''`,
         [parseInt(mpg_year)]
       );
       if (existing) {
