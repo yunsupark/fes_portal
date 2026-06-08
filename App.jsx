@@ -3964,7 +3964,7 @@ function AdminView({ token, onSignOut }) {
 
   // Settings panel
   const [showSettings,    setShowSettings]    = useState(false);
-  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '', invite_email_template: '' });
+  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '', charts_max_year: '', invite_email_template: '' });
   const [settingsSaving,  setSettingsSaving]  = useState(false);
   const [resetting,       setResetting]       = useState(false);
   const [resetMsg,        setResetMsg]        = useState('');
@@ -4148,6 +4148,7 @@ function AdminView({ token, onSignOut }) {
           setSettingsForm({
             editable_year_from: d.settings.editable_year_from ?? '2003',
             editable_year_to:   d.settings.editable_year_to   ?? String(new Date().getFullYear()),
+            charts_max_year:    d.settings.charts_max_year    ?? String(new Date().getFullYear()),
             invite_email_template: d.settings.invite_email_template ?? '',
           });
         }
@@ -4165,6 +4166,7 @@ function AdminView({ token, onSignOut }) {
         body: JSON.stringify({
           editable_year_from: settingsForm.editable_year_from,
           editable_year_to:   settingsForm.editable_year_to,
+          charts_max_year:    settingsForm.charts_max_year,
           invite_email_template: settingsForm.invite_email_template,
         }),
       });
@@ -5252,6 +5254,19 @@ function AdminView({ token, onSignOut }) {
                       onChange={e => setSettingsForm(p => ({ ...p, editable_year_to: e.target.value }))}
                       required />
                   </div>
+                </div>
+              </div>
+              <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 16, marginTop: 4 }}>
+                <p style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Charts Max Year</p>
+                <p style={{ margin: '0 0 12px', fontSize: 12, color: '#6B7280' }}>
+                  The most recent year shown on the admin charts. Useful to exclude incomplete data for the current year.
+                </p>
+                <div style={{ maxWidth: 120 }}>
+                  <label style={labelStyle}>Max Year</label>
+                  <input style={inputStyle} type="number" min="2003" max={new Date().getFullYear() + 1}
+                    value={settingsForm.charts_max_year}
+                    onChange={e => setSettingsForm(p => ({ ...p, charts_max_year: e.target.value }))}
+                    required />
                 </div>
               </div>
               <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 16, marginTop: 4 }}>
