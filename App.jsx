@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-import { ComposedChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -3779,92 +3779,56 @@ function AdminChartCard({ title, children }) {
 }
 
 function AdminChartsPage({ token }) {
-  const [groupData, setGroupData] = useState({});   // { group: { techs[], data[] } }
-  const [catData,   setCatData]   = useState({ groups: [], data: [] });
   const [mpgRows,   setMpgRows]   = useState([]);
+  const [catData,   setCatData]   = useState({ data: [], groups: [] });
+  const [groupData, setGroupData] = useState({});
   const [loading,   setLoading]   = useState(true);
-  const [err,       setErr]       = useState(null);
+  const [error,     setError]     = useState(null);
 
   useEffect(() => {
-    const hdrs = { Authorization: `Bearer ${token}` };
+    const headers = { Authorization: `Bearer ${token}` };
     Promise.all([
-      fetch('/api/admin/charts/adoption', { headers: hdrs }).then(r => r.json()),
-      fetch('/api/admin/charts/mpg',      { headers: hdrs }).then(r => r.json()),
-    ]).then(([adData, mpgData]) => {
-      const techRows = adData.techRows || [];
-      const catRows  = adData.catRows  || [];
-
-      // Sorted year list from tech data
-      const years = [...new Set(techRows.map(r => r.year))].sort((a, b) => a - b);
-
-      // --- per-group datasets ---
-      const byGrp = {};
-      for (const r of techRows) {
-        if (!byGrp[r.tech_group]) byGrp[r.tech_group] = {};
-        if (!byGrp[r.tech_group][r.technology]) byGrp[r.tech_group][r.technology] = {};
-        byGrp[r.tech_group][r.technology][r.year] = parseFloat(r.adoption);
-      }
-      const grpData = {};
-      for (const [grp, techMap] of Object.entries(byGrp)) {
-        const techs = Object.keys(techMap).sort();
-        grpData[grp] = {
-          techs,
-          data: years.map(yr => {
-            const pt = { year: String(yr) };
-            for (const t of techs) pt[t] = techMap[t][yr] ?? null;
-            return pt;
-          }),
-        };
-      }
-      setGroupData(grpData);
-
-      // --- category data ---
-      const catYrMap = {};
-      for (const r of catRows) {
-        if (!catYrMap[r.year]) catYrMap[r.year] = { year: String(r.year) };
-        catYrMap[r.year][r.tech_group] = parseFloat(r.adoption);
-      }
-      const catGroups = [...new Set(catRows.map(r => r.tech_group))].sort();
-      setCatData({ groups: catGroups, data: years.map(yr => catYrMap[yr] || { year: String(yr) }) });
-
-      // --- MPG / FHWA data ---
+      fetch('/api/admin/charts/mpg',      { headers }).then(r => r.json()),
+      fetch('/api/admin/charts/adoption', { headers }).then(r => r.json()),
+    ]).then(([mpgData, adoptData]) => {
       setMpgRows((mpgData.rows || []).map(r => ({
-        year:                  String(r.year),
-        'Average MPG':         r.fleet_mpg  != null ? parseFloat(r.fleet_mpg)  : null,
-        'All US Trucks (FHWA)': r.fhwa_mpg  != null ? parseFloat(r.fhwa_mpg)   : null,
-        'Business as Usual':   r.bau_mpg    != null ? parseFloat(r.bau_mpg)    : null,
-        adoption:              r.adoption   != null ? parseFloat(r.adoption)   : null,
+        year:                  r.year,
+        'Average MPG':         r.fleet_mpg  ?? null,
+        'All US Trucks (FHWA)':r.fhwa_mpg   ?? null,
+        'Business as Usual':   r.bau_mpg    ?? null,
+        adoption:              r.adoption   ?? null,
       })));
-      setLoading(false);
-    }).catch(e => { setErr(e.message); setLoading(false); });
+
+      const { techRows = [], catRows = [] } = adoptData;
+
+      const catByYear = {};
+      catRows.forEach(r => {
+        if (!catByYear[r.year]) catByYear[r.year] = { year: r.year };
+        catByYear[r.year][r.tech_group] = r.adoption;
+      });
+      const catGroups = [...new Set(catRows.map(r => r.tech_group))].sort();
+      setCatData({
+        data:   Object.values(catByYear).sort((a, b) => a.year - b.year),
+        groups: catGroups,
+      });
+
+      const gd = {};
+      techRows.forEach(r => {
+        if (!gd[r.tech_group]) gd[r.tech_group] = { techs: [], byYear: {} };
+        if (!gd[r.tech_group].techs.includes(r.technology)) gd[r.tech_group].techs.push(r.technology);
+        if (!gd[r.tech_group].byYear[r.year]) gd[r.tech_group].byYear[r.year] = { year: r.year };
+        gd[r.tech_group].byYear[r.year][r.technology] = r.adoption;
+      });
+      const built = {};
+      Object.entries(gd).forEach(([grp, { techs, byYear }]) => {
+        built[grp] = { techs, data: Object.values(byYear).sort((a, b) => a.year - b.year) };
+      });
+      setGroupData(built);
+    }).catch(err => setError(err.message)).finally(() => setLoading(false));
   }, [token]);
 
-  if (loading) return (
-    <div style={{ padding: 80, textAlign: 'center', color: '#6B7280', fontSize: 14 }}>
-      Loading chart data…
-    </div>
-  );
-  if (err) return (
-    <div style={{ padding: 40, color: '#DC2626', fontSize: 13 }}>Error loading charts: {err}</div>
-  );
-
-  // ── Diagnostic view ── (remove once charts render correctly)
-  const techGroupList = Object.keys(groupData);
-  return (
-    <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px', fontSize: 13, color: '#374151', display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ background: '#fff', borderRadius: 8, padding: '16px 20px', border: '1px solid #E5E7EB' }}>
-        <strong>Data summary (diagnostic):</strong>
-        <ul style={{ margin: '8px 0 0', paddingLeft: 20, lineHeight: 1.8 }}>
-          <li>MPG rows: {mpgRows.length}</li>
-          <li>Category groups: {catData.groups.join(', ') || '(none)'}</li>
-          <li>Tech groups: {techGroupList.join(', ') || '(none)'}</li>
-          {techGroupList.map(g => (
-            <li key={g}>{g}: {groupData[g].techs.length} techs, {groupData[g].data.length} years</li>
-          ))}
-        </ul>
-      </div>
-    </div>
-  );
+  if (loading) return <div style={{ padding: 40, color: '#6B7280' }}>Loading charts…</div>;
+  if (error)   return <div style={{ padding: 40, color: '#DC2626' }}>Error: {error}</div>;
 
   const CC = CHART_COLORS_30;
   const fmtPct = v => `${Math.round(v)}%`;
