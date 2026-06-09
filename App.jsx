@@ -4080,7 +4080,8 @@ function AdminChartsPage({ token }) {
     ]).then(([mpgData, adoptData]) => {
       setMpgRows((mpgData.rows || []).map(r => ({
         year:                  r.year,
-        'Average MPG':         r.fleet_mpg  ?? null,
+        'Line Haul MPG':       r.lh_mpg     ?? null,
+        'Regional Haul MPG':   r.rh_mpg     ?? null,
         'All US Trucks (FHWA)':r.fhwa_mpg   ?? null,
         'Business as Usual':   r.bau_mpg    ?? null,
         adoption:              r.adoption   ?? null,
@@ -4248,8 +4249,9 @@ function AdminChartsPage({ token }) {
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
               <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line type="monotone" dataKey="Average MPG"          stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
-              <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="Line Haul MPG"       stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="Regional Haul MPG"   stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"   strokeWidth={2} dot={false} connectNulls />
               {hasBau && <Line type="monotone" dataKey="Business as Usual" stroke="#d62728" strokeWidth={1.5} strokeDasharray="5 3" dot={false} connectNulls />}
             </LineChart>
           </ResponsiveContainer>
@@ -4269,8 +4271,9 @@ function AdminChartsPage({ token }) {
                 return [v != null ? `${fmtMpg(v)} mpg` : '—', n];
               }} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line yAxisId="left"  type="monotone" dataKey="Average MPG"          stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
-              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"       stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"   stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"   strokeWidth={2} dot={false} connectNulls />
               <Line yAxisId="right" type="monotone" dataKey="adoption" name="Adoption" stroke="#2ca02c" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>

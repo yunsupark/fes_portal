@@ -2535,14 +2535,20 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
     }
     const minYear = 2003;
 
+    // Split fleet average MPG by duty cycle (lh / rh).
+    // Fleets with no duty_cycle set are excluded from both series.
     const [fleetRows] = await db.query(`
-      SELECT mpg_year AS year,
-             ROUND(AVG(multiplier * ifta_miles / NULLIF(ifta_fuel + COALESCE(nat_gas_dge,0), 0)), 3) AS fleet_mpg
-      FROM ffs_mpg
-      WHERE COALESCE(mpg_quarter,'') = '' AND fleet_id NOT IN (0, 45, 46)
-        AND ifta_fuel > 0 AND ifta_miles > 0
-        AND mpg_year >= ? AND mpg_year <= ?
-      GROUP BY mpg_year ORDER BY mpg_year
+      SELECT m.mpg_year AS year,
+             f.default_duty_cycle AS duty_cycle,
+             ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS fleet_mpg
+      FROM ffs_mpg m
+      JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+      WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
+        AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+        AND m.mpg_year >= ? AND m.mpg_year <= ?
+        AND f.default_duty_cycle IN ('lh', 'rh')
+      GROUP BY m.mpg_year, f.default_duty_cycle
+      ORDER BY m.mpg_year
     `, [minYear, maxYear]);
     const [fhwaRows] = await db.query(`
       SELECT mpg_year AS year, ROUND(ifta_miles / NULLIF(ifta_fuel, 0), 3) AS mpg
@@ -2564,7 +2570,11 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
       GROUP BY adoption_year ORDER BY adoption_year
     `, [minYear, maxYear]);
     const map = {};
-    fleetRows.forEach(r => { map[r.year] = { year: r.year, fleet_mpg:  parseFloat(r.fleet_mpg) }; });
+    fleetRows.forEach(r => {
+      if (!map[r.year]) map[r.year] = { year: r.year };
+      if (r.duty_cycle === 'lh') map[r.year].lh_mpg = parseFloat(r.fleet_mpg);
+      if (r.duty_cycle === 'rh') map[r.year].rh_mpg = parseFloat(r.fleet_mpg);
+    });
     fhwaRows.forEach(r  => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].fhwa_mpg  = parseFloat(r.mpg); });
     bauRows.forEach(r   => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].bau_mpg   = parseFloat(r.mpg); });
     adoptRows.forEach(r => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].adoption  = parseFloat(r.adoption); });
