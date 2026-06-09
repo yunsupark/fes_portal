@@ -2504,7 +2504,7 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (_req, res) =>
       SELECT mpg_year AS year,
              ROUND(AVG(multiplier * ifta_miles / NULLIF(ifta_fuel + COALESCE(nat_gas_dge,0), 0)), 3) AS fleet_mpg
       FROM ffs_mpg
-      WHERE mpg_quarter = '' AND fleet_id NOT IN (0, 45, 46)
+      WHERE COALESCE(mpg_quarter,'') = '' AND fleet_id NOT IN (0, 45, 46)
         AND ifta_fuel > 0 AND ifta_miles > 0
         AND mpg_year >= ? AND mpg_year <= ?
       GROUP BY mpg_year ORDER BY mpg_year
@@ -2512,7 +2512,7 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (_req, res) =>
     const [fhwaRows] = await db.query(`
       SELECT mpg_year AS year, ROUND(ifta_miles / NULLIF(ifta_fuel, 0), 3) AS mpg
       FROM ffs_mpg
-      WHERE fleet_id = 45 AND mpg_quarter = ''
+      WHERE fleet_id = 45 AND COALESCE(mpg_quarter,'') = ''
         AND mpg_year >= 2007 AND mpg_year <= ?
       ORDER BY mpg_year
     `, [maxYear]);

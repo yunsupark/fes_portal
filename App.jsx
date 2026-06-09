@@ -3842,16 +3842,23 @@ function AdminChartsPage({ token }) {
     ...Object.keys(groupData).filter(g => !groupOrder.includes(g)).sort(),
   ];
 
-  const CH = 300;
-  const BH = 360;
+  // Sort a list of series keys by their last non-null value in data, descending.
+  const byLastValue = (keys, data) => [...keys].sort((a, b) => {
+    const last = k => { for (let i = data.length - 1; i >= 0; i--) { if (data[i][k] != null) return data[i][k]; } return 0; };
+    return last(b) - last(a);
+  });
+
+  const CH  = 320;
+  const LEG = { layout: 'vertical', align: 'right', verticalAlign: 'middle', wrapperStyle: { fontSize: 9, lineHeight: '15px' } };
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
                   display: 'flex', flexDirection: 'column', gap: 20 }}>
 
-      {/* ── MPG charts (side by side) ── */}
+      {/* ── All charts in a uniform 2-column grid ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px,1fr))', gap: 20 }}>
 
+        {/* MPG */}
         <AdminChartCard title="IFTA MPG">
           <ResponsiveContainer width="100%" height={CH}>
             <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 0, bottom: 8 }}>
@@ -3885,40 +3892,44 @@ function AdminChartsPage({ token }) {
             </ComposedChart>
           </ResponsiveContainer>
         </AdminChartCard>
-      </div>
 
-      {/* ── Adoption by Category ── */}
-      <AdminChartCard title="Adoption Percent by Technology Category">
-        <ResponsiveContainer width="100%" height={CH}>
-          <LineChart data={catData.data} margin={{ top: 8, right: 20, left: 0, bottom: 8 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-            <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-            <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-            <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 11 }} />
-            <Legend wrapperStyle={{ fontSize: 11 }} />
-            {catData.groups.map((grp, i) => (
-              <Line key={grp} type="monotone" dataKey={grp}
-                stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </AdminChartCard>
+        {/* Adoption by Category */}
+        {(() => {
+          const sortedCats = byLastValue(catData.groups, catData.data);
+          return (
+            <AdminChartCard title="Adoption Percent by Technology Category">
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={catData.data} margin={{ top: 8, right: 210, left: 0, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 11 }} />
+                  <Legend {...LEG} />
+                  {sortedCats.map((grp, i) => (
+                    <Line key={grp} type="monotone" dataKey={grp}
+                      stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+          );
+        })()}
 
-      {/* ── Per-group charts (2-column grid) ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(540px,1fr))', gap: 20 }}>
+        {/* Per-group adoption charts */}
         {sortedGroups.map(grp => {
           const { techs, data } = groupData[grp];
-          const h = techs.length > 10 ? BH : CH;
+          const sortedTechs = byLastValue(techs, data);
+          const h = Math.max(CH, sortedTechs.length * 16 + 60);
           return (
             <AdminChartCard key={grp} title={grp}>
               <ResponsiveContainer width="100%" height={h}>
-                <LineChart data={data} margin={{ top: 8, right: 20, left: 0, bottom: 8 }}>
+                <LineChart data={data} margin={{ top: 8, right: 230, left: 0, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 9 }} />
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 9 }} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  <Legend wrapperStyle={{ fontSize: 10 }} />
-                  {techs.map((tech, i) => (
+                  <Legend {...LEG} />
+                  {sortedTechs.map((tech, i) => (
                     <Line key={tech} type="monotone" dataKey={tech}
                       stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
                   ))}
@@ -3927,6 +3938,7 @@ function AdminChartsPage({ token }) {
             </AdminChartCard>
           );
         })}
+
       </div>
     </div>
   );
