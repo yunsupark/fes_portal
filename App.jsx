@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Customized } from "recharts";
+import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -3737,32 +3737,85 @@ const CHART_COLORS_30 = [
   '#5254a3','#6b6ecf','#9c9ede','#cedb9c','#b5cf6b',
 ];
 
-/** Wraps a Recharts chart with a title bar and ↓ PNG download button. */
-function AdminChartCard({ title, children }) {
+/** Wraps a Recharts chart with a title bar and ↓ PNG download button.
+ *  legendItems – optional [{value, color}] array; renders an HTML legend
+ *  sidebar and paints it onto the canvas when downloading.
+ */
+function AdminChartCard({ title, children, legendItems }) {
   const ref = useRef(null);
+
   const download = () => {
     const svg = ref.current?.querySelector('svg');
     if (!svg) return;
-    const { width, height } = svg.getBoundingClientRect();
-    const scale = 2;
-    const canvas = document.createElement('canvas');
-    canvas.width  = width  * scale;
-    canvas.height = height * scale;
+    const { width: svgW, height: svgH } = svg.getBoundingClientRect();
+    const LEG_W    = legendItems?.length ? 190 : 0;
+    const PADDING  = legendItems?.length ?  12 : 0;
+    const scale    = 2;
+    const canvas   = document.createElement('canvas');
+    canvas.width   = (svgW + LEG_W + PADDING) * scale;
+    canvas.height  = svgH * scale;
     const ctx = canvas.getContext('2d');
+
+    const drawLegend = () => {
+      if (!legendItems?.length) return;
+      const x0     = svgW + PADDING;
+      const lineH  = 16;
+      const gap    = 4;
+      const maxTxtW = LEG_W - 26;   // pixels available for text
+      ctx.font = `${10 * scale}px system-ui,sans-serif`;
+      ctx.textBaseline = 'middle';
+      const totalH = legendItems.reduce((s, it) => {
+        const lines = wrapText(ctx, it.value, maxTxtW * scale);
+        return s + lines.length * lineH * scale + gap * scale;
+      }, 0) - gap * scale;
+      let y = Math.max(8 * scale, (svgH * scale - totalH) / 2);
+
+      for (const item of legendItems) {
+        const lines = wrapText(ctx, item.value, maxTxtW * scale);
+        const midY  = y + ((lines.length - 1) * lineH * scale) / 2 + (lineH * scale) / 2;
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth   = 2.5 * scale;
+        ctx.beginPath();
+        ctx.moveTo(x0 * scale,              midY);
+        ctx.lineTo((x0 + 14) * scale,       midY);
+        ctx.stroke();
+        ctx.fillStyle = '#374151';
+        lines.forEach((ln, li) => {
+          ctx.fillText(ln, (x0 + 18) * scale, y + (li + 0.5) * lineH * scale);
+        });
+        y += lines.length * lineH * scale + gap * scale;
+      }
+    };
+
+    const wrapText = (ctx2, text, maxPx) => {
+      const words = text.split(' ');
+      const lines = [];
+      let cur = '';
+      for (const w of words) {
+        const test = cur ? `${cur} ${w}` : w;
+        if (ctx2.measureText(test).width > maxPx && cur) { lines.push(cur); cur = w; }
+        else cur = test;
+      }
+      if (cur) lines.push(cur);
+      return lines;
+    };
+
     const img = new Image();
     img.onload = () => {
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(scale, scale);
-      ctx.drawImage(img, 0, 0, width, height);
+      ctx.drawImage(img, 0, 0, svgW * scale, svgH * scale);
+      drawLegend();
       Object.assign(document.createElement('a'), {
         download: `${title}.png`, href: canvas.toDataURL('image/png'),
       }).click();
     };
+    const svgStr = new XMLSerializer().serializeToString(svg);
     img.src = URL.createObjectURL(
-      new Blob([new XMLSerializer().serializeToString(svg)], { type: 'image/svg+xml' })
+      new Blob([svgStr], { type: 'image/svg+xml' })
     );
   };
+
   return (
     <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '18px 22px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
@@ -3773,7 +3826,24 @@ function AdminChartCard({ title, children }) {
           ↓ PNG
         </button>
       </div>
-      <div ref={ref}>{children}</div>
+      {/* Chart + optional legend sidebar */}
+      <div ref={ref} style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={{ flex: 1, minWidth: 0 }}>{children}</div>
+        {legendItems?.length > 0 && (
+          <div style={{ width: 178, flexShrink: 0, paddingLeft: 12,
+                        display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 3 }}>
+            {legendItems.map(item => (
+              <div key={item.value} style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                <div style={{ width: 14, height: 2.5, background: item.color,
+                              marginTop: 6, flexShrink: 0, borderRadius: 1 }} />
+                <span style={{ fontSize: 9.5, color: '#374151', lineHeight: '14px', wordBreak: 'break-word' }}>
+                  {item.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -3848,64 +3918,12 @@ function AdminChartsPage({ token }) {
     return last(b) - last(a);
   });
 
-  /**
-   * Returns a <Customized> component that renders a word-wrapped legend
-   * inside the chart SVG (right margin). Because it lives in the SVG it
-   * is captured by the PNG download without any extra work.
-   *
-   * @param {Array<{value,color}>} items  – legend entries in display order
-   * @param {number} marginRight          – must match the chart's margin.right
-   */
-  const SvgLegend = (items, marginRight) => (props) => {
-    const { width, height } = props;
-    const x0   = width - marginRight + 10;  // left edge of legend area
-    const maxW  = marginRight - 24;          // available text width (px)
-    const chPx  = 6.2;                       // approx px per char at 9px font
-    const maxCh = Math.floor(maxW / chPx);
-    const lineH = 13;
-    const gap   = 5;
+  // All charts share the same height for visual consistency.
+  const CH = 380;
 
-    // Pre-wrap all items
-    const wrapped = items.map(item => {
-      const words = item.value.split(' ');
-      const lines = [];
-      let cur = '';
-      for (const w of words) {
-        const test = cur ? `${cur} ${w}` : w;
-        if (test.length > maxCh && cur) { lines.push(cur); cur = w; }
-        else cur = test;
-      }
-      if (cur) lines.push(cur);
-      return { ...item, lines };
-    });
-
-    const totalH = wrapped.reduce((s, it) => s + it.lines.length * lineH + gap, 0) - gap;
-    let y = Math.max(8, (height - totalH) / 2);
-
-    return (
-      <g>
-        {wrapped.map(item => {
-          const midY = y + ((item.lines.length - 1) * lineH) / 2 + 4;
-          const el = (
-            <g key={item.value}>
-              <line x1={x0} y1={midY} x2={x0 + 14} y2={midY}
-                stroke={item.color} strokeWidth={1.5} strokeLinecap="round" />
-              {item.lines.map((ln, li) => (
-                <text key={li} x={x0 + 18} y={y + li * lineH + 9}
-                  fontSize={9} fill="#374151" fontFamily="system-ui,sans-serif">
-                  {ln}
-                </text>
-              ))}
-            </g>
-          );
-          y += item.lines.length * lineH + gap;
-          return el;
-        })}
-      </g>
-    );
-  };
-
-  const CH = 320;
+  // Shared Y-axis label style for adoption charts.
+  const adoptYLabel = { value: '% Adoption', angle: -90, position: 'insideLeft',
+                        style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } };
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
@@ -3917,10 +3935,12 @@ function AdminChartsPage({ token }) {
         {/* MPG */}
         <AdminChartCard title="IFTA MPG">
           <ResponsiveContainer width="100%" height={CH}>
-            <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 0, bottom: 8 }}>
+            <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-              <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+              <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                         style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
               <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Line type="monotone" dataKey="Average MPG"          stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
@@ -3932,10 +3952,12 @@ function AdminChartsPage({ token }) {
 
         <AdminChartCard title="IFTA MPG and Adoption">
           <ResponsiveContainer width="100%" height={CH}>
-            <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 0, bottom: 8 }}>
+            <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-              <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+              <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                         style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
               <YAxis yAxisId="right" orientation="right" stroke="#2ca02c" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
               <Tooltip formatter={(v, n) => {
                 if (n === 'Adoption') return [v != null ? fmtPct(v) : '—', n];
@@ -3951,18 +3973,17 @@ function AdminChartsPage({ token }) {
 
         {/* Adoption by Category */}
         {(() => {
-          const MR = 200;
           const sortedCats = byLastValue(catData.groups, catData.data);
-          const legItems = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
+          const legItems   = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard title="Adoption Percent by Technology Category">
+            <AdminChartCard title="Adoption Percent by Technology Category" legendItems={legItems}>
               <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={catData.data} margin={{ top: 8, right: MR, left: 0, bottom: 8 }}>
+                <LineChart data={catData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={adoptYLabel} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 11 }} />
-                  <Customized component={SvgLegend(legItems, MR)} />
                   {sortedCats.map((grp, i) => (
                     <Line key={grp} type="monotone" dataKey={grp}
                       stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
@@ -3975,22 +3996,18 @@ function AdminChartsPage({ token }) {
 
         {/* Per-group adoption charts */}
         {sortedGroups.map(grp => {
-          const MR = 200;
           const { techs, data } = groupData[grp];
           const sortedTechs = byLastValue(techs, data);
-          const legItems = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
-          // Height: enough to show all legend items without clipping
-          const estLegH = sortedTechs.reduce((s, t) => s + Math.ceil(t.length / 22) * 13 + 5, 0);
-          const h = Math.max(CH, estLegH + 40);
+          const legItems    = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard key={grp} title={grp}>
-              <ResponsiveContainer width="100%" height={h}>
-                <LineChart data={data} margin={{ top: 8, right: MR, left: 0, bottom: 8 }}>
+            <AdminChartCard key={grp} title={grp} legendItems={legItems}>
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 9 }} />
-                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 9 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 9 }}
+                    label={adoptYLabel} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  <Customized component={SvgLegend(legItems, MR)} />
                   {sortedTechs.map((tech, i) => (
                     <Line key={tech} type="monotone" dataKey={tech}
                       stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
