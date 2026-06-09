@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, Customized } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -3848,8 +3848,64 @@ function AdminChartsPage({ token }) {
     return last(b) - last(a);
   });
 
-  const CH  = 320;
-  const LEG = { layout: 'vertical', align: 'right', verticalAlign: 'middle', wrapperStyle: { fontSize: 9, lineHeight: '15px' } };
+  /**
+   * Returns a <Customized> component that renders a word-wrapped legend
+   * inside the chart SVG (right margin). Because it lives in the SVG it
+   * is captured by the PNG download without any extra work.
+   *
+   * @param {Array<{value,color}>} items  – legend entries in display order
+   * @param {number} marginRight          – must match the chart's margin.right
+   */
+  const SvgLegend = (items, marginRight) => (props) => {
+    const { width, height } = props;
+    const x0   = width - marginRight + 10;  // left edge of legend area
+    const maxW  = marginRight - 24;          // available text width (px)
+    const chPx  = 6.2;                       // approx px per char at 9px font
+    const maxCh = Math.floor(maxW / chPx);
+    const lineH = 13;
+    const gap   = 5;
+
+    // Pre-wrap all items
+    const wrapped = items.map(item => {
+      const words = item.value.split(' ');
+      const lines = [];
+      let cur = '';
+      for (const w of words) {
+        const test = cur ? `${cur} ${w}` : w;
+        if (test.length > maxCh && cur) { lines.push(cur); cur = w; }
+        else cur = test;
+      }
+      if (cur) lines.push(cur);
+      return { ...item, lines };
+    });
+
+    const totalH = wrapped.reduce((s, it) => s + it.lines.length * lineH + gap, 0) - gap;
+    let y = Math.max(8, (height - totalH) / 2);
+
+    return (
+      <g>
+        {wrapped.map(item => {
+          const midY = y + ((item.lines.length - 1) * lineH) / 2 + 4;
+          const el = (
+            <g key={item.value}>
+              <line x1={x0} y1={midY} x2={x0 + 14} y2={midY}
+                stroke={item.color} strokeWidth={1.5} strokeLinecap="round" />
+              {item.lines.map((ln, li) => (
+                <text key={li} x={x0 + 18} y={y + li * lineH + 9}
+                  fontSize={9} fill="#374151" fontFamily="system-ui,sans-serif">
+                  {ln}
+                </text>
+              ))}
+            </g>
+          );
+          y += item.lines.length * lineH + gap;
+          return el;
+        })}
+      </g>
+    );
+  };
+
+  const CH = 320;
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
@@ -3895,16 +3951,18 @@ function AdminChartsPage({ token }) {
 
         {/* Adoption by Category */}
         {(() => {
+          const MR = 200;
           const sortedCats = byLastValue(catData.groups, catData.data);
+          const legItems = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
           return (
             <AdminChartCard title="Adoption Percent by Technology Category">
               <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={catData.data} margin={{ top: 8, right: 210, left: 0, bottom: 8 }}>
+                <LineChart data={catData.data} margin={{ top: 8, right: MR, left: 0, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 11 }} />
-                  <Legend {...LEG} />
+                  <Customized component={SvgLegend(legItems, MR)} />
                   {sortedCats.map((grp, i) => (
                     <Line key={grp} type="monotone" dataKey={grp}
                       stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
@@ -3917,18 +3975,22 @@ function AdminChartsPage({ token }) {
 
         {/* Per-group adoption charts */}
         {sortedGroups.map(grp => {
+          const MR = 200;
           const { techs, data } = groupData[grp];
           const sortedTechs = byLastValue(techs, data);
-          const h = Math.max(CH, sortedTechs.length * 16 + 60);
+          const legItems = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
+          // Height: enough to show all legend items without clipping
+          const estLegH = sortedTechs.reduce((s, t) => s + Math.ceil(t.length / 22) * 13 + 5, 0);
+          const h = Math.max(CH, estLegH + 40);
           return (
             <AdminChartCard key={grp} title={grp}>
               <ResponsiveContainer width="100%" height={h}>
-                <LineChart data={data} margin={{ top: 8, right: 230, left: 0, bottom: 8 }}>
+                <LineChart data={data} margin={{ top: 8, right: MR, left: 0, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 9 }} />
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 9 }} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  <Legend {...LEG} />
+                  <Customized component={SvgLegend(legItems, MR)} />
                   {sortedTechs.map((tech, i) => (
                     <Line key={tech} type="monotone" dataKey={tech}
                       stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
