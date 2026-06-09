@@ -2443,15 +2443,42 @@ app.get("/api/benchmark/data", requireAuth, async (req, res) => {
  * fleet_id 0/45/46 are excluded (NACFE admin, FHWA reference, BAU reference).
  * adoption values are returned as percentages (0–100).
  */
-app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (_req, res) => {
+app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const [settingRows] = await db.query(
-      `SELECT setting_value FROM ffs_settings WHERE setting_key = 'charts_max_year'`
-    );
-    const maxYear = settingRows[0]?.setting_value
-      ? parseInt(settingRows[0].setting_value)
-      : new Date().getFullYear();
+    // max_year: prefer query param, fall back to DB setting
+    let maxYear;
+    if (req.query.max_year && !isNaN(parseInt(req.query.max_year))) {
+      maxYear = parseInt(req.query.max_year);
+    } else {
+      const [settingRows] = await db.query(
+        `SELECT setting_value FROM ffs_settings WHERE setting_key = 'charts_max_year'`
+      );
+      maxYear = settingRows[0]?.setting_value
+        ? parseInt(settingRows[0].setting_value)
+        : new Date().getFullYear();
+    }
     const minYear = 2003;
+
+    // haul_type: 'lh' | 'rh' | 'combined' (default)
+    const haulType = req.query.haul_type || 'combined';
+
+    // Build WHERE clause and JOIN based on haul_type.
+    // lh  = line-haul fleets, sleeper cab only (exclude Day Cab rows)
+    // rh  = regional-haul fleets (all cab) + line-haul fleets' Day Cab rows
+    // combined = all study fleets (existing behaviour)
+    let fleetJoin  = '';
+    let fleetWhere = 'a.fleet_id NOT IN (0, 45, 46)';
+    if (haulType === 'lh') {
+      fleetJoin  = 'JOIN ffs_fleet f ON a.fleet_id = f.fleet_id';
+      fleetWhere = `f.default_duty_cycle = 'lh'
+                   AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab')
+                   AND a.fleet_id NOT IN (0, 45, 46)`;
+    } else if (haulType === 'rh') {
+      fleetJoin  = 'JOIN ffs_fleet f ON a.fleet_id = f.fleet_id';
+      fleetWhere = `(f.default_duty_cycle = 'rh'
+                    OR (f.default_duty_cycle = 'lh' AND a.cab_type = 'Day Cab'))
+                   AND a.fleet_id NOT IN (0, 45, 46)`;
+    }
 
     const [techRows] = await db.query(`
       SELECT a.tech_id, t.tech_group, t.technology,
@@ -2459,7 +2486,8 @@ app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (_req, re
              AVG(a.adoption_percent) * 100 AS adoption
       FROM ffs_adoption a
       JOIN ffs_tech t ON a.tech_id = t.tech_id
-      WHERE a.fleet_id NOT IN (0, 45, 46)
+      ${fleetJoin}
+      WHERE ${fleetWhere}
         AND a.adoption_year >= ? AND a.adoption_year <= ?
       GROUP BY a.tech_id, t.tech_group, t.technology, a.adoption_year
       ORDER BY t.tech_group, t.technology, a.adoption_year
@@ -2470,7 +2498,8 @@ app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (_req, re
              AVG(a.adoption_percent) * 100 AS adoption
       FROM ffs_adoption a
       JOIN ffs_tech t ON a.tech_id = t.tech_id
-      WHERE a.fleet_id NOT IN (0, 45, 46)
+      ${fleetJoin}
+      WHERE ${fleetWhere}
         AND a.adoption_year >= ? AND a.adoption_year <= ?
       GROUP BY t.tech_group, a.adoption_year
       ORDER BY t.tech_group, a.adoption_year
@@ -2490,14 +2519,20 @@ app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (_req, re
  * Returns per-year: fleet-average IFTA MPG, FHWA MPG (fleet 45), BAU MPG (fleet 46),
  * and overall average adoption % — all for the combined IFTA MPG & Adoption chart.
  */
-app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (_req, res) => {
+app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => {
   try {
-    const [settingRows] = await db.query(
-      `SELECT setting_value FROM ffs_settings WHERE setting_key = 'charts_max_year'`
-    );
-    const maxYear = settingRows[0]?.setting_value
-      ? parseInt(settingRows[0].setting_value)
-      : new Date().getFullYear();
+    // max_year: prefer query param, fall back to DB setting
+    let maxYear;
+    if (req.query.max_year && !isNaN(parseInt(req.query.max_year))) {
+      maxYear = parseInt(req.query.max_year);
+    } else {
+      const [settingRows] = await db.query(
+        `SELECT setting_value FROM ffs_settings WHERE setting_key = 'charts_max_year'`
+      );
+      maxYear = settingRows[0]?.setting_value
+        ? parseInt(settingRows[0].setting_value)
+        : new Date().getFullYear();
+    }
     const minYear = 2003;
 
     const [fleetRows] = await db.query(`

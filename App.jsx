@@ -3855,11 +3855,42 @@ function AdminChartsPage({ token }) {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
 
+  // ── Controls ──────────────────────────────────────────────────────────────
+  // maxYear: loaded from settings; user can edit + save from the charts page.
+  const [maxYear,        setMaxYear]        = useState('');
+  const [maxYearInput,   setMaxYearInput]   = useState(''); // what's in the text box
+  const [maxYearSaving,  setMaxYearSaving]  = useState(false);
+  const [maxYearMsg,     setMaxYearMsg]     = useState('');
+  // haulType: which fleet subset to show for adoption charts.
+  const [haulType,       setHaulType]       = useState('combined'); // 'combined'|'lh'|'rh'
+
+  const headers = { Authorization: `Bearer ${token}` };
+
+  // Load the saved charts_max_year on mount.
   useEffect(() => {
-    const headers = { Authorization: `Bearer ${token}` };
+    fetch('/api/admin/settings', { headers })
+      .then(r => r.json())
+      .then(d => {
+        const val = d.settings?.charts_max_year || String(new Date().getFullYear());
+        setMaxYear(val);
+        setMaxYearInput(val);
+      })
+      .catch(() => {
+        const y = String(new Date().getFullYear());
+        setMaxYear(y);
+        setMaxYearInput(y);
+      });
+  }, [token]); // eslint-disable-line
+
+  // Fetch chart data whenever maxYear or haulType changes.
+  useEffect(() => {
+    if (!maxYear) return;
+    setLoading(true);
+    setError(null);
+    const qs = `max_year=${encodeURIComponent(maxYear)}`;
     Promise.all([
-      fetch('/api/admin/charts/mpg',      { headers }).then(r => r.json()),
-      fetch('/api/admin/charts/adoption', { headers }).then(r => r.json()),
+      fetch(`/api/admin/charts/mpg?${qs}`,                                       { headers }).then(r => r.json()),
+      fetch(`/api/admin/charts/adoption?${qs}&haul_type=${haulType}`, { headers }).then(r => r.json()),
     ]).then(([mpgData, adoptData]) => {
       setMpgRows((mpgData.rows || []).map(r => ({
         year:                  r.year,
@@ -3895,7 +3926,27 @@ function AdminChartsPage({ token }) {
       });
       setGroupData(built);
     }).catch(err => setError(err.message)).finally(() => setLoading(false));
-  }, [token]);
+  }, [token, maxYear, haulType]); // eslint-disable-line
+
+  // Save maxYear to DB and update the active filter.
+  const saveMaxYear = async () => {
+    const yr = parseInt(maxYearInput);
+    if (!yr || yr < 2003 || yr > 2100) { setMaxYearMsg('Enter a valid year'); return; }
+    setMaxYearSaving(true);
+    setMaxYearMsg('');
+    try {
+      const r = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ charts_max_year: String(yr) }),
+      });
+      if (!r.ok) throw new Error('Save failed');
+      setMaxYear(String(yr));
+      setMaxYearMsg('Saved');
+      setTimeout(() => setMaxYearMsg(''), 2000);
+    } catch { setMaxYearMsg('Error saving'); }
+    finally { setMaxYearSaving(false); }
+  };
 
   if (loading) return <div style={{ padding: 40, color: '#6B7280' }}>Loading charts…</div>;
   if (error)   return <div style={{ padding: 40, color: '#DC2626' }}>Error: {error}</div>;
@@ -3921,6 +3972,19 @@ function AdminChartsPage({ token }) {
   // All charts share the same height for visual consistency.
   const CH = 380;
 
+  // Haul-type pill button helper
+  const HaulBtn = ({ val, label }) => (
+    <button onClick={() => setHaulType(val)}
+      style={{ padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
+               border: '1px solid', transition: 'background 0.15s',
+               borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
+               background:  haulType === val ? '#2563EB' : '#F9FAFB',
+               color:       haulType === val ? '#fff'    : '#374151',
+               fontWeight:  haulType === val ? 600       : 400 }}>
+      {label}
+    </button>
+  );
+
   // Shared Y-axis label style for adoption charts.
   const adoptYLabel = { value: '% Adoption', angle: -90, position: 'insideLeft',
                         style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } };
@@ -3928,6 +3992,53 @@ function AdminChartsPage({ token }) {
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
                   display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── Control bar ── */}
+      <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB',
+                    padding: '14px 20px', display: 'flex', alignItems: 'center',
+                    flexWrap: 'wrap', gap: 24 }}>
+
+        {/* Max year */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
+            Max year shown:
+          </label>
+          <input
+            type="number" min="2003" max="2100" step="1"
+            value={maxYearInput}
+            onChange={e => setMaxYearInput(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && saveMaxYear()}
+            style={{ width: 72, padding: '4px 8px', fontSize: 12, borderRadius: 6,
+                     border: '1px solid #D1D5DB', textAlign: 'center' }}
+          />
+          <button onClick={saveMaxYear} disabled={maxYearSaving}
+            style={{ padding: '4px 12px', fontSize: 12, borderRadius: 6, cursor: 'pointer',
+                     background: '#2563EB', color: '#fff', border: 'none',
+                     opacity: maxYearSaving ? 0.6 : 1 }}>
+            {maxYearSaving ? 'Saving…' : 'Apply'}
+          </button>
+          {maxYearMsg && (
+            <span style={{ fontSize: 11, color: maxYearMsg === 'Saved' ? '#16A34A' : '#DC2626' }}>
+              {maxYearMsg}
+            </span>
+          )}
+        </div>
+
+        {/* Vertical divider */}
+        <div style={{ width: 1, height: 28, background: '#E5E7EB', flexShrink: 0 }} />
+
+        {/* Haul type (adoption charts only) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
+            Adoption filter:
+          </span>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <HaulBtn val="combined" label="Combined" />
+            <HaulBtn val="lh"       label="Line Haul" />
+            <HaulBtn val="rh"       label="Regional Haul" />
+          </div>
+        </div>
+      </div>
 
       {/* ── All charts in a uniform 2-column grid ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px,1fr))', gap: 20 }}>
