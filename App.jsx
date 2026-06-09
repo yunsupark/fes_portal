@@ -3741,7 +3741,7 @@ const CHART_COLORS_30 = [
  *  legendItems – optional [{value, color}] array; renders an HTML legend
  *  sidebar and paints it onto the canvas when downloading.
  */
-function AdminChartCard({ title, children, legendItems }) {
+function AdminChartCard({ title, subtitle, children, legendItems }) {
   const ref = useRef(null);
 
   const download = () => {
@@ -3818,8 +3818,13 @@ function AdminChartCard({ title, children, legendItems }) {
 
   return (
     <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '18px 22px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
-        <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#111827' }}>{title}</h3>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#111827' }}>{title}</h3>
+          {subtitle && (
+            <p style={{ margin: '2px 0 0', fontSize: 11, color: '#6B7280', fontStyle: 'italic' }}>{subtitle}</p>
+          )}
+        </div>
         <button onClick={download} title="Download as PNG"
           style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6,
                    padding: '4px 10px', fontSize: 11, cursor: 'pointer', color: '#374151' }}>
@@ -3844,6 +3849,187 @@ function AdminChartCard({ title, children, legendItems }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Self-contained Reference Data card for the charts page. */
+function RefDataCard({ token }) {
+  const [collapsed,  setCollapsed]  = useState(true);
+  const [rows,       setRows]       = useState([]);
+  const [form,       setForm]       = useState({ mpg_year: '', ifta_miles: '', ifta_fuel: '', avg_diesel_price: '' });
+  const [editId,     setEditId]     = useState(null);
+  const [saving,     setSaving]     = useState(false);
+  const [msg,        setMsg]        = useState('');
+
+  const authH = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+
+  const fetchRows = () =>
+    fetch('/api/admin/fhwa-mpg', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { rows: [] })
+      .then(d => setRows(d.rows || []))
+      .catch(console.error);
+
+  useEffect(() => { if (!collapsed) fetchRows(); }, [collapsed, token]); // eslint-disable-line
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true); setMsg('');
+    try {
+      const url  = editId ? `/api/admin/fhwa-mpg/${editId}` : '/api/admin/fhwa-mpg';
+      const meth = editId ? 'PUT' : 'POST';
+      const r = await fetch(url, { method: meth, headers: authH, body: JSON.stringify(form) });
+      const d = await r.json();
+      if (!r.ok) { setMsg(d.error || 'Failed'); return; }
+      setForm({ mpg_year: '', ifta_miles: '', ifta_fuel: '', avg_diesel_price: '' });
+      setEditId(null);
+      setMsg(editId ? 'Updated.' : 'Added.');
+      fetchRows();
+      setTimeout(() => setMsg(''), 3000);
+    } catch (err) { setMsg('Error: ' + err.message); }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    if (!window.confirm('Delete this reference data row?')) return;
+    await fetch(`/api/admin/fhwa-mpg/${id}`, { method: 'DELETE', headers: authH });
+    fetchRows();
+  };
+
+  const inp  = { background: '#F9FAFB', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 10px', fontSize: 13, boxSizing: 'border-box' };
+  const lbl  = { fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 2, display: 'block' };
+  const thSt = { fontWeight: 600, fontSize: 12, color: '#6B7280', textAlign: 'left', padding: '8px 12px', background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' };
+
+  return (
+    <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E5E7EB',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.06)', overflow: 'hidden' }}>
+      {/* Header (collapsible) */}
+      <div style={{ display: 'flex', alignItems: 'center', padding: '12px 16px',
+                    borderBottom: collapsed ? 'none' : '1px solid #F3F4F6', cursor: 'pointer' }}
+           onClick={() => setCollapsed(c => !c)}>
+        <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
+          Reference Data
+          {!collapsed && rows.length > 0 && (
+            <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF', marginLeft: 8 }}>
+              ({rows.length} row{rows.length !== 1 ? 's' : ''})
+            </span>
+          )}
+        </h2>
+        <span style={{ color: '#9CA3AF', fontSize: 13 }}>{collapsed ? '▶' : '▼'}</span>
+      </div>
+
+      {!collapsed && (
+        <div style={{ padding: '12px 16px 16px' }}>
+          {/* Source note */}
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>
+            <strong>Miles of Travel</strong> and <strong>Fuel Consumed</strong> are from the{' '}
+            <strong>FHWA Highway Statistics Series</strong>, Table VM-1 — Combination Trucks.
+            Use the Excel download for values not rounded to millions.{' '}
+            <strong>Avg Diesel Price</strong> is the annual average price of ultra-low sulfur diesel from the{' '}
+            <strong>U.S. Energy Information Administration (EIA)</strong>.
+            Prior-year numbers can change; update previous entries when new data is released.
+          </p>
+
+          {/* Entry / Edit form */}
+          <form onSubmit={handleSubmit}
+            style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end',
+                     paddingBottom: 16, borderBottom: '1px solid #F3F4F6', marginBottom: 12 }}>
+            <div>
+              <label style={lbl}>Year *</label>
+              <input style={{ ...inp, width: 80 }} type="number" min="2000" max="2099" required
+                value={form.mpg_year}
+                onChange={e => setForm(p => ({ ...p, mpg_year: e.target.value }))}
+                placeholder={String(new Date().getFullYear())} />
+            </div>
+            <div>
+              <label style={lbl}>Miles of Travel *</label>
+              <input style={{ ...inp, width: 140 }} type="number" min="0" step="1" required
+                value={form.ifta_miles}
+                onChange={e => setForm(p => ({ ...p, ifta_miles: e.target.value }))}
+                placeholder="e.g. 195758" />
+            </div>
+            <div>
+              <label style={lbl}>Fuel Consumed (gal) *</label>
+              <input style={{ ...inp, width: 140 }} type="number" min="0" step="1" required
+                value={form.ifta_fuel}
+                onChange={e => setForm(p => ({ ...p, ifta_fuel: e.target.value }))}
+                placeholder="e.g. 29297" />
+            </div>
+            <div>
+              <label style={lbl}>Avg Diesel Price ($/gal)</label>
+              <input style={{ ...inp, width: 120 }} type="number" min="0" step="0.001"
+                value={form.avg_diesel_price}
+                onChange={e => setForm(p => ({ ...p, avg_diesel_price: e.target.value }))}
+                placeholder="e.g. 3.850" />
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+              <button type="submit" disabled={saving}
+                style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6,
+                         padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+                         opacity: saving ? 0.7 : 1 }}>
+                {saving ? 'Saving…' : editId ? 'Update' : 'Add Row'}
+              </button>
+              {editId && (
+                <button type="button"
+                  onClick={() => { setEditId(null); setForm({ mpg_year: '', ifta_miles: '', ifta_fuel: '', avg_diesel_price: '' }); }}
+                  style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6,
+                           padding: '7px 14px', fontSize: 13, cursor: 'pointer' }}>
+                  Cancel
+                </button>
+              )}
+              {msg && <span style={{ fontSize: 12, color: msg.startsWith('Error') ? '#DC2626' : '#059669' }}>{msg}</span>}
+            </div>
+          </form>
+
+          {/* Table */}
+          {rows.length === 0 ? (
+            <p style={{ fontSize: 13, color: '#9CA3AF' }}>No reference data entered yet.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                <thead>
+                  <tr>
+                    {['Year','Miles of Travel','Fuel Consumed (gal)','MPG','Avg Diesel Price ($/gal)',''].map(h => (
+                      <th key={h} style={{ ...thSt, textAlign: ['Miles of Travel','Fuel Consumed (gal)','MPG','Avg Diesel Price ($/gal)'].includes(h) ? 'right' : h === '' ? 'right' : 'left' }}>{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map(row => {
+                    const mpg = row.ifta_miles != null && row.ifta_fuel > 0
+                      ? (row.ifta_miles / row.ifta_fuel).toFixed(3) : '—';
+                    const isEditing = editId === row.mpg_id;
+                    return (
+                      <tr key={row.mpg_id} style={{ borderBottom: '1px solid #F3F4F6', background: isEditing ? '#EFF6FF' : 'transparent' }}>
+                        <td style={{ padding: '7px 12px', fontWeight: 600, color: '#111827' }}>{row.mpg_year}</td>
+                        <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>{row.ifta_miles?.toLocaleString() ?? '—'}</td>
+                        <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>{row.ifta_fuel?.toLocaleString()  ?? '—'}</td>
+                        <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: '#374151' }}>{mpg}</td>
+                        <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>
+                          {row.avg_diesel_price != null ? `$${row.avg_diesel_price.toFixed(3)}` : '—'}
+                        </td>
+                        <td style={{ padding: '7px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                          <button onClick={() => {
+                            setEditId(row.mpg_id);
+                            setForm({
+                              mpg_year:         String(row.mpg_year),
+                              ifta_miles:       row.ifta_miles       != null ? String(row.ifta_miles)       : '',
+                              ifta_fuel:        row.ifta_fuel        != null ? String(row.ifta_fuel)        : '',
+                              avg_diesel_price: row.avg_diesel_price != null ? String(row.avg_diesel_price) : '',
+                            });
+                          }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1c3660', fontSize: 14, marginRight: 6 }}>✎</button>
+                          <button onClick={() => handleDelete(row.mpg_id)}
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14 }}>✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -3989,9 +4175,17 @@ function AdminChartsPage({ token }) {
   const adoptYLabel = { value: '% Adoption', angle: -90, position: 'insideLeft',
                         style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } };
 
+  // Human-readable subtitle for the active haul-type filter.
+  const haulLabel = haulType === 'lh' ? 'Line Haul'
+                  : haulType === 'rh' ? 'Regional Haul'
+                  : 'Combined Duty Cycles';
+
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
                   display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+      {/* ── Reference Data card (collapsed by default) ── */}
+      <RefDataCard token={token} />
 
       {/* ── Control bar ── */}
       <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB',
@@ -4044,7 +4238,7 @@ function AdminChartsPage({ token }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px,1fr))', gap: 20 }}>
 
         {/* MPG */}
-        <AdminChartCard title="IFTA MPG">
+        <AdminChartCard title="IFTA MPG" subtitle={haulLabel}>
           <ResponsiveContainer width="100%" height={CH}>
             <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4061,7 +4255,7 @@ function AdminChartsPage({ token }) {
           </ResponsiveContainer>
         </AdminChartCard>
 
-        <AdminChartCard title="IFTA MPG and Adoption">
+        <AdminChartCard title="IFTA MPG and Adoption" subtitle={haulLabel}>
           <ResponsiveContainer width="100%" height={CH}>
             <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4087,7 +4281,7 @@ function AdminChartsPage({ token }) {
           const sortedCats = byLastValue(catData.groups, catData.data);
           const legItems   = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard title="Adoption Percent by Technology Category" legendItems={legItems}>
+            <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel} legendItems={legItems}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={catData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4111,7 +4305,7 @@ function AdminChartsPage({ token }) {
           const sortedTechs = byLastValue(techs, data);
           const legItems    = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard key={grp} title={grp} legendItems={legItems}>
+            <AdminChartCard key={grp} title={grp} subtitle={haulLabel} legendItems={legItems}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4162,11 +4356,11 @@ function AdminView({ token, onSignOut }) {
   // Card collapse state
   const [fleetsCollapsed,    setFleetsCollapsed]    = useState(false);
   const [contactsCollapsed,  setContactsCollapsed]  = useState(false);
-  const [techsCollapsed,     setTechsCollapsed]     = useState(false);
+  const [techsCollapsed,     setTechsCollapsed]     = useState(true);
 
   // Settings panel
   const [showSettings,    setShowSettings]    = useState(false);
-  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '', charts_max_year: '', invite_email_template: '' });
+  const [settingsForm,    setSettingsForm]    = useState({ editable_year_from: '', editable_year_to: '', invite_email_template: '' });
   const [settingsSaving,  setSettingsSaving]  = useState(false);
   const [resetting,       setResetting]       = useState(false);
   const [resetMsg,        setResetMsg]        = useState('');
@@ -4201,14 +4395,6 @@ function AdminView({ token, onSignOut }) {
 
   // Page switcher: 'data' (management) | 'charts'
   const [adminPage, setAdminPage] = useState('data');
-
-  // FHWA reference data card
-  const [fhwaRows,        setFhwaRows]        = useState([]);
-  const [fhwaCollapsed,   setFhwaCollapsed]   = useState(true);
-  const [fhwaForm,        setFhwaForm]        = useState({ mpg_year: '', ifta_miles: '', ifta_fuel: '', avg_diesel_price: '' });
-  const [fhwaEditId,      setFhwaEditId]      = useState(null); // mpg_id being edited
-  const [fhwaSaving,      setFhwaSaving]      = useState(false);
-  const [fhwaMsg,         setFhwaMsg]         = useState('');
 
   // Technology card
   const [techs, setTechs] = useState([]);
@@ -4278,41 +4464,6 @@ function AdminView({ token, onSignOut }) {
 
   useEffect(() => { fetchFleets(); fetchAdminContacts(); }, [token]);
 
-  const fetchFhwa = () => {
-    fetch('/api/admin/fhwa-mpg', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : { rows: [] })
-      .then(d => setFhwaRows(d.rows || []))
-      .catch(console.error);
-  };
-  useEffect(() => { if (!fhwaCollapsed) fetchFhwa(); }, [fhwaCollapsed, token]);
-
-  const handleFhwaSubmit = async (e) => {
-    e.preventDefault();
-    setFhwaSaving(true); setFhwaMsg('');
-    try {
-      const url  = fhwaEditId ? `/api/admin/fhwa-mpg/${fhwaEditId}` : '/api/admin/fhwa-mpg';
-      const meth = fhwaEditId ? 'PUT' : 'POST';
-      const r = await fetch(url, { method: meth, headers: authHeaders, body: JSON.stringify(fhwaForm) });
-      const d = await r.json();
-      if (!r.ok) { setFhwaMsg(d.error || 'Failed'); return; }
-      setFhwaForm({ mpg_year: '', ifta_miles: '', ifta_fuel: '' });
-      setFhwaEditId(null);
-      setFhwaMsg(fhwaEditId ? 'Updated.' : 'Added.');
-      fetchFhwa();
-      setTimeout(() => setFhwaMsg(''), 3000);
-    } catch (err) {
-      setFhwaMsg('Error: ' + err.message);
-    } finally {
-      setFhwaSaving(false);
-    }
-  };
-
-  const handleFhwaDelete = async (id) => {
-    if (!window.confirm('Delete this reference data row?')) return;
-    await fetch(`/api/admin/fhwa-mpg/${id}`, { method: 'DELETE', headers: authHeaders });
-    fetchFhwa();
-  };
-
   // Load fleet associations when the edit-contact modal opens
   useEffect(() => {
     if (!editContact) { setContactFleetAssocs([]); return; }
@@ -4350,7 +4501,6 @@ function AdminView({ token, onSignOut }) {
           setSettingsForm({
             editable_year_from: d.settings.editable_year_from ?? '2003',
             editable_year_to:   d.settings.editable_year_to   ?? String(new Date().getFullYear()),
-            charts_max_year:    d.settings.charts_max_year    ?? String(new Date().getFullYear()),
             invite_email_template: d.settings.invite_email_template ?? '',
           });
         }
@@ -4368,7 +4518,6 @@ function AdminView({ token, onSignOut }) {
         body: JSON.stringify({
           editable_year_from: settingsForm.editable_year_from,
           editable_year_to:   settingsForm.editable_year_to,
-          charts_max_year:    settingsForm.charts_max_year,
           invite_email_template: settingsForm.invite_email_template,
         }),
       });
@@ -4985,131 +5134,6 @@ function AdminView({ token, onSignOut }) {
         </div>
       </div>
 
-      {/* ── FHWA Reference Data Card ── */}
-      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
-        <div style={{ ...card, marginBottom: 0 }}>
-          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setFhwaCollapsed(c => !c)}>
-            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
-              Reference Data
-              <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF', marginLeft: 8 }}>
-                ({fhwaRows.length} row{fhwaRows.length !== 1 ? 's' : ''})
-              </span>
-            </h2>
-            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{fhwaCollapsed ? '▶' : '▼'}</span>
-          </div>
-
-          {!fhwaCollapsed && (
-            <div style={{ padding: '0 0 16px' }}>
-              {/* Source note */}
-              <p style={{ margin: '12px 0 14px', fontSize: 12, color: '#6B7280', lineHeight: 1.6 }}>
-                <strong>Miles of Travel</strong> and <strong>Fuel Consumed</strong> are from the{' '}
-                <strong>FHWA Highway Statistics Series</strong>, Table VM-1 — Combination Trucks.
-                Use the <strong>Excel download</strong> to get values that are not rounded to the millions.{' '}
-                <strong>Avg Diesel Price</strong> is the annual average price of ultra-low sulfur diesel from the{' '}
-                <strong>U.S. Energy Information Administration (EIA)</strong>.
-                Prior-year numbers can change; check and update previous entries when new data is released.
-              </p>
-
-              {/* Entry / Edit form */}
-              <form onSubmit={handleFhwaSubmit}
-                style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end', padding: '0 0 16px', borderBottom: '1px solid #F3F4F6' }}>
-                <div>
-                  <label style={labelStyle}>Year *</label>
-                  <input style={{ ...inputStyle, width: 80 }} type="number" min="2000" max="2099" required
-                    value={fhwaForm.mpg_year}
-                    onChange={e => setFhwaForm(p => ({ ...p, mpg_year: e.target.value }))}
-                    placeholder={String(new Date().getFullYear())} />
-                </div>
-                <div>
-                  <label style={labelStyle}>Miles of Travel *</label>
-                  <input style={{ ...inputStyle, width: 140 }} type="number" min="0" step="1" required
-                    value={fhwaForm.ifta_miles}
-                    onChange={e => setFhwaForm(p => ({ ...p, ifta_miles: e.target.value }))}
-                    placeholder="e.g. 195758" />
-                </div>
-                <div>
-                  <label style={labelStyle}>Fuel Consumed (gal) *</label>
-                  <input style={{ ...inputStyle, width: 140 }} type="number" min="0" step="1" required
-                    value={fhwaForm.ifta_fuel}
-                    onChange={e => setFhwaForm(p => ({ ...p, ifta_fuel: e.target.value }))}
-                    placeholder="e.g. 29297" />
-                </div>
-                <div>
-                  <label style={labelStyle}>Avg Diesel Price ($/gal)</label>
-                  <input style={{ ...inputStyle, width: 120 }} type="number" min="0" step="0.001"
-                    value={fhwaForm.avg_diesel_price}
-                    onChange={e => setFhwaForm(p => ({ ...p, avg_diesel_price: e.target.value }))}
-                    placeholder="e.g. 3.850" />
-                </div>
-                <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
-                  <button type="submit" disabled={fhwaSaving}
-                    style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '7px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', opacity: fhwaSaving ? 0.7 : 1 }}>
-                    {fhwaSaving ? 'Saving…' : fhwaEditId ? 'Update' : 'Add Row'}
-                  </button>
-                  {fhwaEditId && (
-                    <button type="button"
-                      onClick={() => { setFhwaEditId(null); setFhwaForm({ mpg_year: '', ifta_miles: '', ifta_fuel: '', avg_diesel_price: '' }); }}
-                      style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '7px 14px', fontSize: 13, cursor: 'pointer' }}>
-                      Cancel
-                    </button>
-                  )}
-                  {fhwaMsg && <span style={{ fontSize: 12, color: fhwaMsg.startsWith('Error') ? '#DC2626' : '#059669' }}>{fhwaMsg}</span>}
-                </div>
-              </form>
-
-              {/* Existing rows table */}
-              {fhwaRows.length === 0 ? (
-                <p style={{ fontSize: 13, color: '#9CA3AF', padding: '12px 0 0' }}>No reference data entered yet.</p>
-              ) : (
-                <div style={{ overflowX: 'auto', marginTop: 12 }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-                    <thead>
-                      <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
-                        {['Year','Miles of Travel','Fuel Consumed (gal)','MPG','Avg Diesel Price ($/gal)',''].map(h => (
-                          <th key={h} style={{ ...thBase, padding: '8px 12px', textAlign: h === '' ? 'right' : ['Miles of Travel','Fuel Consumed (gal)','MPG','Avg Diesel Price ($/gal)'].includes(h) ? 'right' : 'left' }}>{h}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {fhwaRows.map(row => {
-                        const mpg = row.ifta_miles != null && row.ifta_fuel > 0
-                          ? (row.ifta_miles / row.ifta_fuel).toFixed(3)
-                          : '—';
-                        const isEditing = fhwaEditId === row.mpg_id;
-                        return (
-                          <tr key={row.mpg_id} style={{ borderBottom: '1px solid #F3F4F6', background: isEditing ? '#EFF6FF' : 'transparent' }}>
-                            <td style={{ padding: '7px 12px', color: '#111827', fontWeight: 600 }}>{row.mpg_year}</td>
-                            <td style={{ padding: '7px 12px', color: '#374151', textAlign: 'right' }}>{row.ifta_miles?.toLocaleString() ?? '—'}</td>
-                            <td style={{ padding: '7px 12px', color: '#374151', textAlign: 'right' }}>{row.ifta_fuel?.toLocaleString()  ?? '—'}</td>
-                            <td style={{ padding: '7px 12px', color: '#374151', textAlign: 'right', fontWeight: 600 }}>{mpg}</td>
-                            <td style={{ padding: '7px 12px', color: '#374151', textAlign: 'right' }}>
-                              {row.avg_diesel_price != null ? `$${row.avg_diesel_price.toFixed(3)}` : '—'}
-                            </td>
-                            <td style={{ padding: '7px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                              <button onClick={() => {
-                                setFhwaEditId(row.mpg_id);
-                                setFhwaForm({
-                                  mpg_year:         String(row.mpg_year),
-                                  ifta_miles:       row.ifta_miles        != null ? String(row.ifta_miles)        : '',
-                                  ifta_fuel:        row.ifta_fuel         != null ? String(row.ifta_fuel)         : '',
-                                  avg_diesel_price: row.avg_diesel_price  != null ? String(row.avg_diesel_price)  : '',
-                                });
-                              }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1c3660', fontSize: 14, marginRight: 6 }}>✎</button>
-                              <button onClick={() => handleFhwaDelete(row.mpg_id)}
-                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14 }}>✕</button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-
       </>}
 
       {/* ── New Fleet Modal ── */}
@@ -5470,19 +5494,6 @@ function AdminView({ token, onSignOut }) {
                       onChange={e => setSettingsForm(p => ({ ...p, editable_year_to: e.target.value }))}
                       required />
                   </div>
-                </div>
-              </div>
-              <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 16, marginTop: 4 }}>
-                <p style={{ margin: '0 0 10px', fontSize: 13, fontWeight: 600, color: '#374151' }}>Charts Max Year</p>
-                <p style={{ margin: '0 0 12px', fontSize: 12, color: '#6B7280' }}>
-                  The most recent year shown on the admin charts. Useful to exclude incomplete data for the current year.
-                </p>
-                <div style={{ maxWidth: 120 }}>
-                  <label style={labelStyle}>Max Year</label>
-                  <input style={inputStyle} type="number" min="2003" max={new Date().getFullYear() + 1}
-                    value={settingsForm.charts_max_year}
-                    onChange={e => setSettingsForm(p => ({ ...p, charts_max_year: e.target.value }))}
-                    required />
                 </div>
               </div>
               <div style={{ borderTop: '1px solid #E5E7EB', paddingTop: 16, marginTop: 4 }}>
