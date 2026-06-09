@@ -2470,13 +2470,13 @@ app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (req, res
     let fleetWhere = 'a.fleet_id NOT IN (0, 45, 46)';
     if (haulType === 'lh') {
       fleetJoin  = 'JOIN ffs_fleet f ON a.fleet_id = f.fleet_id';
-      fleetWhere = `f.default_duty_cycle = 'lh'
+      fleetWhere = `LOWER(f.default_duty_cycle) = 'lh'
                    AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab')
                    AND a.fleet_id NOT IN (0, 45, 46)`;
     } else if (haulType === 'rh') {
       fleetJoin  = 'JOIN ffs_fleet f ON a.fleet_id = f.fleet_id';
-      fleetWhere = `(f.default_duty_cycle = 'rh'
-                    OR (f.default_duty_cycle = 'lh' AND a.cab_type = 'Day Cab'))
+      fleetWhere = `(LOWER(f.default_duty_cycle) = 'rh'
+                    OR (LOWER(f.default_duty_cycle) = 'lh' AND a.cab_type = 'Day Cab'))
                    AND a.fleet_id NOT IN (0, 45, 46)`;
     }
 
@@ -2535,19 +2535,21 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
     }
     const minYear = 2003;
 
-    // Split fleet average MPG by duty cycle (lh / rh).
+    // Split fleet average MPG by duty cycle (LH / RH).
+    // LOWER() normalises stored values ('LH','lh','Lh' → 'lh') so the
+    // JS check below is case-insensitive without an exhaustive IN list.
     // Fleets with no duty_cycle set are excluded from both series.
     const [fleetRows] = await db.query(`
       SELECT m.mpg_year AS year,
-             f.default_duty_cycle AS duty_cycle,
+             LOWER(f.default_duty_cycle) AS duty_cycle,
              ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS fleet_mpg
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
         AND m.ifta_fuel > 0 AND m.ifta_miles > 0
         AND m.mpg_year >= ? AND m.mpg_year <= ?
-        AND f.default_duty_cycle IN ('lh', 'rh')
-      GROUP BY m.mpg_year, f.default_duty_cycle
+        AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+      GROUP BY m.mpg_year, LOWER(f.default_duty_cycle)
       ORDER BY m.mpg_year
     `, [minYear, maxYear]);
     const [fhwaRows] = await db.query(`
