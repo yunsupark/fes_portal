@@ -397,6 +397,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
   const [reviewZeroAsked, setReviewZeroAsked] = useState(savedProgress?.reviewZeroAsked || {});
   const [isSecondCab, setIsSecondCab] = useState(savedProgress?.isSecondCab ?? false);
   const [fuelBenchmarks, setFuelBenchmarks] = useState({});
+  const [interviewTrailerTypes, setInterviewTrailerTypes] = useState([]);
   const [categoriesCabType, setCategoriesCabType] = useState(null);
   const [pendingCabSwitch, setPendingCabSwitch] = useState(null); // { inputs, targetStep }
   const [fuelMissingYears, setFuelMissingYears] = useState([]);
@@ -443,6 +444,12 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     if (!token) return;
     fetch('/api/fuel/benchmarks', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : {}).then(b => setFuelBenchmarks(b)).catch(() => {});
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/trailer-types', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : []).then(d => setInterviewTrailerTypes(d)).catch(() => {});
   }, [token]);
 
   useEffect(() => {
@@ -541,13 +548,14 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
     const firstYear = fuelState.firstYear || maxYear;
     const fuelYears = sortedYears.filter(y => y >= firstYear);
     const fuelEdits = editsMap['__fuel__'] || {};
+    const trailerTypeId = fuelState.trailerTypeId ?? null;
     const rows = [];
     for (const yr of fuelYears) {
       for (const ft of selectedTypes) {
         const miles = (fuelEdits[yr] || {})[`${ft}__miles`] ?? '';
         const vol   = (fuelEdits[yr] || {})[`${ft}__vol`]   ?? '';
         if (miles !== '' || vol !== '') {
-          rows.push({ year: yr, fuel_type: ft, ifta_miles: miles !== '' ? miles : null, volume: vol !== '' ? vol : null });
+          rows.push({ year: yr, fuel_type: ft, ifta_miles: miles !== '' ? miles : null, volume: vol !== '' ? vol : null, trailer_type_id: trailerTypeId });
         }
       }
     }
@@ -1297,6 +1305,26 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
           <p style={{ margin: 0, fontSize: 13, color: '#6B7280' }}>
             Enter IFTA miles and gallons (or DGE for CNG/LNG) for each year. MPG calculates automatically.
           </p>
+          {interviewTrailerTypes.length > 0 && (() => {
+            const fuelState2 = groupInputs['__fuel__'] || {};
+            const defaultTtId = interviewTrailerTypes[0].type_id;
+            const selectedTtId = fuelState2.trailerTypeId ?? defaultTtId;
+            const infoMsg = 'Select the trailer configuration most reflective of your fleet. This affects MPG benchmarking calculations.';
+            return (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 13, fontWeight: 600, color: '#374151' }}>Trailer Type</span>
+                <span title={infoMsg} style={{ cursor: 'help', fontSize: 13, color: '#6B7280', lineHeight: 1, userSelect: 'none' }}>ⓘ</span>
+                <select
+                  style={{ fontSize: 13, padding: '4px 8px', borderRadius: 6, border: '1px solid #D1D5DB', background: '#fff', color: '#111827', cursor: 'pointer' }}
+                  value={selectedTtId}
+                  onChange={e => setGroupInputs(prev => ({ ...prev, '__fuel__': { ...(prev['__fuel__'] || {}), trailerTypeId: parseInt(e.target.value) } }))}>
+                  {interviewTrailerTypes.map(t => (
+                    <option key={t.type_id} value={t.type_id}>{t.type_name}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })()}
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', fontSize: 13, width: '100%' }}>
               <thead>
@@ -1763,6 +1791,15 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
               <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Fuel (IFTA)</span>
               <button onClick={() => setStep('fuel-setup')} style={{ ...bGhost, fontSize: 12, padding: '4px 12px' }}>Edit</button>
             </div>
+            {interviewTrailerTypes.length > 0 && (() => {
+              const ttId = fuelState.trailerTypeId ?? interviewTrailerTypes[0]?.type_id;
+              const tt = interviewTrailerTypes.find(t => t.type_id === ttId) || interviewTrailerTypes[0];
+              return tt ? (
+                <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 8 }}>
+                  Trailer Type: <span style={{ fontWeight: 600, color: '#374151' }}>{tt.type_name}</span>
+                </div>
+              ) : null;
+            })()}
             {!hasFuel ? (
               <p style={{ margin: 0, padding: '12px 16px', fontSize: 12, color: '#9CA3AF' }}>No fuel data entered</p>
             ) : (
@@ -6413,7 +6450,7 @@ export default function App() {
                 const byYear = {};
                 for (const r of fuelRows) { if (!byYear[r.year]) byYear[r.year] = []; byYear[r.year].push(r); }
                 saves.push(...Object.entries(byYear).map(([yr, rows]) =>
-                  fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
+                  fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows, trailer_type_id: rows[0]?.trailer_type_id ?? null }) })
                 ));
               }
               // Save equipment utilization rows
@@ -6472,7 +6509,7 @@ export default function App() {
                 const byYear = {};
                 for (const r of fuelRows) { if (!byYear[r.year]) byYear[r.year] = []; byYear[r.year].push(r); }
                 saves.push(...Object.entries(byYear).map(([yr, rows]) =>
-                  fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows }) })
+                  fetch(`/api/fuel/${yr}`, { method: 'PUT', headers, body: JSON.stringify({ rows, trailer_type_id: rows[0]?.trailer_type_id ?? null }) })
                 ));
               }
               // Save util rows
