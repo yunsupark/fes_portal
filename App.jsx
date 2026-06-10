@@ -3875,15 +3875,15 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
   };
 
   const download = () => {
-    console.log('[PNG] download clicked, ref:', ref.current);
-    const svgEl = ref.current?.querySelector('svg');
-    console.log('[PNG] svg found:', svgEl);
-    if (!svgEl) { console.error('[PNG] no SVG found'); return; }
+    // Target the main Recharts chart SVG, not the 14×14 legend icon SVGs
+    // that also live inside the container and appear first in the DOM.
+    const svgEl = ref.current?.querySelector('.recharts-wrapper > svg')
+               ?? ref.current?.querySelector('svg');
+    if (!svgEl) return;
     const rect  = svgEl.getBoundingClientRect();
     const svgW  = Math.round(rect.width);
     const svgH  = Math.round(rect.height);
-    console.log('[PNG] SVG rect:', svgW, 'x', svgH);
-    if (!svgW || !svgH) { console.error('[PNG] zero dimensions'); return; }
+    if (!svgW || !svgH) return;
 
     const LEG_W   = legendItems?.length ? 190 : 0;
     const PADDING = legendItems?.length ?  12 : 0;
@@ -3957,7 +3957,6 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
     const img = new Image();
     img.onload = () => {
       try {
-        console.log('[PNG] SVG loaded:', img.naturalWidth, 'x', img.naturalHeight, '| canvas:', canvas.width, 'x', canvas.height);
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, svgW + LEG_W + PADDING, svgH);
         ctx.drawImage(img, 0, 0, svgW, svgH);
