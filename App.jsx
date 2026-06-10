@@ -3875,12 +3875,15 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
   };
 
   const download = () => {
+    console.log('[PNG] download clicked, ref:', ref.current);
     const svgEl = ref.current?.querySelector('svg');
-    if (!svgEl) return;
+    console.log('[PNG] svg found:', svgEl);
+    if (!svgEl) { console.error('[PNG] no SVG found'); return; }
     const rect  = svgEl.getBoundingClientRect();
     const svgW  = Math.round(rect.width);
     const svgH  = Math.round(rect.height);
-    if (!svgW || !svgH) return;
+    console.log('[PNG] SVG rect:', svgW, 'x', svgH);
+    if (!svgW || !svgH) { console.error('[PNG] zero dimensions'); return; }
 
     const LEG_W   = legendItems?.length ? 190 : 0;
     const PADDING = legendItems?.length ?  12 : 0;
