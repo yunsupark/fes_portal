@@ -21,7 +21,19 @@ const resend = new Resend(process.env.RESEND_API_KEY);
 const EMAIL_FROM = process.env.EMAIL_FROM || "noreply@nacfe.org";
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
+  // Reflect the requesting origin for HTTPS and localhost.
+  // Safe because all sensitive routes are protected by JWT (not cookies).
+  origin: (origin, callback) => {
+    if (!origin) return callback(null, true); // curl / server-to-server
+    if (
+      origin.startsWith('https://') ||
+      origin.startsWith('http://localhost') ||
+      origin.startsWith('http://127.0.0.1')
+    ) {
+      return callback(null, origin);
+    }
+    callback(new Error('CORS: origin not allowed'));
+  },
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization'],
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
