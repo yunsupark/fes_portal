@@ -3875,25 +3875,44 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
   };
 
   const download = () => {
-    // Target the main Recharts chart SVG, not the 14×14 legend icon SVGs
-    // that also live inside the container and appear first in the DOM.
+    // Target the main Recharts chart SVG, not the 14×14 legend icon SVGs.
     const svgEl = ref.current?.querySelector('.recharts-wrapper > svg')
                ?? ref.current?.querySelector('svg');
     if (!svgEl) return;
-    const rect  = svgEl.getBoundingClientRect();
-    const svgW  = Math.round(rect.width);
-    const svgH  = Math.round(rect.height);
+    const rect = svgEl.getBoundingClientRect();
+    const svgW = Math.round(rect.width);
+    const svgH = Math.round(rect.height);
     if (!svgW || !svgH) return;
 
+    // ── Title / subtitle area ─────────────────────────────────────────────────
+    const TITLE_H = title ? (subtitle ? 46 : 28) : 0;
+
+    // ── Recharts built-in legend (lives in a div outside the SVG) ────────────
+    const rechartsLegEl = ref.current?.querySelector('.recharts-default-legend');
+    const domLegItems = rechartsLegEl
+      ? Array.from(rechartsLegEl.querySelectorAll('.recharts-legend-item')).map(li => {
+          const text  = li.querySelector('.recharts-legend-item-text')?.textContent?.trim() || '';
+          const line  = li.querySelector('line');
+          const color = line?.getAttribute('stroke') || '#999';
+          const dash  = (line?.getAttribute('stroke-dasharray') || '')
+                          .split(/[\s,]+/).map(Number).filter(Boolean);
+          return { text, color, dash };
+        })
+      : [];
+    const LEG_ROW_H = domLegItems.length ? 28 : 0;
+
+    // ── Sidebar custom legend (category/tech charts) ──────────────────────────
     const LEG_W   = legendItems?.length ? 190 : 0;
     const PADDING = legendItems?.length ?  12 : 0;
+
     const scale   = 2;
     const canvas  = document.createElement('canvas');
     canvas.width  = (svgW + LEG_W + PADDING) * scale;
-    canvas.height = svgH * scale;
+    canvas.height = (TITLE_H + svgH + LEG_ROW_H) * scale;
     const ctx = canvas.getContext('2d');
-    ctx.scale(scale, scale); // draw in CSS-pixel coordinates from here on
+    ctx.scale(scale, scale);
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
     const wrapText = (ctx2, text, maxPx) => {
       const words = text.split(' ');
       const lines = [];
@@ -3907,67 +3926,88 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
       return lines;
     };
 
-    const drawLegend = () => {
+    const drawTitle = () => {
+      if (!title) return;
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = '#111827';
+      ctx.font = 'bold 13px system-ui,sans-serif';
+      ctx.fillText(title, 0, 6);
+      if (subtitle) {
+        ctx.fillStyle = '#6B7280';
+        ctx.font = '11px system-ui,sans-serif';
+        ctx.fillText(subtitle, 0, 26);
+      }
+    };
+
+    // Sidebar legend (right side, for category/tech charts)
+    const drawSidebarLegend = () => {
       if (!legendItems?.length) return;
-      const x0      = svgW + PADDING;
-      const lineH   = 16;
-      const gap     = 4;
-      const maxTxtW = LEG_W - 26;
+      const x0 = svgW + PADDING;
+      const lineH = 16, gap = 4, maxTxtW = LEG_W - 26;
       ctx.font = '10px system-ui,sans-serif';
       ctx.textBaseline = 'middle';
       const totalH = legendItems.reduce((s, it) =>
         s + wrapText(ctx, it.value, maxTxtW).length * lineH + gap, 0) - gap;
-      let y = Math.max(8, (svgH - totalH) / 2);
+      let y = TITLE_H + Math.max(8, (svgH - totalH) / 2);
       for (const item of legendItems) {
         const lines = wrapText(ctx, item.value, maxTxtW);
         const midY  = y + ((lines.length - 1) * lineH) / 2 + lineH / 2;
         ctx.strokeStyle = item.color;
-        ctx.lineWidth   = 1.5;
-        ctx.beginPath();
-        ctx.moveTo(x0,      midY);
-        ctx.lineTo(x0 + 14, midY);
-        ctx.stroke();
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.beginPath(); ctx.moveTo(x0, midY); ctx.lineTo(x0 + 14, midY); ctx.stroke();
         ctx.fillStyle = '#374151';
         lines.forEach((ln, li) => ctx.fillText(ln, x0 + 18, y + (li + 0.5) * lineH));
         y += lines.length * lineH + gap;
       }
     };
 
-    // Clone the SVG and make it fully self-contained for rendering as an image.
+    // Inline Recharts legend drawn as a horizontal row below the chart
+    const drawBottomLegend = () => {
+      if (!domLegItems.length) return;
+      const y0 = TITLE_H + svgH + 8;
+      ctx.font = '10px system-ui,sans-serif';
+      ctx.textBaseline = 'middle';
+      let x = 0;
+      for (const item of domLegItems) {
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash(item.dash.length ? item.dash : []);
+        ctx.beginPath(); ctx.moveTo(x, y0 + 5); ctx.lineTo(x + 14, y0 + 5); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = '#374151';
+        ctx.fillText(item.text, x + 18, y0 + 5);
+        x += 18 + ctx.measureText(item.text).width + 16;
+        if (x > svgW - 60) { x = 0; /* next row would need more height — acceptable for now */ }
+      }
+    };
+
+    // ── Serialize SVG ─────────────────────────────────────────────────────────
     const clone = svgEl.cloneNode(true);
     clone.setAttribute('xmlns',       'http://www.w3.org/2000/svg');
     clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
     clone.setAttribute('width',  svgW);
     clone.setAttribute('height', svgH);
-    // Add viewBox matching rendered size so the SVG scales correctly when
-    // rendered at an explicit pixel size (required for Recharts-generated SVGs
-    // which may not carry a viewBox attribute).
-    if (!clone.getAttribute('viewBox')) {
-      clone.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
-    }
-    // Remove any CSS height/width overrides that could conflict with the
-    // explicit attributes (Recharts sometimes sets style="width:100%;height:100%").
-    clone.style.width  = '';
-    clone.style.height = '';
-
-    const svgStr = new XMLSerializer().serializeToString(clone);
-    const blob   = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    if (!clone.getAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+    clone.style.width = ''; clone.style.height = '';
+    const svgStr  = new XMLSerializer().serializeToString(clone);
+    const blob    = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
     const blobUrl = URL.createObjectURL(blob);
 
     const img = new Image();
     img.onload = () => {
       try {
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, svgW + LEG_W + PADDING, svgH);
-        ctx.drawImage(img, 0, 0, svgW, svgH);
+        ctx.fillRect(0, 0, svgW + LEG_W + PADDING, TITLE_H + svgH + LEG_ROW_H);
+        drawTitle();
+        ctx.drawImage(img, 0, TITLE_H, svgW, svgH);
         URL.revokeObjectURL(blobUrl);
-        drawLegend();
-        // Use toBlob + object URL instead of toDataURL — avoids the ~2 MB
-        // data-URI limit that causes silent failure in Chrome on large canvases.
+        drawSidebarLegend();
+        drawBottomLegend();
         canvas.toBlob(pngBlob => {
           const pngUrl = URL.createObjectURL(pngBlob);
           const a = document.createElement('a');
-          a.download = `${title}.png`;
+          a.download = `${title || 'chart'}.png`;
           a.href = pngUrl;
           document.body.appendChild(a);
           a.click();
