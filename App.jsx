@@ -3891,11 +3891,12 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
     const rechartsLegEl = ref.current?.querySelector('.recharts-default-legend');
     const domLegItems = rechartsLegEl
       ? Array.from(rechartsLegEl.querySelectorAll('.recharts-legend-item')).map(li => {
-          const text  = li.querySelector('.recharts-legend-item-text')?.textContent?.trim() || '';
-          const line  = li.querySelector('line');
-          const color = line?.getAttribute('stroke') || '#999';
-          const dash  = (line?.getAttribute('stroke-dasharray') || '')
-                          .split(/[\s,]+/).map(Number).filter(Boolean);
+          const text = li.querySelector('.recharts-legend-item-text')?.textContent?.trim() || '';
+          // Recharts renders legend icons as <path> elements (not <line>)
+          const el    = li.querySelector('.recharts-surface path, .recharts-surface line');
+          const color = el?.getAttribute('stroke') || el?.style?.stroke || '#999';
+          const dashRaw = el?.getAttribute('stroke-dasharray') || el?.style?.strokeDasharray || '';
+          const dash  = dashRaw.split(/[\s,]+/).map(Number).filter(n => n > 0);
           return { text, color, dash };
         })
       : [];
