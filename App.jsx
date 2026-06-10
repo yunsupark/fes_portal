@@ -2892,13 +2892,15 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
 
-  const [rows,         setRows]         = useState([]);
-  const [edits,        setEdits]        = useState({});
-  const [years,        setYears]        = useState([]);
-  const [selectedYear, setSelectedYear] = useState(null);
-  const [saving,       setSaving]       = useState(false);
-  const [status,       setStatus]       = useState(null);
-  const [benchmarks,   setBenchmarks]   = useState({});
+  const [rows,              setRows]              = useState([]);
+  const [edits,             setEdits]             = useState({});
+  const [years,             setYears]             = useState([]);
+  const [selectedYear,      setSelectedYear]      = useState(null);
+  const [saving,            setSaving]            = useState(false);
+  const [status,            setStatus]            = useState(null);
+  const [benchmarks,        setBenchmarks]        = useState({});
+  const [trailerTypes,      setTrailerTypes]      = useState([]);
+  const [trailerTypeByYear, setTrailerTypeByYear] = useState({}); // year -> type_id
 
   const loadData = async () => {
     const r = await fetch('/api/fuel', { headers: { Authorization: `Bearer ${token}` } });
@@ -2916,6 +2918,7 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
     setSelectedYear(prev => prev ?? Math.min(...(visibleEditable.length ? visibleEditable : yrList)));
     // Seed edits for editable years from existing data
     const init = {};
+    const ttInit = {};
     editableYears.forEach(yr => {
       const yrRows = data.filter(r => r.year === yr);
       init[yr] = yrRows.length
@@ -2926,8 +2929,18 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
             volume:     ['CNG','LNG'].includes(r.fuel_type) ? (r.nat_gas_dge ?? '') : (r.ifta_fuel ?? ''),
           }))
         : [EMPTY_FUEL_ROW()];
+      // Use trailer_type_id from first row of this year if available
+      ttInit[yr] = yrRows[0]?.trailer_type_id ?? null;
     });
     setEdits(init);
+    setTrailerTypeByYear(prev => {
+      const merged = { ...prev };
+      Object.entries(ttInit).forEach(([yr, ttId]) => {
+        // Only update if not already set by user interaction
+        if (prev[yr] === undefined) merged[yr] = ttId;
+      });
+      return merged;
+    });
   };
 
   useEffect(() => { if (token) loadData(); }, [token, editableYearsKey]);
@@ -2937,6 +2950,14 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
     fetch('/api/fuel/benchmarks', { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.ok ? r.json() : {})
       .then(b => setBenchmarks(b))
+      .catch(() => {});
+  }, [token]);
+
+  useEffect(() => {
+    if (!token) return;
+    fetch('/api/trailer-types', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setTrailerTypes(d))
       .catch(() => {});
   }, [token]);
 
@@ -2972,10 +2993,12 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
           }))
       );
       const saveRows = allRows.filter(r => !r._remove && r.fuel_type);
+      const defaultTtId = trailerTypes.length > 0 ? trailerTypes[0].type_id : 1;
+      const trailer_type_id = trailerTypeByYear[selectedYear] ?? defaultTtId;
       await fetch(`/api/fuel/${selectedYear}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ rows: saveRows }),
+        body: JSON.stringify({ rows: saveRows, trailer_type_id }),
       });
       await loadData();
       setStatus('saved');
@@ -3025,6 +3048,32 @@ function FuelTable({ token, onSave, editableYears = [2024, 2025], submittedYears
           ) : null}
         </div>
       </div>
+
+      {/* Trailer Type selector */}
+      {(() => {
+        const defaultTtId = trailerTypes.length > 0 ? trailerTypes[0].type_id : 1;
+        const selectedTtId = trailerTypeByYear[selectedYear] ?? defaultTtId;
+        const selectedTt = trailerTypes.find(t => t.type_id === selectedTtId) || trailerTypes[0];
+        const infoMsg = 'Select the trailer configuration most reflective of your fleet. This affects MPG benchmarking calculations.';
+        return (
+          <div style={{display:'flex', alignItems:'center', gap:8, marginBottom:14, flexWrap:'wrap'}}>
+            <span style={{fontSize:13, color:'#374151', fontWeight:600}}>Trailer Type</span>
+            <span title={infoMsg} style={{cursor:'help', fontSize:13, color:'#6B7280', lineHeight:1, userSelect:'none'}}>ⓘ</span>
+            {isEditable ? (
+              <select
+                style={{fontSize:13, padding:'4px 8px', borderRadius:6, border:'1px solid #D1D5DB', background:'#fff', color:'#111827', cursor:'pointer'}}
+                value={selectedTtId || ''}
+                onChange={e => setTrailerTypeByYear(prev => ({ ...prev, [selectedYear]: parseInt(e.target.value) }))}>
+                {trailerTypes.map(t => (
+                  <option key={t.type_id} value={t.type_id}>{t.type_name}</option>
+                ))}
+              </select>
+            ) : (
+              <span style={{fontSize:13, color:'#111827'}}>{selectedTt?.type_name || '—'}</span>
+            )}
+          </div>
+        );
+      })()}
 
       <div style={{overflowX:'auto'}}>
         <table style={styles.detailTable}>
@@ -4596,6 +4645,16 @@ function AdminView({ token, onSignOut }) {
   const [editTechForm, setEditTechForm] = useState({});
   const [editTechSaving, setEditTechSaving] = useState(false);
 
+  // Trailer types card
+  const [trailerTypesAdmin,    setTrailerTypesAdmin]    = useState([]);
+  const [trailerTypesLoading,  setTrailerTypesLoading]  = useState(true);
+  const [trailerTypesCollapsed,setTrailerTypesCollapsed]= useState(true);
+  const [trailerTypeForm,      setTrailerTypeForm]      = useState({ type_name: '', multiplier: '1', sort_order: '' });
+  const [trailerTypeSaving,    setTrailerTypeSaving]    = useState(false);
+  const [trailerTypeStatus,    setTrailerTypeStatus]    = useState(null);
+  const [editTrailerType,      setEditTrailerType]      = useState(null);
+  const [editTrailerTypeForm,  setEditTrailerTypeForm]  = useState({});
+
   const fetchFleets = () => {
     setLoading(true);
     fetch('/api/admin/fleets', { headers: { Authorization: `Bearer ${token}` } })
@@ -4681,6 +4740,16 @@ function AdminView({ token, onSignOut }) {
       .finally(() => setTechsLoading(false));
   };
   useEffect(() => { fetchTechs(); }, [token]);
+
+  const fetchTrailerTypes = () => {
+    setTrailerTypesLoading(true);
+    fetch('/api/admin/trailer-types', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : [])
+      .then(d => setTrailerTypesAdmin(d))
+      .catch(console.error)
+      .finally(() => setTrailerTypesLoading(false));
+  };
+  useEffect(() => { fetchTrailerTypes(); }, [token]);
 
   // Settings
   const fetchSettings = () => {
@@ -5321,6 +5390,141 @@ function AdminView({ token, onSignOut }) {
               </table>
             </div>
           ))}
+        </div>
+      </div>
+
+      {/* ── Trailer Types Card ── */}
+      <div style={{ maxWidth: 1280, margin: '0 auto 24px', padding: '0 20px' }}>
+        <div style={{ ...card, marginBottom: 0 }}>
+          <div style={{ ...cardHeader, cursor: 'pointer' }} onClick={() => setTrailerTypesCollapsed(c => !c)}>
+            <h2 style={{ margin: 0, fontSize: 15, color: '#111827', fontWeight: 700, flex: 1 }}>
+              Trailer Types <span style={{ fontWeight: 400, fontSize: 12, color: '#9CA3AF' }}>({trailerTypesAdmin.filter(t => t.is_active).length} active)</span>
+            </h2>
+            <span style={{ color: '#9CA3AF', fontSize: 13 }}>{trailerTypesCollapsed ? '▶' : '▼'}</span>
+          </div>
+          {!trailerTypesCollapsed && (
+            <div style={{ padding: '0 16px 16px' }}>
+              {trailerTypesLoading ? (
+                <div style={{ textAlign: 'center', color: '#6B7280', padding: 32 }}>Loading…</div>
+              ) : (
+                <>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 16 }}>
+                    <thead>
+                      <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                        <th style={{ ...thBase, padding: '8px 8px 8px 0', textAlign: 'left' }}>Type Name</th>
+                        <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Multiplier</th>
+                        <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Order</th>
+                        <th style={{ ...thBase, padding: '8px', textAlign: 'center' }}>Active</th>
+                        {isAdminRole && <th style={{ ...thBase, padding: '8px 0 8px 8px', textAlign: 'right' }}>✎</th>}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {trailerTypesAdmin.map(tt => (
+                        editTrailerType?.type_id === tt.type_id ? (
+                          <tr key={tt.type_id} style={{ background: '#F0F9FF', borderBottom: '1px solid #E5E7EB' }}>
+                            <td style={{ padding: '6px 8px 6px 0' }}>
+                              <input style={{ ...styles.detailInput, width: 180 }} value={editTrailerTypeForm.type_name || ''}
+                                onChange={e => setEditTrailerTypeForm(f => ({ ...f, type_name: e.target.value }))} />
+                            </td>
+                            <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                              <input style={{ ...styles.detailInput, width: 80, textAlign: 'center' }} type="number" step="0.0001" min="0"
+                                value={editTrailerTypeForm.multiplier ?? ''}
+                                onChange={e => setEditTrailerTypeForm(f => ({ ...f, multiplier: e.target.value }))} />
+                            </td>
+                            <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                              <input style={{ ...styles.detailInput, width: 60, textAlign: 'center' }} type="number"
+                                value={editTrailerTypeForm.sort_order ?? ''}
+                                onChange={e => setEditTrailerTypeForm(f => ({ ...f, sort_order: e.target.value }))} />
+                            </td>
+                            <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                              <input type="checkbox" checked={!!editTrailerTypeForm.is_active}
+                                onChange={e => setEditTrailerTypeForm(f => ({ ...f, is_active: e.target.checked }))} />
+                            </td>
+                            <td style={{ padding: '6px 0 6px 8px', textAlign: 'right' }}>
+                              <button style={{ ...editBtn, marginRight: 4 }} onClick={async () => {
+                                await fetch(`/api/admin/trailer-types/${tt.type_id}`, {
+                                  method: 'PUT',
+                                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                  body: JSON.stringify(editTrailerTypeForm),
+                                });
+                                setEditTrailerType(null);
+                                fetchTrailerTypes();
+                              }}>Save</button>
+                              <button style={{ ...editBtn, color: '#6B7280' }} onClick={() => setEditTrailerType(null)}>✕</button>
+                            </td>
+                          </tr>
+                        ) : (
+                          <tr key={tt.type_id} style={{ borderBottom: '1px solid #F3F4F6', opacity: tt.is_active ? 1 : 0.45 }}>
+                            <td style={{ padding: '8px 8px 8px 0', fontWeight: 500, color: '#111827' }}>{tt.type_name}</td>
+                            <td style={{ padding: '8px', textAlign: 'center', color: '#374151' }}>{tt.multiplier.toFixed(4)}</td>
+                            <td style={{ padding: '8px', textAlign: 'center', color: '#6B7280' }}>{tt.sort_order}</td>
+                            <td style={{ padding: '8px', textAlign: 'center' }}>{tt.is_active ? '✓' : <span style={{ color: '#D1D5DB' }}>—</span>}</td>
+                            {isAdminRole && (
+                              <td style={{ padding: '8px 0 8px 8px', textAlign: 'right' }}>
+                                <button style={{ ...editBtn, marginRight: 4 }} onClick={() => { setEditTrailerType(tt); setEditTrailerTypeForm({ type_name: tt.type_name, multiplier: tt.multiplier, sort_order: tt.sort_order, is_active: !!tt.is_active }); }}>✎</button>
+                                <button style={{ ...editBtn, color: '#DC2626' }} onClick={async () => {
+                                  await fetch(`/api/admin/trailer-types/${tt.type_id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+                                  fetchTrailerTypes();
+                                }}>✕</button>
+                              </td>
+                            )}
+                          </tr>
+                        )
+                      ))}
+                      {trailerTypesAdmin.length === 0 && (
+                        <tr><td colSpan={5} style={{ padding: 32, textAlign: 'center', color: '#9CA3AF' }}>No trailer types found.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                  {isAdminRole && (
+                    <div>
+                      <div style={{ fontSize: 12, fontWeight: 700, color: '#374151', marginBottom: 6 }}>Add Trailer Type</div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <label style={{ fontSize: 11, color: '#6B7280' }}>Type Name</label>
+                          <input style={{ ...styles.detailInput, width: 200 }} placeholder="e.g. Van/Refrigerated"
+                            value={trailerTypeForm.type_name}
+                            onChange={e => setTrailerTypeForm(f => ({ ...f, type_name: e.target.value }))} />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <label style={{ fontSize: 11, color: '#6B7280' }}>Multiplier</label>
+                          <input style={{ ...styles.detailInput, width: 90, textAlign: 'center' }} type="number" step="0.0001" min="0" placeholder="1.0000"
+                            value={trailerTypeForm.multiplier}
+                            onChange={e => setTrailerTypeForm(f => ({ ...f, multiplier: e.target.value }))} />
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <label style={{ fontSize: 11, color: '#6B7280' }}>Sort Order</label>
+                          <input style={{ ...styles.detailInput, width: 70, textAlign: 'center' }} type="number" placeholder="0"
+                            value={trailerTypeForm.sort_order}
+                            onChange={e => setTrailerTypeForm(f => ({ ...f, sort_order: e.target.value }))} />
+                        </div>
+                        <button style={{ ...styles.btnPrimary, opacity: trailerTypeSaving ? 0.7 : 1 }} disabled={trailerTypeSaving || !trailerTypeForm.type_name}
+                          onClick={async () => {
+                            setTrailerTypeSaving(true); setTrailerTypeStatus(null);
+                            try {
+                              await fetch('/api/admin/trailer-types', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+                                body: JSON.stringify(trailerTypeForm),
+                              });
+                              setTrailerTypeForm({ type_name: '', multiplier: '1', sort_order: '' });
+                              setTrailerTypeStatus('saved');
+                              fetchTrailerTypes();
+                              setTimeout(() => setTrailerTypeStatus(null), 3000);
+                            } catch { setTrailerTypeStatus('error'); }
+                            finally { setTrailerTypeSaving(false); }
+                          }}>
+                          {trailerTypeSaving ? 'Adding…' : 'Add'}
+                        </button>
+                        {trailerTypeStatus === 'saved' && <span style={{ fontSize: 12, color: '#16a34a' }}>Added.</span>}
+                        {trailerTypeStatus === 'error'  && <span style={{ fontSize: 12, color: '#DC2626' }}>Error.</span>}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

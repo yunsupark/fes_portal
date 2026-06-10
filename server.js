@@ -203,6 +203,32 @@ const db = mysql.createPool({
       FROM ffs_contact
       WHERE fleet_id != 0
     `);
+    // Trailer types
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ffs_trailer_type (
+        type_id    INT AUTO_INCREMENT PRIMARY KEY,
+        type_name  VARCHAR(100) NOT NULL,
+        multiplier DECIMAL(6,4) NOT NULL DEFAULT 1.0000,
+        sort_order INT NOT NULL DEFAULT 0,
+        is_active  TINYINT NOT NULL DEFAULT 1
+      )
+    `);
+    await db.query(`
+      INSERT IGNORE INTO ffs_trailer_type (type_id, type_name, multiplier, sort_order) VALUES
+        (1, 'Van/Refrigerated', 1.0000, 1),
+        (2, 'Flatbed',          1.0000, 2),
+        (3, 'Tanker',           1.0000, 3),
+        (4, 'Double',           1.0000, 4),
+        (5, 'B-train (Canada)', 1.0000, 5)
+    `);
+    const [[{ tt_col }]] = await db.query(
+      `SELECT COUNT(*) AS tt_col FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ffs_mpg' AND COLUMN_NAME = 'trailer_type_id'`
+    );
+    if (!tt_col) {
+      await db.query(`ALTER TABLE ffs_mpg ADD COLUMN trailer_type_id INT NULL`);
+      console.log("Added trailer_type_id column to ffs_mpg");
+    }
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -1049,6 +1075,71 @@ app.delete("/api/admin/fhwa-mpg/:id", requireAuth, requireAdminRole, async (req,
   }
 });
 
+// ─── Trailer Types ───────────────────────────────────────────────────────────
+
+app.get("/api/trailer-types", requireAuth, async (_req, res) => {
+  try {
+    const [rows] = await db.query(
+      `SELECT type_id, type_name, multiplier, sort_order FROM ffs_trailer_type WHERE is_active = 1 ORDER BY sort_order`
+    );
+    res.json(rows.map(r => ({ ...r, multiplier: parseFloat(r.multiplier) })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.get("/api/admin/trailer-types", requireAuth, requireAdmin, async (_req, res) => {
+  try {
+    const [rows] = await db.query(`SELECT * FROM ffs_trailer_type ORDER BY sort_order`);
+    res.json(rows.map(r => ({ ...r, multiplier: parseFloat(r.multiplier) })));
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.post("/api/admin/trailer-types", requireAuth, requireAdminRole, async (req, res) => {
+  const { type_name, multiplier, sort_order } = req.body;
+  if (!type_name) return res.status(400).json({ error: "type_name required" });
+  try {
+    const [result] = await db.query(
+      `INSERT INTO ffs_trailer_type (type_name, multiplier, sort_order) VALUES (?, ?, ?)`,
+      [type_name.trim(), parseFloat(multiplier) || 1.0, parseInt(sort_order) || 0]
+    );
+    res.json({ type_id: result.insertId });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to create trailer type" });
+  }
+});
+
+app.put("/api/admin/trailer-types/:id", requireAuth, requireAdminRole, async (req, res) => {
+  const id = parseInt(req.params.id);
+  const { type_name, multiplier, sort_order, is_active } = req.body;
+  try {
+    await db.query(
+      `UPDATE ffs_trailer_type SET type_name=?, multiplier=?, sort_order=?, is_active=? WHERE type_id=?`,
+      [type_name, parseFloat(multiplier) || 1.0, parseInt(sort_order) || 0, is_active ? 1 : 0, id]
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to update trailer type" });
+  }
+});
+
+app.delete("/api/admin/trailer-types/:id", requireAuth, requireAdminRole, async (req, res) => {
+  const id = parseInt(req.params.id);
+  try {
+    await db.query(`UPDATE ffs_trailer_type SET is_active = 0 WHERE type_id = ?`, [id]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to delete trailer type" });
+  }
+});
+
 /**
  * POST /api/admin/reset-example-fleet
  * Deletes all input data for the example fleet (fleet_id from ffs_settings).
@@ -1351,19 +1442,20 @@ app.get("/api/fuel", requireAuth, async (req, res) => {
   try {
     const [rows] = await db.query(
       `SELECT mpg_id, mpg_year AS year, fuel_type,
-              ifta_miles, ifta_fuel, nat_gas_dge
+              ifta_miles, ifta_fuel, nat_gas_dge, trailer_type_id
        FROM ffs_mpg
        WHERE fleet_id = ?
        ORDER BY mpg_year DESC, mpg_id`,
       [fleet_id]
     );
     res.json(rows.map(r => ({
-      mpg_id:      r.mpg_id,
-      year:        r.year,
-      fuel_type:   r.fuel_type   || '',
-      ifta_miles:  r.ifta_miles  != null ? parseFloat(r.ifta_miles)  : null,
-      ifta_fuel:   r.ifta_fuel   != null ? parseFloat(r.ifta_fuel)   : null,
-      nat_gas_dge: r.nat_gas_dge != null ? parseFloat(r.nat_gas_dge) : null,
+      mpg_id:          r.mpg_id,
+      year:            r.year,
+      fuel_type:       r.fuel_type       || '',
+      ifta_miles:      r.ifta_miles      != null ? parseFloat(r.ifta_miles)      : null,
+      ifta_fuel:       r.ifta_fuel       != null ? parseFloat(r.ifta_fuel)       : null,
+      nat_gas_dge:     r.nat_gas_dge     != null ? parseFloat(r.nat_gas_dge)     : null,
+      trailer_type_id: r.trailer_type_id != null ? parseInt(r.trailer_type_id)   : null,
     })));
   } catch (err) {
     console.error(err);
@@ -1393,8 +1485,16 @@ app.put("/api/fuel/:year", requireAuth, async (req, res) => {
   const year = parseInt(req.params.year);
   if (isNaN(year)) return res.status(400).json({ error: "Invalid year" });
 
-  const { rows } = req.body;
+  const { rows, trailer_type_id } = req.body;
   if (!Array.isArray(rows)) return res.status(400).json({ error: "rows array required" });
+
+  // Look up multiplier for the selected trailer type
+  let multiplier = 1.0;
+  const ttId = trailer_type_id ? parseInt(trailer_type_id) : null;
+  if (ttId) {
+    const [[tt]] = await db.query(`SELECT multiplier FROM ffs_trailer_type WHERE type_id = ?`, [ttId]);
+    if (tt) multiplier = parseFloat(tt.multiplier);
+  }
 
   const conn = await db.getConnection();
   try {
@@ -1403,13 +1503,15 @@ app.put("/api/fuel/:year", requireAuth, async (req, res) => {
     for (const r of rows) {
       const isCng = ['CNG', 'LNG'].includes(r.fuel_type);
       await conn.query(
-        `INSERT INTO ffs_mpg (fleet_id, mpg_year, fuel_type, ifta_miles, ifta_fuel, nat_gas_dge, contact_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO ffs_mpg (fleet_id, mpg_year, fuel_type, ifta_miles, ifta_fuel, nat_gas_dge, multiplier, trailer_type_id, contact_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [fleet_id, year,
          r.fuel_type   || null,
          r.ifta_miles  != null && r.ifta_miles  !== '' ? parseFloat(r.ifta_miles)  : null,
          isCng ? null : (r.volume != null && r.volume !== '' ? parseFloat(r.volume) : null),
          isCng ? (r.volume != null && r.volume !== '' ? parseFloat(r.volume) : null) : null,
+         multiplier,
+         ttId,
          contact_id ?? null]
       );
     }
