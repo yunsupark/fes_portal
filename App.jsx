@@ -3940,10 +3940,19 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
         download: `${title}.png`, href: canvas.toDataURL('image/png'),
       }).click();
     };
-    const svgStr = new XMLSerializer().serializeToString(svg);
-    img.src = URL.createObjectURL(
-      new Blob([svgStr], { type: 'image/svg+xml' })
-    );
+
+    // Clone so we can add namespace attributes without touching the live DOM.
+    // Setting explicit xmlns + xmlns:xlink is required for SVG to render
+    // correctly when loaded as a standalone image (clip paths, text, etc.).
+    // Using a base64 data URI is more reliable than a blob URL for this use
+    // case because some browsers render blob-URL SVGs in a tighter sandbox.
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns',       'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    clone.setAttribute('width',  String(svgW));
+    clone.setAttribute('height', String(svgH));
+    const svgStr = new XMLSerializer().serializeToString(clone);
+    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
   };
 
   return (
