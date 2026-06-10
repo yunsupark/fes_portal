@@ -4325,17 +4325,41 @@ function AdminChartsPage({ token }) {
     setCustomSqlSettings(prev => ({ ...prev, [sqlKey]: template }));
   };
 
-  // Fetch chart data whenever maxYear or haulType changes.
+  // Fetch chart data whenever maxYear, haulType, or customSqlSettings changes.
+  // customSqlSettings is included so that saved custom SQLs are applied immediately
+  // on load (not only when the user manually clicks Run).
   useEffect(() => {
     if (!maxYear) return;
     setLoading(true);
     setError(null);
     const qs = `max_year=${encodeURIComponent(maxYear)}`;
+
+    // Build parallel fetch for any saved custom SQL templates.
+    const runCustomSql = (sqlKey) => {
+      const tmpl = customSqlSettings[sqlKey];
+      if (!tmpl) return Promise.resolve(null);
+      const sql = applySqlYear(tmpl, maxYear);
+      return fetch('/api/admin/charts/run-query', {
+        method: 'POST',
+        headers: { ...headers, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sql }),
+      }).then(r => r.ok ? r.json() : null).catch(() => null);
+    };
+
+    const customSqlKeys = ['chart_sql_mpg', 'chart_sql_cat',
+      ...Object.keys(customSqlSettings).filter(k => k.startsWith('chart_sql_tech_'))];
+
     Promise.all([
       fetch(`/api/admin/charts/mpg?${qs}`,                                       { headers }).then(r => r.json()),
       fetch(`/api/admin/charts/adoption?${qs}&haul_type=${haulType}`, { headers }).then(r => r.json()),
-    ]).then(([mpgData, adoptData]) => {
-      setMpgRows((mpgData.rows || []).map(r => ({
+      ...customSqlKeys.map(k => runCustomSql(k).then(d => ({ key: k, d }))),
+    ]).then(([mpgData, adoptData, ...customResults]) => {
+      // Index custom results by key for easy lookup
+      const customByKey = {};
+      customResults.forEach(({ key, d }) => { if (d?.rows) customByKey[key] = d.rows; });
+
+      // Base MPG rows from the API endpoint
+      const baseRows = (mpgData.rows || []).map(r => ({
         year:                  r.year,
         'Combined MPG':        r.combined_mpg  ?? null,
         'Line Haul MPG':       r.lh_mpg        ?? null,
@@ -4345,21 +4369,43 @@ function AdminChartsPage({ token }) {
         adoption:              r.adoption      ?? null,
         'LH Adoption':         r.lh_adoption   ?? null,
         'RH Adoption':         r.rh_adoption   ?? null,
-      })));
+      }));
+
+      // Overlay custom MPG SQL results (LH/RH series only) if a saved query exists.
+      if (customByKey['chart_sql_mpg']) {
+        const map = {};
+        baseRows.forEach(r => { map[r.year] = { ...r }; });
+        customByKey['chart_sql_mpg'].forEach(row => {
+          const yr = row.year ?? row.mpg_year;
+          if (!map[yr]) map[yr] = { year: yr };
+          const dc = (row.duty_cycle || '').toLowerCase();
+          if (dc === 'lh') map[yr]['Line Haul MPG']     = row.fleet_mpg != null ? parseFloat(row.fleet_mpg) : null;
+          if (dc === 'rh') map[yr]['Regional Haul MPG'] = row.fleet_mpg != null ? parseFloat(row.fleet_mpg) : null;
+        });
+        setMpgRows(Object.values(map).sort((a, b) => a.year - b.year));
+      } else {
+        setMpgRows(baseRows);
+      }
 
       const { techRows = [], catRows = [] } = adoptData;
 
+      // Category chart — use custom SQL rows if saved, otherwise API rows
+      const effectiveCatRows = customByKey['chart_sql_cat']
+        ? customByKey['chart_sql_cat']
+        : catRows;
       const catByYear = {};
-      catRows.forEach(r => {
-        if (!catByYear[r.year]) catByYear[r.year] = { year: r.year };
-        catByYear[r.year][r.tech_group] = r.adoption;
+      effectiveCatRows.forEach(r => {
+        const yr = r.year ?? r.adoption_year;
+        if (!catByYear[yr]) catByYear[yr] = { year: yr };
+        catByYear[yr][r.tech_group] = parseFloat(r.adoption);
       });
-      const catGroups = [...new Set(catRows.map(r => r.tech_group))].sort();
+      const catGroups = [...new Set(effectiveCatRows.map(r => r.tech_group))].sort();
       setCatData({
         data:   Object.values(catByYear).sort((a, b) => a.year - b.year),
         groups: catGroups,
       });
 
+      // Per-group tech charts — use custom SQL if saved for that group
       const gd = {};
       techRows.forEach(r => {
         if (!gd[r.tech_group]) gd[r.tech_group] = { techs: [], byYear: {} };
@@ -4367,13 +4413,28 @@ function AdminChartsPage({ token }) {
         if (!gd[r.tech_group].byYear[r.year]) gd[r.tech_group].byYear[r.year] = { year: r.year };
         gd[r.tech_group].byYear[r.year][r.technology] = r.adoption;
       });
+      // Overlay per-group custom SQL results
+      Object.keys(customByKey).filter(k => k.startsWith('chart_sql_tech_')).forEach(k => {
+        const grp = k.replace('chart_sql_tech_', '');
+        const rows = customByKey[k];
+        if (!rows?.length) return;
+        if (!gd[grp]) gd[grp] = { techs: [], byYear: {} };
+        gd[grp].techs = [];
+        gd[grp].byYear = {};
+        rows.forEach(r => {
+          const yr = r.year ?? r.adoption_year;
+          if (!gd[grp].techs.includes(r.technology)) gd[grp].techs.push(r.technology);
+          if (!gd[grp].byYear[yr]) gd[grp].byYear[yr] = { year: yr };
+          gd[grp].byYear[yr][r.technology] = parseFloat(r.adoption);
+        });
+      });
       const built = {};
       Object.entries(gd).forEach(([grp, { techs, byYear }]) => {
         built[grp] = { techs, data: Object.values(byYear).sort((a, b) => a.year - b.year) };
       });
       setGroupData(built);
     }).catch(err => setError(err.message)).finally(() => setLoading(false));
-  }, [token, maxYear, haulType]); // eslint-disable-line
+  }, [token, maxYear, haulType, customSqlSettings]); // eslint-disable-line
 
   // Save maxYear to DB and update the active filter.
   const saveMaxYear = async () => {
