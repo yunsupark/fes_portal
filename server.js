@@ -2673,15 +2673,53 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
         AND adoption_year >= ? AND adoption_year <= ?
       GROUP BY adoption_year ORDER BY adoption_year
     `, [minYear, maxYear]);
+    // Combined MPG across all fleets regardless of duty cycle
+    const [combinedRows] = await db.query(`
+      SELECT m.mpg_year AS year,
+             ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS combined_mpg
+      FROM ffs_mpg m
+      JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+      WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
+        AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+        AND m.mpg_year >= ? AND m.mpg_year <= ?
+        AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+      GROUP BY m.mpg_year
+      ORDER BY m.mpg_year
+    `, [minYear, maxYear]);
+    // LH adoption (line-haul fleets, sleeper cab rows only)
+    const [lhAdoptRows] = await db.query(`
+      SELECT a.adoption_year AS year, AVG(a.adoption_percent) * 100 AS lh_adoption
+      FROM ffs_adoption a
+      JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
+      WHERE a.fleet_id NOT IN (0, 45, 46)
+        AND LOWER(f.default_duty_cycle) = 'lh'
+        AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab')
+        AND a.adoption_year >= ? AND a.adoption_year <= ?
+      GROUP BY a.adoption_year ORDER BY a.adoption_year
+    `, [minYear, maxYear]);
+    // RH adoption (regional-haul fleets + LH day-cab rows)
+    const [rhAdoptRows] = await db.query(`
+      SELECT a.adoption_year AS year, AVG(a.adoption_percent) * 100 AS rh_adoption
+      FROM ffs_adoption a
+      JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
+      WHERE a.fleet_id NOT IN (0, 45, 46)
+        AND (LOWER(f.default_duty_cycle) = 'rh'
+             OR (LOWER(f.default_duty_cycle) = 'lh' AND a.cab_type = 'Day Cab'))
+        AND a.adoption_year >= ? AND a.adoption_year <= ?
+      GROUP BY a.adoption_year ORDER BY a.adoption_year
+    `, [minYear, maxYear]);
     const map = {};
     fleetRows.forEach(r => {
       if (!map[r.year]) map[r.year] = { year: r.year };
       if (r.duty_cycle === 'lh') map[r.year].lh_mpg = parseFloat(r.fleet_mpg);
       if (r.duty_cycle === 'rh') map[r.year].rh_mpg = parseFloat(r.fleet_mpg);
     });
-    fhwaRows.forEach(r  => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].fhwa_mpg  = parseFloat(r.mpg); });
-    bauRows.forEach(r   => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].bau_mpg   = parseFloat(r.mpg); });
-    adoptRows.forEach(r => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].adoption  = parseFloat(r.adoption); });
+    fhwaRows.forEach(r       => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].fhwa_mpg    = parseFloat(r.mpg); });
+    bauRows.forEach(r        => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].bau_mpg     = parseFloat(r.mpg); });
+    adoptRows.forEach(r      => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].adoption    = parseFloat(r.adoption); });
+    combinedRows.forEach(r   => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].combined_mpg  = parseFloat(r.combined_mpg); });
+    lhAdoptRows.forEach(r    => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].lh_adoption  = parseFloat(r.lh_adoption); });
+    rhAdoptRows.forEach(r    => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].rh_adoption  = parseFloat(r.rh_adoption); });
     const rows = Object.values(map).sort((a, b) => a.year - b.year);
     res.json({ rows });
   } catch (err) {

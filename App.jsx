@@ -3840,9 +3840,9 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
   const [sqlSaving,    setSqlSaving]    = useState(false);
   const [sqlSaveMsg,   setSqlSaveMsg]   = useState('');
 
-  // Sync defaultSql into the textarea if the user hasn't made edits yet
-  // (e.g. maxYear changes → default SQL changes → textarea refreshes)
-  React.useEffect(() => { if (!sqlEdited) setSql(defaultSql || ''); }, [defaultSql]); // eslint-disable-line
+  // Sync defaultSql into the textarea when it changes and the user hasn't edited.
+  // sqlEdited is included in deps to avoid a stale closure after permanent save.
+  React.useEffect(() => { if (!sqlEdited) setSql(defaultSql || ''); }, [defaultSql, sqlEdited]); // eslint-disable-line
 
   const runSql = async () => {
     if (!onRunQuery) return;
@@ -4313,11 +4313,15 @@ function AdminChartsPage({ token }) {
 
   const saveSqlPermanent = async (sqlKey, sql) => {
     const template = sql.replace(new RegExp(`\\b${yr}\\b`, 'g'), '{{MAX_YEAR}}');
-    await fetch('/api/admin/settings', {
+    const r = await fetch('/api/admin/settings', {
       method: 'PUT',
       headers: { ...headers, 'Content-Type': 'application/json' },
       body: JSON.stringify({ [sqlKey]: template }),
     });
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}));
+      throw new Error(d.error || 'Save failed');
+    }
     setCustomSqlSettings(prev => ({ ...prev, [sqlKey]: template }));
   };
 
@@ -4333,11 +4337,14 @@ function AdminChartsPage({ token }) {
     ]).then(([mpgData, adoptData]) => {
       setMpgRows((mpgData.rows || []).map(r => ({
         year:                  r.year,
-        'Line Haul MPG':       r.lh_mpg     ?? null,
-        'Regional Haul MPG':   r.rh_mpg     ?? null,
-        'All US Trucks (FHWA)':r.fhwa_mpg   ?? null,
-        'Business as Usual':   r.bau_mpg    ?? null,
-        adoption:              r.adoption   ?? null,
+        'Combined MPG':        r.combined_mpg  ?? null,
+        'Line Haul MPG':       r.lh_mpg        ?? null,
+        'Regional Haul MPG':   r.rh_mpg        ?? null,
+        'All US Trucks (FHWA)':r.fhwa_mpg      ?? null,
+        'Business as Usual':   r.bau_mpg       ?? null,
+        adoption:              r.adoption      ?? null,
+        'LH Adoption':         r.lh_adoption   ?? null,
+        'RH Adoption':         r.rh_adoption   ?? null,
       })));
 
       const { techRows = [], catRows = [] } = adoptData;
@@ -4589,11 +4596,8 @@ ORDER BY t.technology, a.adoption_year`;
       {/* ── All charts in a uniform 2-column grid ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px,1fr))', gap: 20 }}>
 
-        {/* MPG */}
-        <AdminChartCard title="IFTA MPG" subtitle={haulLabel}
-          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
-          onRunQuery={sql => runChartQuery(sql, 'mpg')}
-          onSaveSql={saveSqlPermanent}>
+        {/* ── Combined duty cycles MPG ── */}
+        <AdminChartCard title="IFTA MPG" subtitle="Combined duty cycles, diesel MPG">
           <ResponsiveContainer width="100%" height={CH}>
             <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4603,18 +4607,14 @@ ORDER BY t.technology, a.adoption_year`;
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
               <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line type="monotone" dataKey="Line Haul MPG"       stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
-              <Line type="monotone" dataKey="Regional Haul MPG"   stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
-              <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"   strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="Combined MPG"         stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
               {hasBau && <Line type="monotone" dataKey="Business as Usual" stroke="#d62728" strokeWidth={1.5} strokeDasharray="5 3" dot={false} connectNulls />}
             </LineChart>
           </ResponsiveContainer>
         </AdminChartCard>
 
-        <AdminChartCard title="IFTA MPG and Adoption" subtitle={haulLabel}
-          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
-          onRunQuery={sql => runChartQuery(sql, 'mpg')}
-          onSaveSql={saveSqlPermanent}>
+        <AdminChartCard title="IFTA MPG and Adoption" subtitle="Combined duty cycles, diesel MPG">
           <ResponsiveContainer width="100%" height={CH}>
             <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4628,10 +4628,57 @@ ORDER BY t.technology, a.adoption_year`;
                 return [v != null ? `${fmtMpg(v)} mpg` : '—', n];
               }} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"       stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
-              <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"   stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
-              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"   strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="Combined MPG"         stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
               <Line yAxisId="right" type="monotone" dataKey="adoption" name="Adoption" stroke="#2ca02c" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+            </ComposedChart>
+          </ResponsiveContainer>
+        </AdminChartCard>
+
+        {/* ── LH and RH duty cycles MPG ── */}
+        <AdminChartCard title="IFTA MPG" subtitle="LH and RH duty cycles, diesel MPG"
+          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
+          onRunQuery={sql => runChartQuery(sql, 'mpg')}
+          onSaveSql={saveSqlPermanent}>
+          <ResponsiveContainer width="100%" height={CH}>
+            <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+              <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                         style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
+              <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
+              {hasBau && <Line type="monotone" dataKey="Business as Usual" stroke="#d62728" strokeWidth={1.5} strokeDasharray="5 3" dot={false} connectNulls />}
+            </LineChart>
+          </ResponsiveContainer>
+        </AdminChartCard>
+
+        <AdminChartCard title="IFTA MPG and Adoption" subtitle="LH and RH duty cycles, diesel MPG"
+          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
+          onRunQuery={sql => runChartQuery(sql, 'mpg')}
+          onSaveSql={saveSqlPermanent}>
+          <ResponsiveContainer width="100%" height={CH}>
+            <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+              <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+              <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                         style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
+              <YAxis yAxisId="right" orientation="right" stroke="#2ca02c" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
+              <Tooltip formatter={(v, n) => {
+                const isPct = n === 'LH Adoption' || n === 'RH Adoption';
+                return [v != null ? (isPct ? fmtPct(v) : `${fmtMpg(v)} mpg`) : '—', n];
+              }} contentStyle={{ fontSize: 11 }} />
+              <Legend wrapperStyle={{ fontSize: 11 }} />
+              <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
+              <Line yAxisId="right" type="monotone" dataKey="LH Adoption" stroke="#2ca02c" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+              <Line yAxisId="right" type="monotone" dataKey="RH Adoption" stroke="#9467bd" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
         </AdminChartCard>
