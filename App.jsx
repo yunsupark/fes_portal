@@ -3827,15 +3827,18 @@ const CHART_COLORS_30 = [
  *  legendItems – optional [{value, color}] array; renders an HTML legend
  *  sidebar and paints it onto the canvas when downloading.
  */
-function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defaultSql, onRunQuery }) {
+function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defaultSql, sqlKey, onRunQuery, onSaveSql }) {
   const ref = useRef(null);
 
   // ── SQL editor state (NACFE admin only) ──────────────────────────────────────
-  const [showSql,    setShowSql]    = useState(false);
-  const [sql,        setSql]        = useState(defaultSql || '');
-  const [sqlEdited,  setSqlEdited]  = useState(false); // true once user has typed
-  const [sqlRunning, setSqlRunning] = useState(false);
-  const [sqlStatus,  setSqlStatus]  = useState('');    // '' | 'OK' | error message
+  const [showSql,      setShowSql]      = useState(false);
+  const [sql,          setSql]          = useState(defaultSql || '');
+  const [sqlEdited,    setSqlEdited]    = useState(false); // true once user has typed
+  const [sqlRunning,   setSqlRunning]   = useState(false);
+  const [sqlStatus,    setSqlStatus]    = useState('');    // '' | 'OK' | error message
+  const [confirmSave,  setConfirmSave]  = useState(false); // show caution dialog
+  const [sqlSaving,    setSqlSaving]    = useState(false);
+  const [sqlSaveMsg,   setSqlSaveMsg]   = useState('');
 
   // Sync defaultSql into the textarea if the user hasn't made edits yet
   // (e.g. maxYear changes → default SQL changes → textarea refreshes)
@@ -3854,7 +3857,22 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
     }
   };
 
-  const resetSql = () => { setSql(defaultSql || ''); setSqlEdited(false); setSqlStatus(''); };
+  const resetSql = () => { setSql(defaultSql || ''); setSqlEdited(false); setSqlStatus(''); setConfirmSave(false); setSqlSaveMsg(''); };
+
+  const doSavePermanent = async () => {
+    if (!onSaveSql || !sqlKey) return;
+    setSqlSaving(true); setSqlSaveMsg('');
+    try {
+      await onSaveSql(sqlKey, sql);
+      setSqlSaveMsg('Saved as new default.');
+      setConfirmSave(false);
+      setSqlEdited(false);
+    } catch {
+      setSqlSaveMsg('Error saving.');
+    } finally {
+      setSqlSaving(false);
+    }
+  };
 
   const download = () => {
     const svg = ref.current?.querySelector('svg');
@@ -3992,11 +4010,18 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
                          opacity: sqlRunning ? 0.6 : 1 }}>
                 {sqlRunning ? 'Running…' : 'Run'}
               </button>
+              {onSaveSql && sqlKey && !confirmSave && (
+                <button onClick={() => { setConfirmSave(true); setSqlSaveMsg(''); }}
+                  style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
+                           background: '#FEF3C7', border: '1px solid #F59E0B', color: '#92400E' }}>
+                  Save as permanent…
+                </button>
+              )}
             </div>
           </div>
           <textarea
             value={sql}
-            onChange={e => { setSql(e.target.value); setSqlEdited(true); setSqlStatus(''); }}
+            onChange={e => { setSql(e.target.value); setSqlEdited(true); setSqlStatus(''); setSqlSaveMsg(''); }}
             rows={8}
             spellCheck={false}
             style={{ width: '100%', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5,
@@ -4004,10 +4029,37 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
                      background: '#F8FAFC', resize: 'vertical', boxSizing: 'border-box',
                      color: '#1e293b' }}
           />
-          {sqlStatus && (
-            <p style={{ margin: '4px 0 0', fontSize: 11,
-                        color: sqlStatus === 'OK' ? '#16A34A' : '#DC2626' }}>
-              {sqlStatus === 'OK' ? 'Chart updated.' : sqlStatus}
+          {/* Caution / confirm dialog */}
+          {confirmSave && (
+            <div style={{ marginTop: 10, padding: '12px 14px', borderRadius: 8,
+                          background: '#FFFBEB', border: '1px solid #F59E0B' }}>
+              <p style={{ margin: '0 0 6px', fontSize: 12, fontWeight: 700, color: '#92400E' }}>
+                ⚠ This change is permanent and irreversible.
+              </p>
+              <p style={{ margin: '0 0 10px', fontSize: 11, color: '#78350F', lineHeight: 1.5 }}>
+                The query above will replace the default SQL for this chart for all future sessions.
+                The max year at the end of the query will remain dynamic (controlled by the Max Year setting).
+                <br /><strong>Before confirming, copy the query above and save it somewhere so you can restore it if needed.</strong>
+              </p>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button onClick={() => setConfirmSave(false)}
+                  style={{ fontSize: 11, padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
+                           background: '#F3F4F6', border: '1px solid #D1D5DB', color: '#374151' }}>
+                  Cancel
+                </button>
+                <button onClick={doSavePermanent} disabled={sqlSaving}
+                  style={{ fontSize: 11, padding: '4px 12px', borderRadius: 5, cursor: 'pointer',
+                           background: '#B45309', border: 'none', color: '#fff',
+                           opacity: sqlSaving ? 0.6 : 1, fontWeight: 600 }}>
+                  {sqlSaving ? 'Saving…' : 'Confirm — save permanently'}
+                </button>
+              </div>
+            </div>
+          )}
+          {(sqlStatus || sqlSaveMsg) && (
+            <p style={{ margin: '6px 0 0', fontSize: 11,
+                        color: (sqlStatus === 'OK' || sqlSaveMsg.startsWith('Saved')) ? '#16A34A' : '#DC2626' }}>
+              {sqlSaveMsg || (sqlStatus === 'OK' ? 'Chart updated.' : sqlStatus)}
             </p>
           )}
         </div>
@@ -4228,14 +4280,18 @@ function AdminChartsPage({ token }) {
 
   const headers = { Authorization: `Bearer ${token}` };
 
-  // Load the saved charts_max_year on mount.
+  const [customSqlSettings, setCustomSqlSettings] = useState({});
+
+  // Load saved settings (max year + any custom SQL templates) on mount.
   useEffect(() => {
     fetch('/api/admin/settings', { headers })
       .then(r => r.json())
       .then(d => {
-        const val = d.settings?.charts_max_year || String(new Date().getFullYear());
+        const s = d.settings || {};
+        const val = s.charts_max_year || String(new Date().getFullYear());
         setMaxYear(val);
         setMaxYearInput(val);
+        setCustomSqlSettings(s);
       })
       .catch(() => {
         const y = String(new Date().getFullYear());
@@ -4243,6 +4299,18 @@ function AdminChartsPage({ token }) {
         setMaxYearInput(y);
       });
   }, [token]); // eslint-disable-line
+
+  const applySqlYear = (template, yr) => template.replace(/\{\{MAX_YEAR\}\}/g, String(yr));
+
+  const saveSqlPermanent = async (sqlKey, sql) => {
+    const template = sql.replace(new RegExp(`\\b${yr}\\b`, 'g'), '{{MAX_YEAR}}');
+    await fetch('/api/admin/settings', {
+      method: 'PUT',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ [sqlKey]: template }),
+    });
+    setCustomSqlSettings(prev => ({ ...prev, [sqlKey]: template }));
+  };
 
   // Fetch chart data whenever maxYear or haulType changes.
   useEffect(() => {
@@ -4412,7 +4480,9 @@ function AdminChartsPage({ token }) {
   // ── Default SQL strings for the SQL editor (NACFE admin only) ─────────────
   const yr = maxYear || new Date().getFullYear();
 
-  const sqlMpg = `SELECT m.mpg_year AS year,
+  const sqlMpg = customSqlSettings['chart_sql_mpg']
+    ? applySqlYear(customSqlSettings['chart_sql_mpg'], yr)
+    : `SELECT m.mpg_year AS year,
        LOWER(f.default_duty_cycle) AS duty_cycle,
        ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS fleet_mpg
 FROM ffs_mpg m
@@ -4425,7 +4495,9 @@ WHERE COALESCE(m.mpg_quarter,'') = ''
 GROUP BY m.mpg_year, LOWER(f.default_duty_cycle)
 ORDER BY m.mpg_year`;
 
-  const sqlCat = `SELECT t.tech_group,
+  const sqlCat = customSqlSettings['chart_sql_cat']
+    ? applySqlYear(customSqlSettings['chart_sql_cat'], yr)
+    : `SELECT t.tech_group,
        a.adoption_year AS year,
        AVG(a.adoption_percent) * 100 AS adoption
 FROM ffs_adoption a
@@ -4435,7 +4507,11 @@ WHERE a.fleet_id NOT IN (0, 45, 46)
 GROUP BY t.tech_group, a.adoption_year
 ORDER BY t.tech_group, a.adoption_year`;
 
-  const sqlTech = (grp) => `SELECT t.technology,
+  const sqlTech = (grp) => {
+    const key = `chart_sql_tech_${grp}`;
+    return customSqlSettings[key]
+      ? applySqlYear(customSqlSettings[key], yr)
+      : `SELECT t.technology,
        a.adoption_year AS year,
        AVG(a.adoption_percent) * 100 AS adoption
 FROM ffs_adoption a
@@ -4445,6 +4521,7 @@ WHERE a.fleet_id NOT IN (0, 45, 46)
   AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}
 GROUP BY t.technology, a.adoption_year
 ORDER BY t.technology, a.adoption_year`;
+  };
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
@@ -4505,8 +4582,9 @@ ORDER BY t.technology, a.adoption_year`;
 
         {/* MPG */}
         <AdminChartCard title="IFTA MPG" subtitle={haulLabel}
-          isAdmin={isAdminRole} defaultSql={sqlMpg}
-          onRunQuery={sql => runChartQuery(sql, 'mpg')}>
+          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
+          onRunQuery={sql => runChartQuery(sql, 'mpg')}
+          onSaveSql={saveSqlPermanent}>
           <ResponsiveContainer width="100%" height={CH}>
             <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4525,8 +4603,9 @@ ORDER BY t.technology, a.adoption_year`;
         </AdminChartCard>
 
         <AdminChartCard title="IFTA MPG and Adoption" subtitle={haulLabel}
-          isAdmin={isAdminRole} defaultSql={sqlMpg}
-          onRunQuery={sql => runChartQuery(sql, 'mpg')}>
+          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
+          onRunQuery={sql => runChartQuery(sql, 'mpg')}
+          onSaveSql={saveSqlPermanent}>
           <ResponsiveContainer width="100%" height={CH}>
             <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4554,8 +4633,9 @@ ORDER BY t.technology, a.adoption_year`;
           const legItems   = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
           return (
             <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel} legendItems={legItems}
-              isAdmin={isAdminRole} defaultSql={sqlCat}
-              onRunQuery={sql => runChartQuery(sql, 'cat')}>
+              isAdmin={isAdminRole} defaultSql={sqlCat} sqlKey="chart_sql_cat"
+              onRunQuery={sql => runChartQuery(sql, 'cat')}
+              onSaveSql={saveSqlPermanent}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={catData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4580,8 +4660,9 @@ ORDER BY t.technology, a.adoption_year`;
           const legItems    = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
           return (
             <AdminChartCard key={grp} title={grp} subtitle={haulLabel} legendItems={legItems}
-              isAdmin={isAdminRole} defaultSql={sqlTech(grp)}
-              onRunQuery={sql => runChartQuery(sql, 'tech', grp)}>
+              isAdmin={isAdminRole} defaultSql={sqlTech(grp)} sqlKey={`chart_sql_tech_${grp}`}
+              onRunQuery={sql => runChartQuery(sql, 'tech', grp)}
+              onSaveSql={saveSqlPermanent}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
