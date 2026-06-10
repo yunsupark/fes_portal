@@ -3741,8 +3741,34 @@ const CHART_COLORS_30 = [
  *  legendItems – optional [{value, color}] array; renders an HTML legend
  *  sidebar and paints it onto the canvas when downloading.
  */
-function AdminChartCard({ title, subtitle, children, legendItems }) {
+function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defaultSql, onRunQuery }) {
   const ref = useRef(null);
+
+  // ── SQL editor state (NACFE admin only) ──────────────────────────────────────
+  const [showSql,    setShowSql]    = useState(false);
+  const [sql,        setSql]        = useState(defaultSql || '');
+  const [sqlEdited,  setSqlEdited]  = useState(false); // true once user has typed
+  const [sqlRunning, setSqlRunning] = useState(false);
+  const [sqlStatus,  setSqlStatus]  = useState('');    // '' | 'OK' | error message
+
+  // Sync defaultSql into the textarea if the user hasn't made edits yet
+  // (e.g. maxYear changes → default SQL changes → textarea refreshes)
+  React.useEffect(() => { if (!sqlEdited) setSql(defaultSql || ''); }, [defaultSql]); // eslint-disable-line
+
+  const runSql = async () => {
+    if (!onRunQuery) return;
+    setSqlRunning(true); setSqlStatus('');
+    try {
+      await onRunQuery(sql);
+      setSqlStatus('OK');
+    } catch (err) {
+      setSqlStatus(err.message || 'Error');
+    } finally {
+      setSqlRunning(false);
+    }
+  };
+
+  const resetSql = () => { setSql(defaultSql || ''); setSqlEdited(false); setSqlStatus(''); };
 
   const download = () => {
     const svg = ref.current?.querySelector('svg');
@@ -3825,11 +3851,23 @@ function AdminChartCard({ title, subtitle, children, legendItems }) {
             <p style={{ margin: '2px 0 0', fontSize: 11, color: '#6B7280', fontStyle: 'italic' }}>{subtitle}</p>
           )}
         </div>
-        <button onClick={download} title="Download as PNG"
-          style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6,
-                   padding: '4px 10px', fontSize: 11, cursor: 'pointer', color: '#374151' }}>
-          ↓ PNG
-        </button>
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          {isAdmin && defaultSql && (
+            <button onClick={() => setShowSql(s => !s)} title="View / edit SQL query"
+              style={{ background: showSql ? '#1c3660' : '#F3F4F6',
+                       border: '1px solid', borderColor: showSql ? '#1c3660' : '#D1D5DB',
+                       borderRadius: 6, padding: '4px 10px', fontSize: 11,
+                       cursor: 'pointer', color: showSql ? '#fff' : '#374151',
+                       fontFamily: 'monospace' }}>
+              SQL
+            </button>
+          )}
+          <button onClick={download} title="Download as PNG"
+            style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6,
+                     padding: '4px 10px', fontSize: 11, cursor: 'pointer', color: '#374151' }}>
+            ↓ PNG
+          </button>
+        </div>
       </div>
       {/* Chart + optional legend sidebar */}
       <div ref={ref} style={{ display: 'flex', alignItems: 'stretch' }}>
@@ -3849,12 +3887,56 @@ function AdminChartCard({ title, subtitle, children, legendItems }) {
           </div>
         )}
       </div>
+      {/* SQL editor — NACFE admin only */}
+      {isAdmin && showSql && (
+        <div style={{ marginTop: 14, borderTop: '1px solid #E5E7EB', paddingTop: 12 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#374151', fontFamily: 'monospace' }}>
+              SQL Query
+            </span>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={resetSql}
+                style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
+                         background: '#F3F4F6', border: '1px solid #D1D5DB', color: '#374151' }}>
+                Reset
+              </button>
+              <button onClick={runSql} disabled={sqlRunning || !onRunQuery}
+                style={{ fontSize: 11, padding: '3px 10px', borderRadius: 5, cursor: 'pointer',
+                         background: '#1c3660', border: 'none', color: '#fff',
+                         opacity: sqlRunning ? 0.6 : 1 }}>
+                {sqlRunning ? 'Running…' : 'Run'}
+              </button>
+            </div>
+          </div>
+          <textarea
+            value={sql}
+            onChange={e => { setSql(e.target.value); setSqlEdited(true); setSqlStatus(''); }}
+            rows={8}
+            spellCheck={false}
+            style={{ width: '100%', fontFamily: 'monospace', fontSize: 11, lineHeight: 1.5,
+                     padding: '8px 10px', borderRadius: 6, border: '1px solid #D1D5DB',
+                     background: '#F8FAFC', resize: 'vertical', boxSizing: 'border-box',
+                     color: '#1e293b' }}
+          />
+          {sqlStatus && (
+            <p style={{ margin: '4px 0 0', fontSize: 11,
+                        color: sqlStatus === 'OK' ? '#16A34A' : '#DC2626' }}>
+              {sqlStatus === 'OK' ? 'Chart updated.' : sqlStatus}
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
 /** Self-contained Reference Data card for the charts page. */
 function RefDataCard({ token }) {
+  const isAdmin = (() => {
+    try { return JSON.parse(atob(token.split('.')[1])).admin_role === 'admin'; }
+    catch { return false; }
+  })();
+
   const [collapsed,  setCollapsed]  = useState(true);
   const [rows,       setRows]       = useState([]);
   const [form,       setForm]       = useState({ mpg_year: '', ifta_miles: '', ifta_fuel: '', avg_diesel_price: '' });
@@ -3930,8 +4012,8 @@ function RefDataCard({ token }) {
             Prior-year numbers can change; update previous entries when new data is released.
           </p>
 
-          {/* Entry / Edit form */}
-          <form onSubmit={handleSubmit}
+          {/* Entry / Edit form — NACFE admin only */}
+          {isAdmin && <form onSubmit={handleSubmit}
             style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'flex-end',
                      paddingBottom: 16, borderBottom: '1px solid #F3F4F6', marginBottom: 12 }}>
             <div>
@@ -3979,9 +4061,9 @@ function RefDataCard({ token }) {
               )}
               {msg && <span style={{ fontSize: 12, color: msg.startsWith('Error') ? '#DC2626' : '#059669' }}>{msg}</span>}
             </div>
-          </form>
+          </form>}
 
-          {/* Table */}
+          {/* Table — always visible; edit/delete buttons shown to NACFE admin only */}
           {rows.length === 0 ? (
             <p style={{ fontSize: 13, color: '#9CA3AF' }}>No reference data entered yet.</p>
           ) : (
@@ -3989,7 +4071,7 @@ function RefDataCard({ token }) {
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                 <thead>
                   <tr>
-                    {['Year','Miles of Travel','Fuel Consumed (gal)','MPG','Avg Diesel Price ($/gal)',''].map(h => (
+                    {['Year','Miles of Travel','Fuel Consumed (gal)','MPG','Avg Diesel Price ($/gal)', ...(isAdmin ? [''] : [])].map(h => (
                       <th key={h} style={{ ...thSt, textAlign: ['Miles of Travel','Fuel Consumed (gal)','MPG','Avg Diesel Price ($/gal)'].includes(h) ? 'right' : h === '' ? 'right' : 'left' }}>{h}</th>
                     ))}
                   </tr>
@@ -4008,19 +4090,21 @@ function RefDataCard({ token }) {
                         <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>
                           {row.avg_diesel_price != null ? `$${row.avg_diesel_price.toFixed(3)}` : '—'}
                         </td>
-                        <td style={{ padding: '7px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                          <button onClick={() => {
-                            setEditId(row.mpg_id);
-                            setForm({
-                              mpg_year:         String(row.mpg_year),
-                              ifta_miles:       row.ifta_miles       != null ? String(row.ifta_miles)       : '',
-                              ifta_fuel:        row.ifta_fuel        != null ? String(row.ifta_fuel)        : '',
-                              avg_diesel_price: row.avg_diesel_price != null ? String(row.avg_diesel_price) : '',
-                            });
-                          }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1c3660', fontSize: 14, marginRight: 6 }}>✎</button>
-                          <button onClick={() => handleDelete(row.mpg_id)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14 }}>✕</button>
-                        </td>
+                        {isAdmin && (
+                          <td style={{ padding: '7px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                            <button onClick={() => {
+                              setEditId(row.mpg_id);
+                              setForm({
+                                mpg_year:         String(row.mpg_year),
+                                ifta_miles:       row.ifta_miles       != null ? String(row.ifta_miles)       : '',
+                                ifta_fuel:        row.ifta_fuel        != null ? String(row.ifta_fuel)        : '',
+                                avg_diesel_price: row.avg_diesel_price != null ? String(row.avg_diesel_price) : '',
+                              });
+                            }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1c3660', fontSize: 14, marginRight: 6 }}>✎</button>
+                            <button onClick={() => handleDelete(row.mpg_id)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#DC2626', fontSize: 14 }}>✕</button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -4035,6 +4119,12 @@ function RefDataCard({ token }) {
 }
 
 function AdminChartsPage({ token }) {
+  // Determine NACFE admin role from JWT (gates SQL editor + ref-data write access).
+  const isAdminRole = (() => {
+    try { return JSON.parse(atob(token.split('.')[1])).admin_role === 'admin'; }
+    catch { return false; }
+  })();
+
   const [mpgRows,   setMpgRows]   = useState([]);
   const [catData,   setCatData]   = useState({ data: [], groups: [] });
   const [groupData, setGroupData] = useState({});
@@ -4135,6 +4225,58 @@ function AdminChartsPage({ token }) {
     finally { setMaxYearSaving(false); }
   };
 
+  // ── Run-query helper (NACFE admin only) ───────────────────────────────────
+  const runChartQuery = async (sql, type, groupKey) => {
+    const r = await fetch('/api/admin/charts/run-query', {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sql }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || 'Query failed');
+    const rows = d.rows || [];
+
+    if (type === 'mpg') {
+      // Expected columns: year, duty_cycle ('lh'|'rh'), fleet_mpg
+      setMpgRows(prev => {
+        const map = {};
+        prev.forEach(p => { map[p.year] = { ...p }; });
+        rows.forEach(row => {
+          const yr = row.year ?? row.mpg_year;
+          if (!map[yr]) map[yr] = { year: yr };
+          const dc = (row.duty_cycle || '').toLowerCase();
+          if (dc === 'lh') map[yr]['Line Haul MPG']     = row.fleet_mpg != null ? parseFloat(row.fleet_mpg) : null;
+          if (dc === 'rh') map[yr]['Regional Haul MPG'] = row.fleet_mpg != null ? parseFloat(row.fleet_mpg) : null;
+        });
+        return Object.values(map).sort((a, b) => a.year - b.year);
+      });
+    } else if (type === 'cat') {
+      // Expected columns: tech_group, year, adoption
+      const catByYear = {};
+      rows.forEach(row => {
+        const yr = row.year ?? row.adoption_year;
+        if (!catByYear[yr]) catByYear[yr] = { year: yr };
+        catByYear[yr][row.tech_group] = parseFloat(row.adoption);
+      });
+      const groups = [...new Set(rows.map(r => r.tech_group))].sort();
+      setCatData({ data: Object.values(catByYear).sort((a, b) => a.year - b.year), groups });
+    } else if (type === 'tech' && groupKey) {
+      // Expected columns: technology, year, adoption
+      const byYear = {};
+      const techs  = [];
+      rows.forEach(row => {
+        const yr = row.year ?? row.adoption_year;
+        if (!byYear[yr]) byYear[yr] = { year: yr };
+        byYear[yr][row.technology] = parseFloat(row.adoption);
+        if (!techs.includes(row.technology)) techs.push(row.technology);
+      });
+      setGroupData(prev => ({
+        ...prev,
+        [groupKey]: { techs, data: Object.values(byYear).sort((a, b) => a.year - b.year) },
+      }));
+    }
+  };
+
   if (loading) return <div style={{ padding: 40, color: '#6B7280' }}>Loading charts…</div>;
   if (error)   return <div style={{ padding: 40, color: '#DC2626' }}>Error: {error}</div>;
 
@@ -4180,6 +4322,43 @@ function AdminChartsPage({ token }) {
   const haulLabel = haulType === 'lh' ? 'Line Haul'
                   : haulType === 'rh' ? 'Regional Haul'
                   : 'Combined Duty Cycles';
+
+  // ── Default SQL strings for the SQL editor (NACFE admin only) ─────────────
+  const yr = maxYear || new Date().getFullYear();
+
+  const sqlMpg = `SELECT m.mpg_year AS year,
+       LOWER(f.default_duty_cycle) AS duty_cycle,
+       ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS fleet_mpg
+FROM ffs_mpg m
+JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+WHERE COALESCE(m.mpg_quarter,'') = ''
+  AND m.fleet_id NOT IN (0, 45, 46)
+  AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+  AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+  AND m.mpg_year >= 2003 AND m.mpg_year <= ${yr}
+GROUP BY m.mpg_year, LOWER(f.default_duty_cycle)
+ORDER BY m.mpg_year`;
+
+  const sqlCat = `SELECT t.tech_group,
+       a.adoption_year AS year,
+       AVG(a.adoption_percent) * 100 AS adoption
+FROM ffs_adoption a
+JOIN ffs_tech t ON a.tech_id = t.tech_id
+WHERE a.fleet_id NOT IN (0, 45, 46)
+  AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}
+GROUP BY t.tech_group, a.adoption_year
+ORDER BY t.tech_group, a.adoption_year`;
+
+  const sqlTech = (grp) => `SELECT t.technology,
+       a.adoption_year AS year,
+       AVG(a.adoption_percent) * 100 AS adoption
+FROM ffs_adoption a
+JOIN ffs_tech t ON a.tech_id = t.tech_id
+WHERE a.fleet_id NOT IN (0, 45, 46)
+  AND t.tech_group = '${grp.replace(/'/g, "''")}'
+  AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}
+GROUP BY t.technology, a.adoption_year
+ORDER BY t.technology, a.adoption_year`;
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
@@ -4239,7 +4418,9 @@ function AdminChartsPage({ token }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px,1fr))', gap: 20 }}>
 
         {/* MPG */}
-        <AdminChartCard title="IFTA MPG" subtitle={haulLabel}>
+        <AdminChartCard title="IFTA MPG" subtitle={haulLabel}
+          isAdmin={isAdminRole} defaultSql={sqlMpg}
+          onRunQuery={sql => runChartQuery(sql, 'mpg')}>
           <ResponsiveContainer width="100%" height={CH}>
             <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4257,7 +4438,9 @@ function AdminChartsPage({ token }) {
           </ResponsiveContainer>
         </AdminChartCard>
 
-        <AdminChartCard title="IFTA MPG and Adoption" subtitle={haulLabel}>
+        <AdminChartCard title="IFTA MPG and Adoption" subtitle={haulLabel}
+          isAdmin={isAdminRole} defaultSql={sqlMpg}
+          onRunQuery={sql => runChartQuery(sql, 'mpg')}>
           <ResponsiveContainer width="100%" height={CH}>
             <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4284,7 +4467,9 @@ function AdminChartsPage({ token }) {
           const sortedCats = byLastValue(catData.groups, catData.data);
           const legItems   = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel} legendItems={legItems}>
+            <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel} legendItems={legItems}
+              isAdmin={isAdminRole} defaultSql={sqlCat}
+              onRunQuery={sql => runChartQuery(sql, 'cat')}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={catData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4308,7 +4493,9 @@ function AdminChartsPage({ token }) {
           const sortedTechs = byLastValue(techs, data);
           const legItems    = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard key={grp} title={grp} subtitle={haulLabel} legendItems={legItems}>
+            <AdminChartCard key={grp} title={grp} subtitle={haulLabel} legendItems={legItems}
+              isAdmin={isAdminRole} defaultSql={sqlTech(grp)}
+              onRunQuery={sql => runChartQuery(sql, 'tech', grp)}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />

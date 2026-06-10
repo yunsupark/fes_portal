@@ -2588,6 +2588,28 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
   }
 });
 
+/**
+ * POST /api/admin/charts/run-query
+ * Executes an admin-supplied SELECT query and returns the result rows.
+ * Restricted to NACFE admin role. Only SELECT statements are permitted;
+ * results are capped at 5 000 rows.
+ */
+app.post("/api/admin/charts/run-query", requireAuth, requireAdminRole, async (req, res) => {
+  const { sql } = req.body;
+  if (!sql || typeof sql !== 'string') return res.status(400).json({ error: 'sql is required' });
+  const trimmed = sql.trim();
+  if (!/^SELECT\b/i.test(trimmed)) return res.status(400).json({ error: 'Only SELECT statements are allowed' });
+  try {
+    const [rows] = await db.query(trimmed);
+    if (rows.length > 5000) {
+      return res.status(400).json({ error: `Query returned ${rows.length} rows (max 5 000). Add a LIMIT clause.` });
+    }
+    res.json({ rows });
+  } catch (err) {
+    res.status(400).json({ error: err.sqlMessage || err.message });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {
