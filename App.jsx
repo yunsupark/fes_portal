@@ -3953,18 +3953,31 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
 
     const img = new Image();
     img.onload = () => {
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, svgW + LEG_W + PADDING, svgH);
-      ctx.drawImage(img, 0, 0, svgW, svgH);
-      URL.revokeObjectURL(blobUrl);
-      drawLegend();
-      Object.assign(document.createElement('a'), {
-        download: `${title}.png`, href: canvas.toDataURL('image/png'),
-      }).click();
+      try {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, svgW + LEG_W + PADDING, svgH);
+        ctx.drawImage(img, 0, 0, svgW, svgH);
+        URL.revokeObjectURL(blobUrl);
+        drawLegend();
+        // Use toBlob + object URL instead of toDataURL — avoids the ~2 MB
+        // data-URI limit that causes silent failure in Chrome on large canvases.
+        canvas.toBlob(pngBlob => {
+          const pngUrl = URL.createObjectURL(pngBlob);
+          const a = document.createElement('a');
+          a.download = `${title}.png`;
+          a.href = pngUrl;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(pngUrl), 100);
+        }, 'image/png');
+      } catch (e) {
+        console.error('PNG export error:', e);
+      }
     };
-    img.onerror = () => {
+    img.onerror = (e) => {
       URL.revokeObjectURL(blobUrl);
-      console.error('PNG export failed — SVG could not be rendered as an image');
+      console.error('PNG export: SVG image failed to load', e);
     };
     img.src = blobUrl;
   };
