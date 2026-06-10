@@ -3875,47 +3875,21 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
   };
 
   const download = () => {
-    const svg = ref.current?.querySelector('svg');
-    if (!svg) return;
-    const { width: svgW, height: svgH } = svg.getBoundingClientRect();
-    const LEG_W    = legendItems?.length ? 190 : 0;
-    const PADDING  = legendItems?.length ?  12 : 0;
-    const scale    = 2;
-    const canvas   = document.createElement('canvas');
-    canvas.width   = (svgW + LEG_W + PADDING) * scale;
-    canvas.height  = svgH * scale;
+    const svgEl = ref.current?.querySelector('svg');
+    if (!svgEl) return;
+    const rect  = svgEl.getBoundingClientRect();
+    const svgW  = Math.round(rect.width);
+    const svgH  = Math.round(rect.height);
+    if (!svgW || !svgH) return;
+
+    const LEG_W   = legendItems?.length ? 190 : 0;
+    const PADDING = legendItems?.length ?  12 : 0;
+    const scale   = 2;
+    const canvas  = document.createElement('canvas');
+    canvas.width  = (svgW + LEG_W + PADDING) * scale;
+    canvas.height = svgH * scale;
     const ctx = canvas.getContext('2d');
-
-    const drawLegend = () => {
-      if (!legendItems?.length) return;
-      const x0     = svgW + PADDING;
-      const lineH  = 16;
-      const gap    = 4;
-      const maxTxtW = LEG_W - 26;   // pixels available for text
-      ctx.font = `${10 * scale}px system-ui,sans-serif`;
-      ctx.textBaseline = 'middle';
-      const totalH = legendItems.reduce((s, it) => {
-        const lines = wrapText(ctx, it.value, maxTxtW * scale);
-        return s + lines.length * lineH * scale + gap * scale;
-      }, 0) - gap * scale;
-      let y = Math.max(8 * scale, (svgH * scale - totalH) / 2);
-
-      for (const item of legendItems) {
-        const lines = wrapText(ctx, item.value, maxTxtW * scale);
-        const midY  = y + ((lines.length - 1) * lineH * scale) / 2 + (lineH * scale) / 2;
-        ctx.strokeStyle = item.color;
-        ctx.lineWidth   = 2.5 * scale;
-        ctx.beginPath();
-        ctx.moveTo(x0 * scale,              midY);
-        ctx.lineTo((x0 + 14) * scale,       midY);
-        ctx.stroke();
-        ctx.fillStyle = '#374151';
-        lines.forEach((ln, li) => {
-          ctx.fillText(ln, (x0 + 18) * scale, y + (li + 0.5) * lineH * scale);
-        });
-        y += lines.length * lineH * scale + gap * scale;
-      }
-    };
+    ctx.scale(scale, scale); // draw in CSS-pixel coordinates from here on
 
     const wrapText = (ctx2, text, maxPx) => {
       const words = text.split(' ');
@@ -3930,29 +3904,69 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
       return lines;
     };
 
+    const drawLegend = () => {
+      if (!legendItems?.length) return;
+      const x0      = svgW + PADDING;
+      const lineH   = 16;
+      const gap     = 4;
+      const maxTxtW = LEG_W - 26;
+      ctx.font = '10px system-ui,sans-serif';
+      ctx.textBaseline = 'middle';
+      const totalH = legendItems.reduce((s, it) =>
+        s + wrapText(ctx, it.value, maxTxtW).length * lineH + gap, 0) - gap;
+      let y = Math.max(8, (svgH - totalH) / 2);
+      for (const item of legendItems) {
+        const lines = wrapText(ctx, item.value, maxTxtW);
+        const midY  = y + ((lines.length - 1) * lineH) / 2 + lineH / 2;
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth   = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(x0,      midY);
+        ctx.lineTo(x0 + 14, midY);
+        ctx.stroke();
+        ctx.fillStyle = '#374151';
+        lines.forEach((ln, li) => ctx.fillText(ln, x0 + 18, y + (li + 0.5) * lineH));
+        y += lines.length * lineH + gap;
+      }
+    };
+
+    // Clone the SVG and make it fully self-contained for rendering as an image.
+    const clone = svgEl.cloneNode(true);
+    clone.setAttribute('xmlns',       'http://www.w3.org/2000/svg');
+    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
+    clone.setAttribute('width',  svgW);
+    clone.setAttribute('height', svgH);
+    // Add viewBox matching rendered size so the SVG scales correctly when
+    // rendered at an explicit pixel size (required for Recharts-generated SVGs
+    // which may not carry a viewBox attribute).
+    if (!clone.getAttribute('viewBox')) {
+      clone.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
+    }
+    // Remove any CSS height/width overrides that could conflict with the
+    // explicit attributes (Recharts sometimes sets style="width:100%;height:100%").
+    clone.style.width  = '';
+    clone.style.height = '';
+
+    const svgStr = new XMLSerializer().serializeToString(clone);
+    const blob   = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
+    const blobUrl = URL.createObjectURL(blob);
+
     const img = new Image();
     img.onload = () => {
       ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.drawImage(img, 0, 0, svgW * scale, svgH * scale);
+      ctx.fillRect(0, 0, svgW + LEG_W + PADDING, svgH);
+      ctx.drawImage(img, 0, 0, svgW, svgH);
+      URL.revokeObjectURL(blobUrl);
       drawLegend();
       Object.assign(document.createElement('a'), {
         download: `${title}.png`, href: canvas.toDataURL('image/png'),
       }).click();
     };
-
-    // Clone so we can add namespace attributes without touching the live DOM.
-    // Setting explicit xmlns + xmlns:xlink is required for SVG to render
-    // correctly when loaded as a standalone image (clip paths, text, etc.).
-    // Using a base64 data URI is more reliable than a blob URL for this use
-    // case because some browsers render blob-URL SVGs in a tighter sandbox.
-    const clone = svg.cloneNode(true);
-    clone.setAttribute('xmlns',       'http://www.w3.org/2000/svg');
-    clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-    clone.setAttribute('width',  String(svgW));
-    clone.setAttribute('height', String(svgH));
-    const svgStr = new XMLSerializer().serializeToString(clone);
-    img.src = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(svgStr)));
+    img.onerror = () => {
+      URL.revokeObjectURL(blobUrl);
+      console.error('PNG export failed — SVG could not be rendered as an image');
+    };
+    img.src = blobUrl;
   };
 
   return (
