@@ -153,14 +153,14 @@ function LoginScreen({ onLogin }) {
         {!pendingFleets && view === 'login' && (
           <form onSubmit={handleLogin} style={styles.loginForm}>
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>Email</label>
-              <input style={styles.input} type="email" value={email}
-                onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoFocus />
+              <label htmlFor="login-email" style={styles.label}>Email</label>
+              <input id="login-email" name="email" style={styles.input} type="email" value={email}
+                onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoFocus autoComplete="email" />
             </div>
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>Password</label>
-              <input style={styles.input} type="password" value={password}
-                onChange={e => setPassword(e.target.value)} placeholder="••••••••" />
+              <label htmlFor="login-password" style={styles.label}>Password</label>
+              <input id="login-password" name="password" style={styles.input} type="password" value={password}
+                onChange={e => setPassword(e.target.value)} placeholder="••••••••" autoComplete="current-password" />
             </div>
             {err && <p style={styles.errMsg}>{err}</p>}
             <button style={{...styles.btn, opacity: loading ? 0.7 : 1}} type="submit" disabled={loading}>
@@ -179,9 +179,9 @@ function LoginScreen({ onLogin }) {
               Enter your email and we'll send you a link to set your password.
             </p>
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>Email</label>
-              <input style={styles.input} type="email" value={email}
-                onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoFocus />
+              <label htmlFor="forgot-email" style={styles.label}>Email</label>
+              <input id="forgot-email" name="email" style={styles.input} type="email" value={email}
+                onChange={e => setEmail(e.target.value)} placeholder="you@example.com" autoFocus autoComplete="email" />
             </div>
             {err && <p style={styles.errMsg}>{err}</p>}
             <button style={{...styles.btn, opacity: loading ? 0.7 : 1}} type="submit" disabled={loading}>
@@ -261,14 +261,14 @@ function ResetPasswordScreen({ token, onDone }) {
         ) : (
           <form onSubmit={handleSubmit} style={styles.loginForm}>
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>New password</label>
-              <input style={styles.input} type="password" value={password}
-                onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoFocus />
+              <label htmlFor="reset-password" style={styles.label}>New password</label>
+              <input id="reset-password" name="password" style={styles.input} type="password" value={password}
+                onChange={e => setPassword(e.target.value)} placeholder="At least 8 characters" autoFocus autoComplete="new-password" />
             </div>
             <div style={styles.fieldGroup}>
-              <label style={styles.label}>Confirm password</label>
-              <input style={styles.input} type="password" value={confirm}
-                onChange={e => setConfirm(e.target.value)} placeholder="••••••••" />
+              <label htmlFor="reset-confirm" style={styles.label}>Confirm password</label>
+              <input id="reset-confirm" name="confirm_password" style={styles.input} type="password" value={confirm}
+                onChange={e => setConfirm(e.target.value)} placeholder="••••••••" autoComplete="new-password" />
             </div>
             {err && <p style={styles.errMsg}>{err}</p>}
             <button style={{...styles.btn, opacity: loading ? 0.7 : 1}} type="submit" disabled={loading}>
@@ -3954,6 +3954,7 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
     const img = new Image();
     img.onload = () => {
       try {
+        console.log('[PNG] SVG loaded:', img.naturalWidth, 'x', img.naturalHeight, '| canvas:', canvas.width, 'x', canvas.height);
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, svgW + LEG_W + PADDING, svgH);
         ctx.drawImage(img, 0, 0, svgW, svgH);
