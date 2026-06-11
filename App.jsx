@@ -3888,15 +3888,25 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
     const TITLE_H = title ? (subtitle ? 46 : 28) : 0;
 
     // ── Recharts built-in legend (lives in a div outside the SVG) ────────────
+    // Build color→dash map from the actual chart line paths (reliable source of truth)
+    const colorToDash = {};
+    svgEl.querySelectorAll('.recharts-line path, .recharts-line line').forEach(p => {
+      const c = p.getAttribute('stroke');
+      const d = p.getAttribute('stroke-dasharray');
+      if (c && d && d !== 'none') colorToDash[c] = d;
+    });
+
     const rechartsLegEl = ref.current?.querySelector('.recharts-default-legend');
     const domLegItems = rechartsLegEl
       ? Array.from(rechartsLegEl.querySelectorAll('.recharts-legend-item')).map(li => {
           const text = li.querySelector('.recharts-legend-item-text')?.textContent?.trim() || '';
-          // Recharts renders legend icons as <path> elements (not <line>)
           const el    = li.querySelector('.recharts-surface path, .recharts-surface line');
           const color = el?.getAttribute('stroke') || el?.style?.stroke || '#999';
-          const dashRaw = el?.getAttribute('stroke-dasharray') || el?.style?.strokeDasharray || '';
-          const dash  = dashRaw.split(/[\s,]+/).map(Number).filter(n => n > 0);
+          // Legend icon may not carry stroke-dasharray; fall back to chart line by color
+          const dashAttr = el?.getAttribute('stroke-dasharray') || '';
+          const dashComp = el ? (window.getComputedStyle(el).getPropertyValue('stroke-dasharray') || '') : '';
+          const dashRaw  = dashAttr || (dashComp !== 'none' ? dashComp : '') || colorToDash[color] || '';
+          const dash  = dashRaw ? dashRaw.split(/[\s,]+/).map(Number).filter(n => n > 0) : [];
           return { text, color, dash };
         })
       : [];
@@ -3974,11 +3984,11 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
         ctx.strokeStyle = item.color;
         ctx.lineWidth = 1.5;
         ctx.setLineDash(item.dash.length ? item.dash : []);
-        ctx.beginPath(); ctx.moveTo(x, y0 + 5); ctx.lineTo(x + 14, y0 + 5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x, y0 + 5); ctx.lineTo(x + 22, y0 + 5); ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = '#374151';
-        ctx.fillText(item.text, x + 18, y0 + 5);
-        x += 18 + ctx.measureText(item.text).width + 16;
+        ctx.fillText(item.text, x + 26, y0 + 5);
+        x += 26 + ctx.measureText(item.text).width + 16;
         if (x > svgW - 60) { x = 0; /* next row would need more height — acceptable for now */ }
       }
     };
@@ -4809,8 +4819,8 @@ ORDER BY t.technology, a.adoption_year`;
               <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
               <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
               <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
-              <Line yAxisId="right" type="monotone" dataKey="LH Adoption" stroke="#2ca02c" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-              <Line yAxisId="right" type="monotone" dataKey="RH Adoption" stroke="#9467bd" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+              <Line yAxisId="right" type="monotone" dataKey="LH Adoption" stroke="#1f77b4" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+              <Line yAxisId="right" type="monotone" dataKey="RH Adoption" stroke="#ff7f0e" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
             </ComposedChart>
           </ResponsiveContainer>
         </AdminChartCard>
