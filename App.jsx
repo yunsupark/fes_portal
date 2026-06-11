@@ -4765,7 +4765,7 @@ ORDER BY t.technology, a.adoption_year`;
               <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
                 label={{ value: 'MPG', angle: -90, position: 'insideLeft',
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
-              <YAxis yAxisId="right" orientation="right" stroke="#2ca02c" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
+              <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
               <Tooltip formatter={(v, n) => {
                 if (n === 'Adoption') return [v != null ? fmtPct(v) : '—', n];
                 return [v != null ? `${fmtMpg(v)} mpg` : '—', n];
@@ -4812,17 +4812,17 @@ ORDER BY t.technology, a.adoption_year`;
               <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
                 label={{ value: 'MPG', angle: -90, position: 'insideLeft',
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
-              <YAxis yAxisId="right" orientation="right" stroke="#2ca02c" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
+              <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
               <Tooltip formatter={(v, n) => {
                 const isPct = n === 'LH Adoption' || n === 'RH Adoption';
                 return [v != null ? (isPct ? fmtPct(v) : `${fmtMpg(v)} mpg`) : '—', n];
               }} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
-              <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
-              <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
-              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
-              <Line yAxisId="right" type="monotone" dataKey="LH Adoption" stroke="#1f77b4" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
-              <Line yAxisId="right" type="monotone" dataKey="RH Adoption" stroke="#ff7f0e" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls />
+              <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls legendType="plainline" />
+              <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls legendType="plainline" />
+              <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls legendType="plainline" />
+              <Line yAxisId="right" type="monotone" dataKey="LH Adoption" stroke="#1f77b4" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls legendType="plainline" />
+              <Line yAxisId="right" type="monotone" dataKey="RH Adoption" stroke="#ff7f0e" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls legendType="plainline" />
             </ComposedChart>
           </ResponsiveContainer>
         </AdminChartCard>
