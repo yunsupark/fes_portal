@@ -3827,7 +3827,7 @@ const CHART_COLORS_30 = [
  *  legendItems – optional [{value, color}] array; renders an HTML legend
  *  sidebar and paints it onto the canvas when downloading.
  */
-function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defaultSql, sqlKey, onRunQuery, onSaveSql }) {
+function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, isAdmin, defaultSql, sqlKey, onRunQuery, onSaveSql }) {
   const ref = useRef(null);
 
   // ── SQL editor state (NACFE admin only) ──────────────────────────────────────
@@ -3981,9 +3981,10 @@ function AdminChartCard({ title, subtitle, children, legendItems, isAdmin, defau
       ctx.textBaseline = 'middle';
       let x = 0;
       for (const item of domLegItems) {
+        const dash = (lineDashes && lineDashes[item.text]) ? lineDashes[item.text] : item.dash;
         ctx.strokeStyle = item.color;
         ctx.lineWidth = 1.5;
-        ctx.setLineDash(item.dash.length ? item.dash : []);
+        ctx.setLineDash(dash.length ? dash : []);
         ctx.beginPath(); ctx.moveTo(x, y0 + 5); ctx.lineTo(x + 22, y0 + 5); ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = '#374151';
@@ -4802,7 +4803,8 @@ ORDER BY t.technology, a.adoption_year`;
         <AdminChartCard title="IFTA MPG and Adoption" subtitle="LH and RH duty cycles, diesel MPG"
           isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
           onRunQuery={sql => runChartQuery(sql, 'mpg')}
-          onSaveSql={saveSqlPermanent}>
+          onSaveSql={saveSqlPermanent}
+          lineDashes={{ 'LH Adoption': [5, 3], 'RH Adoption': [5, 3] }}>
           <ResponsiveContainer width="100%" height={CH}>
             <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
