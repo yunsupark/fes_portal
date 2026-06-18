@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import ffsLogoUrl from "./src/ffs-logo.png";
 
 import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 
@@ -107,7 +108,7 @@ function LoginScreen({ onLogin }) {
 
   return (
     <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
-      <img src="/ffs-logo.png" alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
+      <img src={ffsLogoUrl} alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
         <p style={{ ...styles.loginSub, marginBottom: 28, marginTop: 0 }}>Fleet Portal</p>
 
@@ -244,7 +245,7 @@ function ResetPasswordScreen({ token, onDone }) {
 
   return (
     <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
-      <img src="/ffs-logo.png" alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
+      <img src={ffsLogoUrl} alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
         <p style={{ ...styles.loginSub, marginBottom: 28, marginTop: 0 }}>Set your password</p>
         {success ? (
@@ -760,7 +761,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 52, objectFit: 'contain', flexShrink: 0 }} />
+              <img src={ffsLogoUrl} alt="Fleet Efficiency Study" style={{ height: 52, objectFit: 'contain', flexShrink: 0 }} />
               <div>
                 <h2 style={h2style}>New Fleet Interview</h2>
                 <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>We will start with the technology adoption section.</p>
@@ -6699,7 +6700,7 @@ export default function App() {
               <h1 style={styles.mainTitle}>Dashboard</h1>
               <p style={styles.mainSub}>Last submission: {fleet?.lastSubmission ?? '—'} · Survey year {latestYear ?? '—'}</p>
             </div>
-            <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 56, objectFit: 'contain', opacity: 0.85 }} />
+            <img src={ffsLogoUrl} alt="Fleet Efficiency Study" style={{ height: 56, objectFit: 'contain', opacity: 0.85 }} />
         </header>
 
         {/* Interview modal rendered at top level */}
