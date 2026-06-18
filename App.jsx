@@ -106,13 +106,10 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={styles.loginBg}>
+    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
+      <img src="/ffs-logo.png" alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
-        <div style={styles.loginLogo}>
-          <img src="/nacfe-logo.png" alt="NACFE" style={styles.loginLogoImg} />
-        </div>
-        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
-        <p style={styles.loginSub}>Fleet Portal</p>
+        <p style={{ ...styles.loginSub, marginBottom: 28, marginTop: 0 }}>Fleet Portal</p>
 
         {/* Fleet picker — shown after login when a contact belongs to multiple fleets */}
         {pendingFleets && (
@@ -246,13 +243,10 @@ function ResetPasswordScreen({ token, onDone }) {
   };
 
   return (
-    <div style={styles.loginBg}>
+    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
+      <img src="/ffs-logo.png" alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
-        <div style={styles.loginLogo}>
-          <img src="/nacfe-logo.png" alt="NACFE" style={styles.loginLogoImg} />
-        </div>
-        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
-        <p style={styles.loginSub}>Set your password</p>
+        <p style={{ ...styles.loginSub, marginBottom: 28, marginTop: 0 }}>Set your password</p>
         {success ? (
           <div style={{ textAlign: 'center', padding: '12px 0' }}>
             <p style={{ fontSize: 14, color: '#15803D', fontWeight: 600, marginBottom: 12 }}>Password set successfully!</p>
@@ -765,9 +759,12 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
       <div style={overlay} onClick={e => e.target === e.currentTarget && onClose()}>
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-            <div>
-              <h2 style={h2style}>Fleet Efficiency Study New Fleet Interview</h2>
-              <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>We will start with the technology adoption section.</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+              <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 52, objectFit: 'contain', flexShrink: 0 }} />
+              <div>
+                <h2 style={h2style}>New Fleet Interview</h2>
+                <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>We will start with the technology adoption section.</p>
+              </div>
             </div>
             <CloseBtn />
           </div>
@@ -6702,6 +6699,7 @@ export default function App() {
               <h1 style={styles.mainTitle}>Dashboard</h1>
               <p style={styles.mainSub}>Last submission: {fleet?.lastSubmission ?? '—'} · Survey year {latestYear ?? '—'}</p>
             </div>
+            <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 56, objectFit: 'contain', opacity: 0.85 }} />
         </header>
 
         {/* Interview modal rendered at top level */}
