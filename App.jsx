@@ -106,10 +106,14 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
-      <img src="/ffs-logo.png" alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
+    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 20 }}>
+      <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 110, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
-        <p style={{ ...styles.loginSub, marginBottom: 28, marginTop: 0 }}>Fleet Portal</p>
+        <div style={styles.loginLogo}>
+          <img src="/nacfe-logo.png" alt="NACFE" style={styles.loginLogoImg} />
+        </div>
+        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
+        <p style={styles.loginSub}>Fleet Portal</p>
 
         {/* Fleet picker — shown after login when a contact belongs to multiple fleets */}
         {pendingFleets && (
@@ -243,10 +247,14 @@ function ResetPasswordScreen({ token, onDone }) {
   };
 
   return (
-    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
-      <img src="/ffs-logo.png" alt="NACFE Fleet Efficiency Study" style={{ height: 130, objectFit: 'contain' }} />
+    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 20 }}>
+      <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 110, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
-        <p style={{ ...styles.loginSub, marginBottom: 28, marginTop: 0 }}>Set your password</p>
+        <div style={styles.loginLogo}>
+          <img src="/nacfe-logo.png" alt="NACFE" style={styles.loginLogoImg} />
+        </div>
+        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
+        <p style={styles.loginSub}>Set your password</p>
         {success ? (
           <div style={{ textAlign: 'center', padding: '12px 0' }}>
             <p style={{ fontSize: 14, color: '#15803D', fontWeight: 600, marginBottom: 12 }}>Password set successfully!</p>
