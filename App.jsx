@@ -106,12 +106,9 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={styles.loginBg}>
+    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
+      <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
-        <div style={styles.loginLogo}>
-          <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={styles.loginLogoImg} />
-        </div>
-        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
         <p style={styles.loginSub}>Fleet Portal</p>
 
         {/* Fleet picker — shown after login when a contact belongs to multiple fleets */}
@@ -246,12 +243,9 @@ function ResetPasswordScreen({ token, onDone }) {
   };
 
   return (
-    <div style={styles.loginBg}>
+    <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
+      <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
       <div style={styles.loginCard}>
-        <div style={styles.loginLogo}>
-          <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={styles.loginLogoImg} />
-        </div>
-        <h1 style={styles.loginTitle}>Fleet Efficiency Study</h1>
         <p style={styles.loginSub}>Set your password</p>
         {success ? (
           <div style={{ textAlign: 'center', padding: '12px 0' }}>
