@@ -2773,6 +2773,9 @@ app.get("/api/health", async (req, res) => {
 });
 
 // ─── Serve React frontend ──────────────────────────────────────────────────────
+// Serve logos directly from public/ so they work regardless of build caching
+app.get('/ffs-logo.png',   (req, res) => res.sendFile(path.join(__dirname, 'public', 'ffs-logo.png')));
+app.get('/nacfe-logo.png', (req, res) => res.sendFile(path.join(__dirname, 'public', 'nacfe-logo.png')));
 app.use(express.static(path.join(__dirname, "dist")));
 
 // Catch-all: serve index.html for any non-API route (React Router support)
