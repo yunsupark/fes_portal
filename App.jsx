@@ -107,7 +107,9 @@ function LoginScreen({ onLogin }) {
 
   return (
     <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
-      <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
+      <div style={{ background: '#fff', borderRadius: 12, padding: '16px 24px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+        <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 280, objectFit: 'contain', display: 'block' }} />
+      </div>
       <div style={styles.loginCard}>
         <p style={styles.loginSub}>Fleet Portal</p>
 
@@ -244,7 +246,9 @@ function ResetPasswordScreen({ token, onDone }) {
 
   return (
     <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
-      <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
+      <div style={{ background: '#fff', borderRadius: 12, padding: '16px 24px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
+        <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 280, objectFit: 'contain', display: 'block' }} />
+      </div>
       <div style={styles.loginCard}>
         <p style={styles.loginSub}>Set your password</p>
         {success ? (
