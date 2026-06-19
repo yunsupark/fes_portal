@@ -3831,7 +3831,7 @@ const CHART_COLORS_30 = [
  *  legendItems – optional [{value, color}] array; renders an HTML legend
  *  sidebar and paints it onto the canvas when downloading.
  */
-function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, isAdmin, defaultSql, sqlKey, onRunQuery, onSaveSql }) {
+function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, isAdmin, defaultSql, sqlKey, onRunQuery, onSaveSql, csvData }) {
   const ref = useRef(null);
 
   // ── SQL editor state (NACFE admin only) ──────────────────────────────────────
@@ -4041,6 +4041,26 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     img.src = blobUrl;
   };
 
+  const downloadCsv = () => {
+    if (!csvData?.length) return;
+    const headers = Object.keys(csvData[0]);
+    const escape = v => {
+      if (v == null) return '';
+      const s = String(v);
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = [headers.join(','), ...csvData.map(row => headers.map(h => escape(row[h])).join(','))];
+    const blob = new Blob([rows.join('\n')], { type: 'text/csv;charset=utf-8;' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `${title || 'chart'}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  };
+
   return (
     <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '18px 22px' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
@@ -4059,6 +4079,13 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
                        cursor: 'pointer', color: showSql ? '#fff' : '#374151',
                        fontFamily: 'monospace' }}>
               SQL
+            </button>
+          )}
+          {csvData?.length > 0 && (
+            <button onClick={downloadCsv} title="Download data as CSV"
+              style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6,
+                       padding: '4px 10px', fontSize: 11, cursor: 'pointer', color: '#374151' }}>
+              ↓ CSV
             </button>
           )}
           <button onClick={download} title="Download as PNG"
@@ -4744,7 +4771,10 @@ ORDER BY t.technology, a.adoption_year`;
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(480px,1fr))', gap: 20 }}>
 
         {/* ── Combined duty cycles MPG ── */}
-        <AdminChartCard title="IFTA MPG" subtitle="Combined duty cycles, diesel MPG">
+        <AdminChartCard title="IFTA MPG" subtitle="Combined duty cycles, diesel MPG"
+          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
+          onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
+          csvData={mpgRows}>
           <ResponsiveContainer width="100%" height={CH}>
             <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4761,7 +4791,10 @@ ORDER BY t.technology, a.adoption_year`;
           </ResponsiveContainer>
         </AdminChartCard>
 
-        <AdminChartCard title="IFTA MPG and Adoption" subtitle="Combined duty cycles, diesel MPG">
+        <AdminChartCard title="IFTA MPG and Adoption" subtitle="Combined duty cycles, diesel MPG"
+          isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
+          onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
+          csvData={mpgRows}>
           <ResponsiveContainer width="100%" height={CH}>
             <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4785,8 +4818,8 @@ ORDER BY t.technology, a.adoption_year`;
         {/* ── LH and RH duty cycles MPG ── */}
         <AdminChartCard title="IFTA MPG" subtitle="LH and RH duty cycles, diesel MPG"
           isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
-          onRunQuery={sql => runChartQuery(sql, 'mpg')}
-          onSaveSql={saveSqlPermanent}>
+          onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
+          csvData={mpgRows}>
           <ResponsiveContainer width="100%" height={CH}>
             <LineChart data={mpgRows} margin={{ top: 8, right: 20, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4806,9 +4839,9 @@ ORDER BY t.technology, a.adoption_year`;
 
         <AdminChartCard title="IFTA MPG and Adoption" subtitle="LH and RH duty cycles, diesel MPG"
           isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
-          onRunQuery={sql => runChartQuery(sql, 'mpg')}
-          onSaveSql={saveSqlPermanent}
-          lineDashes={{ 'LH Adoption': [5, 3], 'RH Adoption': [5, 3] }}>
+          onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
+          lineDashes={{ 'LH Adoption': [5, 3], 'RH Adoption': [5, 3] }}
+          csvData={mpgRows}>
           <ResponsiveContainer width="100%" height={CH}>
             <ComposedChart data={mpgRows} margin={{ top: 8, right: 40, left: 16, bottom: 8 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4838,8 +4871,8 @@ ORDER BY t.technology, a.adoption_year`;
           return (
             <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel} legendItems={legItems}
               isAdmin={isAdminRole} defaultSql={sqlCat} sqlKey="chart_sql_cat"
-              onRunQuery={sql => runChartQuery(sql, 'cat')}
-              onSaveSql={saveSqlPermanent}>
+              onRunQuery={sql => runChartQuery(sql, 'cat')} onSaveSql={saveSqlPermanent}
+              csvData={catData.data}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={catData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -4865,8 +4898,8 @@ ORDER BY t.technology, a.adoption_year`;
           return (
             <AdminChartCard key={grp} title={grp} subtitle={haulLabel} legendItems={legItems}
               isAdmin={isAdminRole} defaultSql={sqlTech(grp)} sqlKey={`chart_sql_tech_${grp}`}
-              onRunQuery={sql => runChartQuery(sql, 'tech', grp)}
-              onSaveSql={saveSqlPermanent}>
+              onRunQuery={sql => runChartQuery(sql, 'tech', grp)} onSaveSql={saveSqlPermanent}
+              csvData={data}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
