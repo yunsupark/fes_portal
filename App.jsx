@@ -6701,12 +6701,12 @@ export default function App() {
           );
         })()}
         {page === 'dashboard' && <>
-        <header style={styles.mainHeader}>
+        <header style={{ ...styles.mainHeader, position: 'relative' }}>
             <div>
               <h1 style={styles.mainTitle}>Dashboard</h1>
               <p style={styles.mainSub}>Last submission: {fleet?.lastSubmission ?? '—'} · Survey year {latestYear ?? '—'}</p>
             </div>
-            <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ height: 108, objectFit: 'contain', opacity: 0.85 }} />
+            <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ height: 108, objectFit: 'contain', opacity: 0.85, position: 'absolute', top: 0, right: 0 }} />
         </header>
 
         {/* Interview modal rendered at top level */}
