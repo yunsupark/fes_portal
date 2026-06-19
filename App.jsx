@@ -108,7 +108,7 @@ function LoginScreen({ onLogin }) {
   return (
     <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
       <div style={{ background: '#fff', borderRadius: 12, padding: '16px 24px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
-        <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 280, objectFit: 'contain', display: 'block' }} />
+        <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 280, objectFit: 'contain', display: 'block' }} />
       </div>
       <div style={styles.loginCard}>
         <p style={styles.loginSub}>Fleet Portal</p>
@@ -247,7 +247,7 @@ function ResetPasswordScreen({ token, onDone }) {
   return (
     <div style={{ ...styles.loginBg, flexDirection: 'column', gap: 24 }}>
       <div style={{ background: '#fff', borderRadius: 12, padding: '16px 24px', boxShadow: '0 2px 12px rgba(0,0,0,0.08)' }}>
-        <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ width: 280, objectFit: 'contain', display: 'block' }} />
+        <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 280, objectFit: 'contain', display: 'block' }} />
       </div>
       <div style={styles.loginCard}>
         <p style={styles.loginSub}>Set your password</p>
@@ -764,7 +764,7 @@ function InterviewModal({ token, effectiveEditableYears, savedProgress, intervie
         <div style={card}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-              <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 36, objectFit: 'contain', flexShrink: 0, opacity: 0.7 }} />
+              <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ height: 36, objectFit: 'contain', flexShrink: 0, opacity: 0.7 }} />
               <div>
                 <h2 style={h2style}>New Fleet Interview</h2>
                 <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>We will start with the technology adoption section.</p>
@@ -6703,7 +6703,7 @@ export default function App() {
               <h1 style={styles.mainTitle}>Dashboard</h1>
               <p style={styles.mainSub}>Last submission: {fleet?.lastSubmission ?? '—'} · Survey year {latestYear ?? '—'}</p>
             </div>
-            <img src="/ffs-logo.png" alt="Fleet Efficiency Study" style={{ height: 36, objectFit: 'contain', opacity: 0.7 }} />
+            <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ height: 36, objectFit: 'contain', opacity: 0.7 }} />
         </header>
 
         {/* Interview modal rendered at top level */}
