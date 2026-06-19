@@ -106,10 +106,13 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{ ...styles.loginBg, position: 'relative' }}>
-      <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ position: 'absolute', bottom: 24, right: 24, width: 160, objectFit: 'contain', opacity: 0.85 }} />
+    <div style={{ minHeight: '100vh', display: 'flex', fontFamily: 'Arial, sans-serif' }}>
+      <div style={{ flex: 1, background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 40px', borderRight: '1px solid #e8e6e0' }}>
+        <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
+        <p style={{ color: '#9CA3AF', fontSize: 13, marginTop: 24, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Fleet Portal</p>
+      </div>
+      <div style={{ flex: 1, background: '#f4f3f1', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 40px' }}>
       <div style={styles.loginCard}>
-        <p style={styles.loginSub}>Fleet Portal</p>
 
         {/* Fleet picker — shown after login when a contact belongs to multiple fleets */}
         {pendingFleets && (
@@ -208,6 +211,7 @@ function LoginScreen({ onLogin }) {
           Need access? Contact <a href="mailto:yunsu.park@nacfe.org" style={styles.link}>yunsu.park@nacfe.org</a>
         </p>
       </div>
+      </div>
     </div>
   );
 }
@@ -243,8 +247,12 @@ function ResetPasswordScreen({ token, onDone }) {
   };
 
   return (
-    <div style={{ ...styles.loginBg, position: 'relative' }}>
-      <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ position: 'absolute', bottom: 24, right: 24, width: 160, objectFit: 'contain', opacity: 0.85 }} />
+    <div style={{ minHeight: '100vh', display: 'flex', fontFamily: 'Arial, sans-serif' }}>
+      <div style={{ flex: 1, background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 40px', borderRight: '1px solid #e8e6e0' }}>
+        <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
+        <p style={{ color: '#9CA3AF', fontSize: 13, marginTop: 24, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Fleet Portal</p>
+      </div>
+      <div style={{ flex: 1, background: '#f4f3f1', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 40px' }}>
       <div style={styles.loginCard}>
         <p style={styles.loginSub}>Set your password</p>
         {success ? (
@@ -270,6 +278,7 @@ function ResetPasswordScreen({ token, onDone }) {
             </button>
           </form>
         )}
+      </div>
       </div>
     </div>
   );
