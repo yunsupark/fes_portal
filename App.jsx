@@ -106,13 +106,12 @@ function LoginScreen({ onLogin }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', fontFamily: 'Arial, sans-serif' }}>
-      <div style={{ flex: 1, background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 40px', borderRight: '1px solid #e8e6e0' }}>
-        <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
-        <p style={{ color: '#9CA3AF', fontSize: 13, marginTop: 24, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Fleet Portal</p>
-      </div>
-      <div style={{ flex: 1, background: '#f4f3f1', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 40px' }}>
-      <div style={styles.loginCard}>
+    <div style={{ ...styles.loginBg }}>
+      <div style={{ display: 'flex' }}>
+        <div style={{ background: '#fff', borderRadius: '12px 0 0 12px', padding: '48px 40px', width: 400, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', boxShadow: '-4px 0 0 0 rgba(0,0,0,0), 0 8px 40px rgba(0,0,0,0.15)' }}>
+          <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 220, objectFit: 'contain' }} />
+        </div>
+      <div style={{ ...styles.loginCard, borderRadius: '0 12px 12px 0', maxWidth: 400 }}>
 
         {/* Fleet picker — shown after login when a contact belongs to multiple fleets */}
         {pendingFleets && (
@@ -247,13 +246,12 @@ function ResetPasswordScreen({ token, onDone }) {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', fontFamily: 'Arial, sans-serif' }}>
-      <div style={{ flex: 1, background: '#fff', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '48px 40px', borderRight: '1px solid #e8e6e0' }}>
-        <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 260, objectFit: 'contain' }} />
-        <p style={{ color: '#9CA3AF', fontSize: 13, marginTop: 24, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Fleet Portal</p>
-      </div>
-      <div style={{ flex: 1, background: '#f4f3f1', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '48px 40px' }}>
-      <div style={styles.loginCard}>
+    <div style={{ ...styles.loginBg }}>
+      <div style={{ display: 'flex' }}>
+        <div style={{ background: '#fff', borderRadius: '12px 0 0 12px', padding: '48px 40px', width: 400, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', boxShadow: '0 8px 40px rgba(0,0,0,0.15)' }}>
+          <img src="/fes-logo.png" alt="Fleet Efficiency Study" style={{ width: 220, objectFit: 'contain' }} />
+        </div>
+      <div style={{ ...styles.loginCard, borderRadius: '0 12px 12px 0', maxWidth: 400 }}>
         <p style={styles.loginSub}>Set your password</p>
         {success ? (
           <div style={{ textAlign: 'center', padding: '12px 0' }}>
