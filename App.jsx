@@ -2706,17 +2706,18 @@ function XlsxUpload({ templateName, columns, onImport, disabled }) {
       if (!raw.length) { setErrors(['File appears to be empty.']); return; }
 
       const headerRow = raw[0].map(h => String(h).trim());
-      const missing = columns.filter(c => !headerRow.includes(c.header)).map(c => c.header);
+      const headerLower = headerRow.map(h => h.toLowerCase());
+      const missing = columns.filter(c => !headerLower.includes(c.header.toLowerCase())).map(c => c.header);
       if (missing.length) {
         setErrors([
           `Missing column${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`,
-          'Column headers must match the template exactly (spelling, capitalization, and spaces).',
+          'Column headers must match the template (spelling and spaces must match, capitalization does not matter).',
         ]);
         return;
       }
 
       const colIdx = {};
-      columns.forEach(c => { colIdx[c.key] = headerRow.indexOf(c.header); });
+      columns.forEach(c => { colIdx[c.key] = headerLower.indexOf(c.header.toLowerCase()); });
 
       const dataRows = raw.slice(1).filter(r => r.some(v => v !== '' && v != null));
       if (!dataRows.length) { setErrors(['No data rows found — fill in at least one row below the header.']); return; }
