@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import * as XLSX from 'xlsx';
 
 import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 
@@ -2655,6 +2656,149 @@ const EMPTY_UTIL_ROW = () => ({
   grossed_out_pct: '', cubed_out_pct: '', ave_length_haul: '', empty_miles_pct: '',
 });
 
+const UTIL_UPLOAD_COLS = [
+  { header: 'Application',              key: 'application',    required: true,  type: 'str'   },
+  { header: 'Tractors',                 key: 'tractors',       required: false, type: 'int'   },
+  { header: 'Trailers',                 key: 'trailers',       required: false, type: 'int'   },
+  { header: 'Grossed Out %',            key: 'grossed_out_pct',required: false, type: 'pct'   },
+  { header: 'Cubed Out %',              key: 'cubed_out_pct',  required: false, type: 'pct'   },
+  { header: 'Avg Length of Haul (mi)', key: 'ave_length_haul', required: false, type: 'float' },
+  { header: 'Empty Miles %',            key: 'empty_miles_pct',required: false, type: 'pct'   },
+];
+
+const EQUIP_UPLOAD_COLS = [
+  { header: 'Qty',           key: 'qty',                required: false, type: 'int'   },
+  { header: 'Cab Type',      key: 'cab_type',           required: false, type: 'str'   },
+  { header: 'Tractor Make',  key: 'tractor_make',       required: false, type: 'str'   },
+  { header: 'Tractor Model', key: 'tractor_model',      required: false, type: 'str'   },
+  { header: 'Engine Make',   key: 'engine_make',        required: false, type: 'str'   },
+  { header: 'Engine Model',  key: 'engine_model',       required: false, type: 'str'   },
+  { header: 'Engine Rating', key: 'engine_rating',      required: false, type: 'float' },
+  { header: 'Trans Make',    key: 'transmission_make',  required: false, type: 'str'   },
+  { header: 'Trans Model',   key: 'transmission_model', required: false, type: 'str'   },
+  { header: 'Axle Make',     key: 'axle_make',          required: false, type: 'str'   },
+  { header: 'Axle Model',    key: 'axle_model',         required: false, type: 'str'   },
+  { header: 'Axle Ratio',    key: 'axle_ratio',         required: false, type: 'float' },
+];
+
+function XlsxUpload({ templateName, columns, onImport, disabled }) {
+  const [errors, setErrors] = useState([]);
+  const inputRef = useRef();
+
+  const downloadTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([columns.map(c => c.header)]);
+    ws['!cols'] = columns.map(() => ({ wch: 20 }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Template');
+    XLSX.writeFile(wb, `${templateName} Template.xlsx`);
+  };
+
+  const handleFile = async (e) => {
+    setErrors([]);
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf, { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const raw = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      if (!raw.length) { setErrors(['File appears to be empty.']); return; }
+
+      const headerRow = raw[0].map(h => String(h).trim());
+      const missing = columns.filter(c => !headerRow.includes(c.header)).map(c => c.header);
+      if (missing.length) {
+        setErrors([
+          `Missing column${missing.length > 1 ? 's' : ''}: ${missing.join(', ')}`,
+          'Column headers must match the template exactly (spelling, capitalization, and spaces).',
+        ]);
+        return;
+      }
+
+      const colIdx = {};
+      columns.forEach(c => { colIdx[c.key] = headerRow.indexOf(c.header); });
+
+      const dataRows = raw.slice(1).filter(r => r.some(v => v !== '' && v != null));
+      if (!dataRows.length) { setErrors(['No data rows found — fill in at least one row below the header.']); return; }
+
+      const rowErrors = [];
+      const parsed = dataRows.map((row, ri) => {
+        const out = {};
+        for (const col of columns) {
+          const cell = row[colIdx[col.key]];
+          const val  = (cell === '' || cell == null) ? '' : String(cell).trim();
+          if (col.required && val === '') {
+            rowErrors.push(`Row ${ri + 2}: "${col.header}" is required.`);
+            out[col.key] = ''; continue;
+          }
+          if (val === '') { out[col.key] = ''; continue; }
+          if (col.type === 'int') {
+            const n = parseInt(val, 10);
+            if (isNaN(n)) rowErrors.push(`Row ${ri + 2}: "${col.header}" must be a whole number (got "${val}").`);
+            else out[col.key] = String(n);
+          } else if (col.type === 'float') {
+            const n = parseFloat(val);
+            if (isNaN(n)) rowErrors.push(`Row ${ri + 2}: "${col.header}" must be a number (got "${val}").`);
+            else out[col.key] = String(n);
+          } else if (col.type === 'pct') {
+            const n = parseFloat(val);
+            if (isNaN(n)) rowErrors.push(`Row ${ri + 2}: "${col.header}" must be a number between 0 and 100 (got "${val}").`);
+            else if (n < 0 || n > 100) rowErrors.push(`Row ${ri + 2}: "${col.header}" must be between 0 and 100 (got ${n}).`);
+            else out[col.key] = String(n);
+          } else {
+            out[col.key] = val;
+          }
+        }
+        return out;
+      });
+
+      if (rowErrors.length) { setErrors(rowErrors); return; }
+      setErrors([]);
+      onImport(parsed);
+    } catch (err) {
+      setErrors([`Could not read file: ${err.message}`]);
+    }
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button onClick={downloadTemplate} title="Download blank template"
+          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                   border: '1px solid #D1D5DB', background: '#F9FAFB', cursor: 'pointer', color: '#374151', whiteSpace: 'nowrap' }}>
+          ↓ Template
+        </button>
+        <button onClick={() => !disabled && inputRef.current?.click()} disabled={disabled}
+          title={disabled ? 'Select an editable year to upload' : 'Upload filled-in template'}
+          style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6,
+                   border: '1px solid', borderColor: disabled ? '#D1D5DB' : '#1c3660',
+                   background: disabled ? '#F3F4F6' : '#EFF6FF',
+                   cursor: disabled ? 'not-allowed' : 'pointer',
+                   color: disabled ? '#9CA3AF' : '#1c3660', whiteSpace: 'nowrap' }}>
+          ↑ Upload XLSX
+        </button>
+        <input ref={inputRef} type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={handleFile} />
+      </div>
+      {errors.length > 0 && (
+        <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 6,
+                      padding: '10px 12px', fontSize: 11, color: '#991B1B', lineHeight: 1.6 }}>
+          <strong>Upload failed:</strong>
+          <ul style={{ margin: '4px 0 6px', paddingLeft: 18 }}>
+            {errors.map((e, i) => <li key={i}>{e}</li>)}
+          </ul>
+          <span style={{ color: '#7F1D1D' }}>
+            If you can't resolve this, email{' '}
+            <a href="mailto:yunsu.park@nacfe.org" style={{ color: '#1c3660', fontWeight: 600 }}>
+              yunsu.park@nacfe.org
+            </a>{' '}
+            for assistance.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submittedYears = [], minDataYear = null }) {
   const NUM_YEARS = 5;
   const editableYearsKey = editableYears.join(',');
@@ -2804,7 +2948,15 @@ function FleetDetailsTable({ token, onSave, editableYears = [2024, 2025], submit
     <div style={styles.chartCard}>
       {/* Header */}
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
-        <h3 style={{...styles.chartTitle, marginBottom:0}}>Equipment Utilization</h3>
+        <div>
+          <h3 style={{...styles.chartTitle, marginBottom:4}}>Equipment Utilization</h3>
+          <XlsxUpload
+            templateName="Equipment Utilization"
+            columns={UTIL_UPLOAD_COLS}
+            disabled={!isSelectedEditable}
+            onImport={rows => setEdits(prev => ({ ...prev, [selectedYear]: { ...prev[selectedYear], utilization: rows } }))}
+          />
+        </div>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           {[...years].sort((a, b) => a - b).map(yr => {
             const yrEditable = editableYears.includes(yr) && !submittedYears.includes(yr);
@@ -3444,7 +3596,15 @@ function FleetEquipTable({ token, onSave, editableYears = [2024, 2025], submitte
   return (
     <div style={styles.chartCard}>
       <div style={{display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16, flexWrap:'wrap', gap:8}}>
-        <h3 style={{...styles.chartTitle, marginBottom:0}}>Fleet Equipment</h3>
+        <div>
+          <h3 style={{...styles.chartTitle, marginBottom:4}}>Fleet Equipment</h3>
+          <XlsxUpload
+            templateName="Fleet Equipment"
+            columns={EQUIP_UPLOAD_COLS}
+            disabled={!isSelectedEditable}
+            onImport={rows => setEdits(prev => ({ ...prev, [selectedYear]: rows }))}
+          />
+        </div>
         <div style={{display:'flex', alignItems:'center', gap:8, flexWrap:'wrap'}}>
           {allYearsForTabs.map(yr => {
             const yrEditable = editableYears.includes(yr) && !submittedYears.includes(yr);
