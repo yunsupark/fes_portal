@@ -5102,7 +5102,7 @@ function AdminView({ token, onSignOut }) {
   // Admin contacts
   const [adminContacts, setAdminContacts] = useState([]);
   const [showNacfeUsers, setShowNacfeUsers] = useState(false);
-  const [nacfeUserForm, setNacfeUserForm] = useState({ first_name: '', last_name: '', email: '', phone: '', admin_role: 'user' });
+  const [nacfeUserForm, setNacfeUserForm] = useState({ first_name: '', last_name: '', email: '', phone: '', admin_role: 'user', receives_assist_email: false });
   const [nacfeUserSaving, setNacfeUserSaving] = useState(false);
   const [showNacfeUserForm, setShowNacfeUserForm] = useState(false);
   const nacfeDropdownRef = React.useRef(null);
@@ -5209,7 +5209,7 @@ function AdminView({ token, onSignOut }) {
       });
       const d = await r.json();
       if (!r.ok) { alert(d.error || 'Failed to add user'); return; }
-      setNacfeUserForm({ first_name: '', last_name: '', email: '', phone: '', admin_role: 'user' });
+      setNacfeUserForm({ first_name: '', last_name: '', email: '', phone: '', admin_role: 'user', receives_assist_email: false });
       setShowNacfeUserForm(false);
       fetchAdminContacts();
     } catch { alert('Network error'); }
@@ -5224,6 +5224,16 @@ function AdminView({ token, onSignOut }) {
       if (!r.ok) { alert(d.error || 'Failed to remove user'); return; }
       setAdminContacts(prev => prev.filter(c => c.contact_id !== contactId));
     } catch { alert('Network error'); }
+  };
+
+  const handleToggleAssistEmail = async (contactId, current) => {
+    const next = current ? 0 : 1;
+    setAdminContacts(prev => prev.map(c => c.contact_id === contactId ? { ...c, receives_assist_email: next } : c));
+    try {
+      await fetch(`/api/admin/admin-contacts/${contactId}/assist-email`, {
+        method: 'PATCH', headers: authHeaders, body: JSON.stringify({ receives_assist_email: next }),
+      });
+    } catch { setAdminContacts(prev => prev.map(c => c.contact_id === contactId ? { ...c, receives_assist_email: current } : c)); }
   };
 
   useEffect(() => { fetchFleets(); fetchAdminContacts(); }, [token]);
@@ -5519,6 +5529,11 @@ function AdminView({ token, onSignOut }) {
                       <option value="admin">Admin</option>
                     </select>
                   </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#374151', cursor: 'pointer', userSelect: 'none' }}>
+                    <input type="checkbox" checked={!!nacfeUserForm.receives_assist_email}
+                      onChange={e => setNacfeUserForm(p => ({ ...p, receives_assist_email: e.target.checked }))} />
+                    Receives assistance email (shown to fleet users when they contact NACFE for help)
+                  </label>
                   <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                     <button type="button" onClick={() => setShowNacfeUserForm(false)} style={{ background: '#F3F4F6', border: '1px solid #D1D5DB', borderRadius: 6, padding: '5px 12px', fontSize: 12, cursor: 'pointer' }}>Cancel</button>
                     <button type="submit" disabled={nacfeUserSaving} style={{ background: '#1c3660', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
@@ -5535,6 +5550,7 @@ function AdminView({ token, onSignOut }) {
                       <th style={{ ...thBase, padding: '8px 12px' }}>Email</th>
                       <th style={{ ...thBase, padding: '8px 12px' }}>Last Login</th>
                       <th style={{ ...thBase, padding: '8px 12px' }}>Role</th>
+                      <th style={{ ...thBase, padding: '8px 12px', textAlign: 'center' }} title="Person listed as assistance contact for fleet users">Assist. Email</th>
                       {isAdminRole && <th style={{ ...thBase, padding: '8px 12px' }}></th>}
                     </tr>
                   </thead>
@@ -5566,6 +5582,13 @@ function AdminView({ token, onSignOut }) {
                               </span>
                             )}
                           </td>
+                          <td style={{ padding: '8px 12px', textAlign: 'center' }}>
+                            <input type="checkbox" checked={!!c.receives_assist_email}
+                              disabled={!isAdminRole}
+                              onChange={() => isAdminRole && handleToggleAssistEmail(c.contact_id, c.receives_assist_email)}
+                              title={isAdminRole ? 'Toggle assistance email recipient' : ''}
+                              style={{ cursor: isAdminRole ? 'pointer' : 'default', width: 15, height: 15 }} />
+                          </td>
                           {isAdminRole && (
                             <td style={{ padding: '8px 12px', textAlign: 'right' }}>
                               <button onClick={() => handleRemoveNacfeUser(c.contact_id)} disabled={isLastAdmin}
@@ -5577,7 +5600,7 @@ function AdminView({ token, onSignOut }) {
                       );
                     })}
                     {adminContacts.length === 0 && (
-                      <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No users found.</td></tr>
+                      <tr><td colSpan={6} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No users found.</td></tr>
                     )}
                   </tbody>
                 </table>

@@ -241,6 +241,14 @@ const db = mysql.createPool({
       await db.query(`ALTER TABLE ffs_mpg ADD COLUMN trailer_type_id INT NULL`);
       console.log("Added trailer_type_id column to ffs_mpg");
     }
+    const [[{ assist_col }]] = await db.query(
+      `SELECT COUNT(*) AS assist_col FROM INFORMATION_SCHEMA.COLUMNS
+       WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'ffs_contact' AND COLUMN_NAME = 'receives_assist_email'`
+    );
+    if (!assist_col) {
+      await db.query(`ALTER TABLE ffs_contact ADD COLUMN receives_assist_email TINYINT(1) NOT NULL DEFAULT 0`);
+      console.log("Added receives_assist_email column to ffs_contact");
+    }
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -2118,12 +2126,13 @@ app.get("/api/admin/admin-contacts", requireAuth, requireAdmin, async (req, res)
     const [rows] = await db.query(
       `SELECT contact_id, first_name, last_name, email, phone,
               COALESCE(active, 1) AS active, last_login,
-              COALESCE(admin_role, 'user') AS admin_role
+              COALESCE(admin_role, 'user') AS admin_role,
+              COALESCE(receives_assist_email, 0) AS receives_assist_email
        FROM ffs_contact
        WHERE fleet_id = 0
        ORDER BY last_name, first_name`
     );
-    res.json({ contacts: rows.map(c => ({ ...c, active: Number(c.active) })) });
+    res.json({ contacts: rows.map(c => ({ ...c, active: Number(c.active), receives_assist_email: Number(c.receives_assist_email) })) });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Database error" });
@@ -2164,16 +2173,17 @@ app.patch("/api/admin/admin-contacts/:id/role", requireAuth, requireAdminRole, a
  * Creates a new fleet_id=0 (NACFE) user.
  */
 app.post("/api/admin/admin-contacts", requireAuth, requireAdminRole, async (req, res) => {
-  const { first_name, last_name, email, phone, admin_role } = req.body;
+  const { first_name, last_name, email, phone, admin_role, receives_assist_email } = req.body;
   if (!email) return res.status(400).json({ error: "email required" });
   const role = ['admin', 'user'].includes(admin_role) ? admin_role : 'user';
+  const assistEmail = receives_assist_email ? 1 : 0;
   try {
     const [existing] = await db.query(`SELECT contact_id FROM ffs_contact WHERE email = ?`, [email]);
     if (existing.length) return res.status(400).json({ error: "A user with that email already exists" });
     await db.query(
-      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, admin_role)
-       VALUES (0, ?, ?, ?, ?, 1, ?)`,
-      [first_name || '', last_name || '', email, phone || '', role]
+      `INSERT INTO ffs_contact (fleet_id, first_name, last_name, email, phone, active, admin_role, receives_assist_email)
+       VALUES (0, ?, ?, ?, ?, 1, ?, ?)`,
+      [first_name || '', last_name || '', email, phone || '', role, assistEmail]
     );
     res.json({ ok: true });
   } catch (err) {
@@ -2201,6 +2211,26 @@ app.delete("/api/admin/admin-contacts/:id", requireAuth, requireAdminRole, async
       if (admin_count === 0) return res.status(400).json({ error: "Cannot remove the last admin" });
     }
     await db.query(`DELETE FROM ffs_contact WHERE contact_id = ? AND fleet_id = 0`, [contactId]);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * PATCH /api/admin/admin-contacts/:id/assist-email
+ * Toggles the receives_assist_email flag for a fleet_id=0 contact.
+ */
+app.patch("/api/admin/admin-contacts/:id/assist-email", requireAuth, requireAdminRole, async (req, res) => {
+  const contactId = parseInt(req.params.id);
+  const { receives_assist_email } = req.body;
+  if (typeof receives_assist_email === 'undefined') return res.status(400).json({ error: "receives_assist_email required" });
+  try {
+    await db.query(
+      `UPDATE ffs_contact SET receives_assist_email = ? WHERE contact_id = ? AND fleet_id = 0`,
+      [receives_assist_email ? 1 : 0, contactId]
+    );
     res.json({ ok: true });
   } catch (err) {
     console.error(err);
