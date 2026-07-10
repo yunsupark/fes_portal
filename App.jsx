@@ -2261,7 +2261,7 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
                 </td>
               ))}
               {effectiveEditableYears.map(y => {
-                const isReadOnly = submittedYears.includes(y) || dataYears.has(y);
+                const isReadOnly = submittedYears.includes(y);
                 return (
                   <td key={y} style={{...styles.heatCell, fontSize:12, color: isReadOnly ? '#6B7280' : '#374151', background: isReadOnly ? 'transparent' : '#EFF6FF', fontWeight:500}}>
                     {yearMeta[y]?.cab_type || selectedCabType}
@@ -2304,10 +2304,10 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
                         </td>
                       ))}
                       {effectiveEditableYears.map(y => {
-                        if (submittedYears.includes(y) || dataYears.has(y)) {
+                        if (submittedYears.includes(y)) {
                           const dbVal = (techData[y] || {})[tech.label];
                           const editVal = ((edits[selectedCabType] || {})[y] || {})[tech.label];
-                          const displayVal = dbVal != null ? dbVal : (submittedYears.includes(y) && editVal !== '' && editVal != null ? Number(editVal) / 100 : 0);
+                          const displayVal = dbVal != null ? dbVal : (editVal !== '' && editVal != null ? Number(editVal) / 100 : 0);
                           return (
                             <td key={y} style={styles.heatCell}>
                               <HeatCell value={displayVal} />
