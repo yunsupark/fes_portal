@@ -2214,9 +2214,6 @@ function TechAdoptionCard({ token, onSave, editableYears = [2024, 2025], submitt
                 if (submittedYears.includes(y)) {
                   return <th key={y} style={styles.heatThYear}>{y} ✓</th>;
                 }
-                if (dataYears.has(y)) {
-                  return <th key={y} style={styles.heatThYear}>{y}</th>;
-                }
                 const otherCab = selectedCabType === 'Day Cab' ? 'Sleeper' : 'Day Cab';
                 const hasPriorYear    = y - 1 >= 2003;
                 const hasPriorSame    = hasPriorYear && (
