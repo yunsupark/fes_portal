@@ -2422,16 +2422,28 @@ app.get("/api/chart-data", requireAuth, async (req, res) => {
       peerRows.forEach(r => { if (r.avg_mpg != null) peerMpg[r.mpg_year] = parseFloat(parseFloat(r.avg_mpg).toFixed(2)); });
     }
 
-    // Own adoption avg % by cab type
+    // Own adoption avg % by cab type.
+    // Denominator = all active technologies applicable to the cab type so that
+    // years where the fleet only entered the techs they use are not inflated vs
+    // years where they also entered 0% for unused technologies.
     const [adoptionRows] = await db.query(
-      `SELECT adoption_year, cab_type, AVG(adoption_percent)*100 AS avg_pct
-       FROM ffs_adoption WHERE fleet_id = ? AND cab_type IN ('Sleeper','Day Cab')
-       GROUP BY adoption_year, cab_type ORDER BY adoption_year`,
+      `SELECT a.adoption_year, a.cab_type,
+              SUM(a.adoption_percent) * 100 AS sum_pct,
+              (SELECT COUNT(*) FROM ffs_tech t2
+               WHERE t2.active_to IS NULL
+                 AND CASE a.cab_type
+                   WHEN 'Sleeper'  THEN (t2.applies_sleeper = 1 OR t2.applies_sleeper IS NULL)
+                   WHEN 'Day Cab'  THEN (t2.applies_daycab  = 1 OR t2.applies_daycab  IS NULL)
+                   ELSE 1 END) AS total_techs
+       FROM ffs_adoption a
+       WHERE a.fleet_id = ? AND a.cab_type IN ('Sleeper','Day Cab')
+       GROUP BY a.adoption_year, a.cab_type ORDER BY a.adoption_year`,
       [fleet_id]
     );
     const sleeperAdoption = {}, dayCabAdoption = {};
     adoptionRows.forEach(r => {
-      const v = parseFloat(parseFloat(r.avg_pct).toFixed(1));
+      if (!r.total_techs) return;
+      const v = parseFloat((r.sum_pct / r.total_techs).toFixed(1));
       if (r.cab_type === 'Sleeper') sleeperAdoption[r.adoption_year] = v;
       else dayCabAdoption[r.adoption_year] = v;
     });

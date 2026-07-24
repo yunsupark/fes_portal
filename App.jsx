@@ -7453,14 +7453,23 @@ function BenchmarkPage({ token }) {
 
   const adoptionChartData = benchData ? years.map(yr => {
     const pt = { year: String(yr) };
-    // "You" — average adoption across all techs for this year
-    const youVals = adoptionTechs.map(t => benchData.adoption[t]?.[cabType]?.['You']?.[yr]).filter(v => v != null);
-    pt['You'] = youVals.length ? parseFloat((youVals.reduce((s,v)=>s+v,0)/youVals.length).toFixed(1)) : null;
-    // "Peer Average" — average across all peer fleets and all techs
-    const peerVals = peerLabels.flatMap(lbl =>
+    // "You" — average over ALL techs; missing entries count as 0% so the
+    // denominator stays consistent across years regardless of how many techs
+    // the fleet explicitly entered. Only show a value if at least one tech
+    // was entered for the year (to distinguish "entered zeros" from "no data").
+    const youRaw = adoptionTechs.map(t => benchData.adoption[t]?.[cabType]?.['You']?.[yr]);
+    const youHasAny = youRaw.some(v => v != null);
+    pt['You'] = youHasAny
+      ? parseFloat((youRaw.reduce((s, v) => s + (v ?? 0), 0) / youRaw.length).toFixed(1))
+      : null;
+    // "Peer Average" — same logic: missing = 0% per fleet-tech pair
+    const peerRaw = peerLabels.flatMap(lbl =>
       adoptionTechs.map(t => benchData.adoption[t]?.[cabType]?.[lbl]?.[yr])
-    ).filter(v => v != null);
-    pt['Peer Average'] = peerVals.length ? parseFloat((peerVals.reduce((s,v)=>s+v,0)/peerVals.length).toFixed(1)) : null;
+    );
+    const peerHasAny = peerRaw.some(v => v != null);
+    pt['Peer Average'] = peerHasAny
+      ? parseFloat((peerRaw.reduce((s, v) => s + (v ?? 0), 0) / peerRaw.length).toFixed(1))
+      : null;
     return pt;
   }) : [];
 
