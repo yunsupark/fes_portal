@@ -835,8 +835,41 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
     const editableYears = [];
     for (let yr = yrFrom; yr <= yrTo; yr++) editableYears.push(yr);
 
-    // Query status for all display years (editable range + any submitted years outside it)
-    const years = [...new Set([...editableYears, ...submittedYears])].sort((a, b) => a - b);
+    // If this fleet has no submissions, check whether it has any data in the DB.
+    // Fleets with historical data are returning fleets even without ffs_submission rows.
+    let hasHistoricalData = false;
+    if (isNewFleet) {
+      const [[{ adoptionCnt }]] = await db.query(
+        `SELECT COUNT(*) AS adoptionCnt FROM ffs_adoption WHERE fleet_id = ? LIMIT 1`, [fleet_id]
+      );
+      const [[{ equipCnt }]] = await db.query(
+        `SELECT COUNT(*) AS equipCnt FROM ffs_fleet_equip WHERE fleet_id = ? LIMIT 1`, [fleet_id]
+      );
+      const [[{ fuelCnt }]] = await db.query(
+        `SELECT COUNT(*) AS fuelCnt FROM ffs_mpg WHERE fleet_id = ? LIMIT 1`, [fleet_id]
+      );
+      const [[{ utilCnt }]] = await db.query(
+        `SELECT COUNT(*) AS utilCnt FROM ffs_equip_utilization WHERE fleet_id = ? LIMIT 1`, [fleet_id]
+      );
+      hasHistoricalData = adoptionCnt > 0 || equipCnt > 0 || fuelCnt > 0 || utilCnt > 0;
+    }
+    const effectiveIsNewFleet = isNewFleet && !hasHistoricalData;
+
+    // Query status for all display years (editable range + submitted years + any years with actual data)
+    let historicalDataYears = [];
+    if (hasHistoricalData) {
+      const [histRows] = await db.query(
+        `SELECT DISTINCT yr FROM (
+           SELECT adoption_year AS yr FROM ffs_adoption WHERE fleet_id = ?
+           UNION SELECT equip_year FROM ffs_fleet_equip WHERE fleet_id = ?
+           UNION SELECT mpg_year FROM ffs_mpg WHERE fleet_id = ?
+           UNION SELECT utilization_year FROM ffs_equip_utilization WHERE fleet_id = ?
+         ) AS t`,
+        [fleet_id, fleet_id, fleet_id, fleet_id]
+      );
+      historicalDataYears = histRows.map(r => Number(r.yr));
+    }
+    const years = [...new Set([...editableYears, ...submittedYears, ...historicalDataYears])].sort((a, b) => a - b);
     if (!years.length) years.push(new Date().getFullYear());
 
     const [utilRows] = await db.query(
@@ -896,7 +929,7 @@ app.get("/api/submission-status", requireAuth, async (req, res) => {
       techTotals[yr] = { 'Sleeper': Number(sleeperTotal.cnt), 'Day Cab': Number(dayCabTotal.cnt) };
     }
 
-    res.json({ years, utilization, fleetEquip, fuel, tech, techTotals, submittedYears, editableYears, isNewFleet });
+    res.json({ years, utilization, fleetEquip, fuel, tech, techTotals, submittedYears, editableYears, isNewFleet: effectiveIsNewFleet });
   } catch (err) {
     console.error("Error fetching submission status:", err.message);
     res.status(500).json({ error: "Failed to fetch status" });
