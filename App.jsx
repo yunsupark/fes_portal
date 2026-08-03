@@ -6513,6 +6513,31 @@ export default function App() {
       .catch(console.error);
   }, [token, saveCount]);
 
+  // Fetch all fleets this contact has access to (enables in-session fleet switching)
+  useEffect(() => {
+    if (!token || isAdmin) return;
+    fetch('/api/auth/my-fleets', { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.ok ? r.json() : { fleets: [] })
+      .then(d => setMyFleets(d.fleets || []))
+      .catch(() => {});
+  }, [token]);
+
+  const handleSwitchFleet = async (fleetId) => {
+    setFleetSwitching(true);
+    try {
+      const res = await fetch('/api/auth/switch-fleet', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fleet_id: fleetId }),
+      });
+      const body = await res.json();
+      if (!res.ok) { alert(body.error || 'Failed to switch fleet'); return; }
+      localStorage.setItem('token', body.token);
+      window.location.reload();
+    } catch { alert('Network error. Please try again.'); }
+    finally { setFleetSwitching(false); }
+  };
+
   // Load interview progress from server (shared across all fleet users)
   useEffect(() => {
     if (!token) return;
@@ -6638,6 +6663,9 @@ export default function App() {
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMsg, setPwMsg] = useState('');
+  const [myFleets, setMyFleets] = useState([]);
+  const [showFleetSwitcher, setShowFleetSwitcher] = useState(false);
+  const [fleetSwitching, setFleetSwitching] = useState(false);
 
   const fetchTeamContacts = async () => {
     setTeamLoading(true);
@@ -6778,6 +6806,11 @@ export default function App() {
               <div style={styles.fleetMeta}>{fleet?.hq}</div>
             </div>
           </div>
+          {myFleets.length > 1 && (
+            <button onClick={() => setShowFleetSwitcher(true)} style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.18)', borderRadius: 6, color: '#E5E7EB', fontSize: 12, cursor: 'pointer', padding: '6px 10px', textAlign: 'left', width: '100%', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 13 }}>⇄</span> Switch fleet
+            </button>
+          )}
           <button onClick={() => { setShowChangePassword(true); setPwMsg(''); }} style={{ background: 'none', border: 'none', color: '#9CA3AF', fontSize: 12, cursor: 'pointer', padding: '4px 0', textAlign: 'left', width: '100%' }}>Change password</button>
           <button style={styles.btnSignOut} onClick={handleSignOut}>Sign out</button>
         </div>
@@ -7153,6 +7186,40 @@ export default function App() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Fleet Switcher Modal */}
+      {showFleetSwitcher && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}
+          onClick={e => { if (e.target === e.currentTarget) setShowFleetSwitcher(false); }}>
+          <div style={{ background: '#fff', borderRadius: 12, padding: '28px 32px', width: 360, boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}>
+            <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#111827' }}>Switch Fleet</h3>
+            <p style={{ margin: '0 0 18px', fontSize: 13, color: '#6B7280' }}>Select the fleet you want to open:</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {myFleets.map(f => (
+                <button key={f.fleet_id}
+                  onClick={() => handleSwitchFleet(f.fleet_id)}
+                  disabled={fleetSwitching || f.fleet_id === fleet?.id}
+                  style={{
+                    background: f.fleet_id === fleet?.id ? '#F0F7FF' : '#fff',
+                    border: `1px solid ${f.fleet_id === fleet?.id ? '#1c3660' : '#D1D5DB'}`,
+                    borderRadius: 8, padding: '10px 16px', cursor: f.fleet_id === fleet?.id ? 'default' : 'pointer',
+                    textAlign: 'left', display: 'flex', flexDirection: 'column', gap: 2,
+                    opacity: fleetSwitching && f.fleet_id !== fleet?.id ? 0.6 : 1,
+                  }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, color: '#111827', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {f.fleet_name}
+                    {f.fleet_id === fleet?.id && <span style={{ fontSize: 11, fontWeight: 400, color: '#1c3660', background: '#DBEAFE', borderRadius: 4, padding: '1px 6px' }}>current</span>}
+                  </span>
+                  {f.fleet_city && <span style={{ fontSize: 12, color: '#6B7280' }}>{f.fleet_city}{f.fleet_state ? `, ${f.fleet_state}` : ''}</span>}
+                </button>
+              ))}
+            </div>
+            <button onClick={() => setShowFleetSwitcher(false)} style={{ marginTop: 16, background: 'none', border: 'none', color: '#6B7280', fontSize: 13, cursor: 'pointer', padding: '4px 0' }}>
+              Cancel
+            </button>
           </div>
         </div>
       )}

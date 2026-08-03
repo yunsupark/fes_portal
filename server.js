@@ -433,6 +433,75 @@ app.post("/api/auth/select-fleet", async (req, res) => {
 });
 
 /**
+ * GET /api/auth/my-fleets
+ * Returns all fleets the logged-in contact has access to (used for in-session fleet switching).
+ */
+app.get("/api/auth/my-fleets", requireAuth, async (req, res) => {
+  const { contact_id } = req.user;
+  try {
+    const [rows] = await db.query(
+      `SELECT f.fleet_id, f.fleet_name, f.fleet_city, f.fleet_state, cf.fleet_role
+       FROM ffs_contact_fleet cf
+       JOIN ffs_fleet f ON cf.fleet_id = f.fleet_id
+       WHERE cf.contact_id = ?
+       ORDER BY f.fleet_name`,
+      [contact_id]
+    );
+    res.json({ fleets: rows.map(f => ({
+      fleet_id: f.fleet_id, fleet_name: f.fleet_name,
+      fleet_city: f.fleet_city || null, fleet_state: f.fleet_state || null,
+    })) });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
+ * POST /api/auth/switch-fleet
+ * Body: { fleet_id }
+ * Issues a new JWT for a different fleet the contact has access to — no re-login required.
+ */
+app.post("/api/auth/switch-fleet", requireAuth, async (req, res) => {
+  const { contact_id } = req.user;
+  const fid = parseInt(req.body.fleet_id);
+  if (!fid) return res.status(400).json({ error: "fleet_id required" });
+  try {
+    const [[cfRow]] = await db.query(
+      `SELECT cf.fleet_role, f.fleet_name, f.fleet_city, f.fleet_state
+       FROM ffs_contact_fleet cf
+       JOIN ffs_fleet f ON cf.fleet_id = f.fleet_id
+       WHERE cf.contact_id = ? AND cf.fleet_id = ?`,
+      [contact_id, fid]
+    );
+    if (!cfRow) return res.status(403).json({ error: "You do not have access to that fleet." });
+
+    const [[contact]] = await db.query(
+      `SELECT contact_id, first_name, last_name, email FROM ffs_contact WHERE contact_id = ?`,
+      [contact_id]
+    );
+    const token = jwt.sign(
+      { fleet_id: fid, fleet_name: cfRow.fleet_name, contact_id: contact.contact_id,
+        email: contact.email, first_name: contact.first_name || '', last_name: contact.last_name || '',
+        admin_role: null, fleet_role: cfRow.fleet_role || 'fleet_user' },
+      JWT_SECRET, { expiresIn: "30d" }
+    );
+    res.json({
+      token,
+      fleet: {
+        id: fid, name: cfRow.fleet_name,
+        contact: `${contact.first_name||''} ${contact.last_name||''}`.trim(),
+        email: contact.email,
+        hq: cfRow.fleet_city ? `${cfRow.fleet_city}, ${cfRow.fleet_state}` : null,
+      },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+/**
  * POST /api/auth/forgot-password
  * Body: { email }
  * Sends a password reset link. Always returns 200 to prevent email enumeration.
