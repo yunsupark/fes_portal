@@ -4986,7 +4986,7 @@ ORDER BY t.technology, a.adoption_year`;
         </AdminChartCard>
 
         {/* ── LH and RH duty cycles MPG ── */}
-        <AdminChartCard title="IFTA MPG" subtitle="LH and RH duty cycles — diesel/biodiesel &amp; CNG DGE"
+        <AdminChartCard title="IFTA MPG" subtitle="LH and RH duty cycles — diesel/biodiesel"
           isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
           onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
           csvData={mpgRows}>
@@ -4995,20 +4995,19 @@ ORDER BY t.technology, a.adoption_year`;
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
               <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                label={{ value: 'MPG / DGE', angle: -90, position: 'insideLeft',
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
               <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)}` : '—', n]} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Line type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
               <Line type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
-              <Line type="monotone" dataKey="RH CNG DGE"           stroke="#2ca02c" strokeWidth={2} strokeDasharray="6 2" dot={false} connectNulls />
               <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
               {hasBau && <Line type="monotone" dataKey="Business as Usual" stroke="#d62728" strokeWidth={1.5} strokeDasharray="5 3" dot={false} connectNulls />}
             </LineChart>
           </ResponsiveContainer>
         </AdminChartCard>
 
-        <AdminChartCard title="IFTA MPG and Adoption" subtitle="LH and RH duty cycles — diesel/biodiesel &amp; CNG DGE"
+        <AdminChartCard title="IFTA MPG and Adoption" subtitle="LH and RH duty cycles — diesel/biodiesel"
           isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
           onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
           lineDashes={{ 'LH Adoption': [5, 3], 'RH Adoption': [5, 3] }}
@@ -5018,7 +5017,7 @@ ORDER BY t.technology, a.adoption_year`;
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
               <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                label={{ value: 'MPG / DGE', angle: -90, position: 'insideLeft',
+                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
               <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
               <Tooltip formatter={(v, n) => {
@@ -5028,7 +5027,6 @@ ORDER BY t.technology, a.adoption_year`;
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls legendType="plainline" />
-              <Line yAxisId="left"  type="monotone" dataKey="RH CNG DGE"           stroke="#2ca02c" strokeWidth={2} strokeDasharray="6 2" dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="right" type="monotone" dataKey="LH Adoption" stroke="#1f77b4" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="right" type="monotone" dataKey="RH Adoption" stroke="#ff7f0e" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls legendType="plainline" />
