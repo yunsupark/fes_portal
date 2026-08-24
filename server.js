@@ -2885,6 +2885,93 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
 });
 
 /**
+ * GET /api/admin/charts/by-fleet
+ * Returns per-fleet per-year MPG and adoption %, split by duty cycle (LH / RH).
+ * Used to render individual fleet lines on the admin charts page.
+ */
+app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    let maxYear;
+    if (req.query.max_year && !isNaN(parseInt(req.query.max_year))) {
+      maxYear = parseInt(req.query.max_year);
+    } else {
+      const [s] = await db.query(`SELECT setting_value FROM ffs_settings WHERE setting_key = 'charts_max_year'`);
+      maxYear = s[0]?.setting_value ? parseInt(s[0].setting_value) : new Date().getFullYear();
+    }
+    const minYear = 2003;
+
+    // Per-fleet MPG by duty cycle
+    const [mpgRows] = await db.query(`
+      SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle, f.fleet_name,
+             ROUND(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0), 3) AS mpg
+      FROM ffs_mpg m
+      JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+      WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0,45,46)
+        AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+        AND LOWER(f.default_duty_cycle) IN ('lh','rh')
+        AND m.mpg_year >= ? AND m.mpg_year <= ?
+      ORDER BY m.mpg_year, f.fleet_name
+    `, [minYear, maxYear]);
+
+    // Per-fleet adoption by duty cycle
+    // LH fleets: sleeper cab rows; RH fleets: day cab rows (+ RH-flagged fleets all cab)
+    const [adoptRows] = await db.query(`
+      SELECT a.adoption_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
+             f.fleet_name, AVG(a.adoption_percent) * 100 AS adoption
+      FROM ffs_adoption a
+      JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
+      WHERE a.fleet_id NOT IN (0,45,46)
+        AND LOWER(f.default_duty_cycle) IN ('lh','rh')
+        AND (
+          (LOWER(f.default_duty_cycle) = 'lh' AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab'))
+          OR
+          (LOWER(f.default_duty_cycle) = 'rh')
+        )
+        AND a.adoption_year >= ? AND a.adoption_year <= ?
+      GROUP BY a.adoption_year, a.fleet_id, f.fleet_name, LOWER(f.default_duty_cycle)
+      ORDER BY a.adoption_year, f.fleet_name
+    `, [minYear, maxYear]);
+
+    // Pivot into { lhMpg: [{year, FleetA, FleetB, ...}], rhMpg: [...], lhAdopt: [...], rhAdopt: [...] }
+    const pivot = (rows, valueKey) => {
+      const lhMap = {}, rhMap = {}, lhFleets = new Set(), rhFleets = new Set();
+      rows.forEach(r => {
+        const dc = r.duty_cycle;
+        const map = dc === 'lh' ? lhMap : rhMap;
+        const set = dc === 'lh' ? lhFleets : rhFleets;
+        if (!map[r.year]) map[r.year] = { year: r.year };
+        map[r.year][r.fleet_name] = r[valueKey] != null ? parseFloat(r[valueKey]) : null;
+        set.add(r.fleet_name);
+      });
+      const toRows = m => Object.values(m).sort((a, b) => a.year - b.year);
+      return {
+        lhFleets: [...lhFleets].sort(),
+        rhFleets: [...rhFleets].sort(),
+        lhRows:   toRows(lhMap),
+        rhRows:   toRows(rhMap),
+      };
+    };
+
+    const mpg   = pivot(mpgRows,   'mpg');
+    const adopt = pivot(adoptRows, 'adoption');
+
+    res.json({
+      lhMpgFleets:   mpg.lhFleets,
+      rhMpgFleets:   mpg.rhFleets,
+      lhMpgRows:     mpg.lhRows,
+      rhMpgRows:     mpg.rhRows,
+      lhAdoptFleets: adopt.lhFleets,
+      rhAdoptFleets: adopt.rhFleets,
+      lhAdoptRows:   adopt.lhRows,
+      rhAdoptRows:   adopt.rhRows,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch by-fleet chart data" });
+  }
+});
+
+/**
  * POST /api/admin/charts/run-query
  * Executes an admin-supplied SELECT query and returns the result rows.
  * Restricted to NACFE admin role. Only SELECT statements are permitted;

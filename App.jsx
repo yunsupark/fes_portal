@@ -4543,11 +4543,12 @@ function AdminChartsPage({ token }) {
     catch { return false; }
   })();
 
-  const [mpgRows,   setMpgRows]   = useState([]);
-  const [catData,   setCatData]   = useState({ data: [], groups: [] });
-  const [groupData, setGroupData] = useState({});
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState(null);
+  const [mpgRows,     setMpgRows]     = useState([]);
+  const [catData,     setCatData]     = useState({ data: [], groups: [] });
+  const [groupData,   setGroupData]   = useState({});
+  const [byFleetData, setByFleetData] = useState(null);
+  const [loading,     setLoading]     = useState(true);
+  const [error,       setError]       = useState(null);
 
   // ── Controls ──────────────────────────────────────────────────────────────
   // maxYear: loaded from settings; user can edit + save from the charts page.
@@ -4623,8 +4624,10 @@ function AdminChartsPage({ token }) {
     Promise.all([
       fetch(`/api/admin/charts/mpg?${qs}`,                                       { headers }).then(r => r.json()),
       fetch(`/api/admin/charts/adoption?${qs}&haul_type=${haulType}`, { headers }).then(r => r.json()),
+      fetch(`/api/admin/charts/by-fleet?${qs}`,                                  { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
       ...customSqlKeys.map(k => runCustomSql(k).then(d => ({ key: k, d }))),
-    ]).then(([mpgData, adoptData, ...customResults]) => {
+    ]).then(([mpgData, adoptData, byFleet, ...customResults]) => {
+      if (byFleet) setByFleetData(byFleet);
       // Index custom results by key for easy lookup
       const customByKey = {};
       customResults.forEach(({ key, d }) => { if (d?.rows) customByKey[key] = d.rows; });
@@ -5074,6 +5077,77 @@ ORDER BY t.technology, a.adoption_year`;
             </AdminChartCard>
           );
         })}
+
+        {/* ── Per-fleet charts (LH and RH separately) ── */}
+        {byFleetData && (() => {
+          const { lhMpgFleets, rhMpgFleets, lhMpgRows, rhMpgRows,
+                  lhAdoptFleets, rhAdoptFleets, lhAdoptRows, rhAdoptRows } = byFleetData;
+          const fleetLegItems = (fleets) => fleets.map((f, i) => ({ value: f, color: CC[i % CC.length] }));
+          const fleetLines = (fleets, rows) => fleets.map((f, i) => (
+            <Line key={f} type="monotone" dataKey={f}
+              stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
+          ));
+
+          return (<>
+            <AdminChartCard title="IFTA MPG by Fleet" subtitle="Line Haul fleets"
+              legendItems={fleetLegItems(lhMpgFleets)} csvData={lhMpgRows}>
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={lhMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                             style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
+                  <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 10 }} />
+                  {fleetLines(lhMpgFleets, lhMpgRows)}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+
+            <AdminChartCard title="IFTA MPG by Fleet" subtitle="Regional Haul fleets"
+              legendItems={fleetLegItems(rhMpgFleets)} csvData={rhMpgRows}>
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={rhMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                             style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
+                  <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 10 }} />
+                  {fleetLines(rhMpgFleets, rhMpgRows)}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+
+            <AdminChartCard title="Adoption % by Fleet" subtitle="Line Haul fleets (sleeper cab)"
+              legendItems={fleetLegItems(lhAdoptFleets)} csvData={lhAdoptRows}>
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={lhAdoptRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={adoptYLabel} />
+                  <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
+                  {fleetLines(lhAdoptFleets, lhAdoptRows)}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+
+            <AdminChartCard title="Adoption % by Fleet" subtitle="Regional Haul fleets"
+              legendItems={fleetLegItems(rhAdoptFleets)} csvData={rhAdoptRows}>
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={rhAdoptRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={adoptYLabel} />
+                  <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
+                  {fleetLines(rhAdoptFleets, rhAdoptRows)}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+          </>);
+        })()}
 
       </div>
     </div>
