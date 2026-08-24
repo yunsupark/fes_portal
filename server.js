@@ -3062,15 +3062,32 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
 
     const toRows = m => Object.values(m).sort((a, b) => a.year - b.year);
 
+    // Sort fleet names by their most-recent-year value descending (nulls last)
+    const byLatestDesc = (fleetSet, map) => {
+      const years = Object.keys(map).map(Number).sort((a, b) => b - a);
+      return [...fleetSet].sort((a, b) => {
+        let va = null, vb = null;
+        for (const yr of years) {
+          if (va == null && map[yr]?.[a] != null) va = map[yr][a];
+          if (vb == null && map[yr]?.[b] != null) vb = map[yr][b];
+          if (va != null && vb != null) break;
+        }
+        if (va == null && vb == null) return a.localeCompare(b);
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        return vb - va;
+      });
+    };
+
     res.json({
-      lhMpgFleets:   [...lhDieselFleets].sort(),
-      rhMpgFleets:   [...rhDieselFleets].sort(),
-      cngMpgFleets:  [...cngFleets].sort(),
+      lhMpgFleets:   byLatestDesc(lhDieselFleets, lhDieselMap),
+      rhMpgFleets:   byLatestDesc(rhDieselFleets, rhDieselMap),
+      cngMpgFleets:  byLatestDesc(cngFleets,       cngMap),
       lhMpgRows:     toRows(lhDieselMap),
       rhMpgRows:     toRows(rhDieselMap),
       cngMpgRows:    toRows(cngMap),
-      lhAdoptFleets: [...lhAdoptFleets].sort(),
-      rhAdoptFleets: [...rhAdoptFleets].sort(),
+      lhAdoptFleets: byLatestDesc(lhAdoptFleets, lhAdoptMap),
+      rhAdoptFleets: byLatestDesc(rhAdoptFleets, rhAdoptMap),
       lhAdoptRows:   toRows(lhAdoptMap),
       rhAdoptRows:   toRows(rhAdoptMap),
     });
