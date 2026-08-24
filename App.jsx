@@ -4638,6 +4638,7 @@ function AdminChartsPage({ token }) {
         'Combined MPG':        r.combined_mpg  ?? null,
         'Line Haul MPG':       r.lh_mpg        ?? null,
         'Regional Haul MPG':   r.rh_mpg        ?? null,
+        'RH CNG DGE':          r.rh_cng_mpg    ?? null,
         'All US Trucks (FHWA)':r.fhwa_mpg      ?? null,
         'Business as Usual':   r.bau_mpg       ?? null,
         adoption:              r.adoption      ?? null,
@@ -4835,15 +4836,23 @@ function AdminChartsPage({ token }) {
     ? applySqlYear(customSqlSettings['chart_sql_mpg'], yr)
     : `SELECT m.mpg_year AS year,
        LOWER(f.default_duty_cycle) AS duty_cycle,
-       ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS fleet_mpg
+       CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
+       ROUND(AVG(
+         CASE WHEN m.fuel_type = 'CNG'
+              THEN m.ifta_miles / NULLIF(m.nat_gas_dge, 0)
+              ELSE m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel, 0)
+         END
+       ), 3) AS fleet_mpg
 FROM ffs_mpg m
 JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
 WHERE COALESCE(m.mpg_quarter,'') = ''
   AND m.fleet_id NOT IN (0, 45, 46)
-  AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+  AND m.ifta_miles > 0
+  AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
   AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
   AND m.mpg_year >= 2003 AND m.mpg_year <= ${yr}
-GROUP BY m.mpg_year, LOWER(f.default_duty_cycle)
+GROUP BY m.mpg_year, LOWER(f.default_duty_cycle),
+         CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END
 ORDER BY m.mpg_year`;
 
   const sqlCat = customSqlSettings['chart_sql_cat']
@@ -4977,7 +4986,7 @@ ORDER BY t.technology, a.adoption_year`;
         </AdminChartCard>
 
         {/* ── LH and RH duty cycles MPG ── */}
-        <AdminChartCard title="IFTA MPG" subtitle="LH and RH duty cycles, diesel MPG"
+        <AdminChartCard title="IFTA MPG" subtitle="LH and RH duty cycles — diesel/biodiesel &amp; CNG DGE"
           isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
           onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
           csvData={mpgRows}>
@@ -4986,19 +4995,20 @@ ORDER BY t.technology, a.adoption_year`;
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
               <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                label={{ value: 'MPG / DGE', angle: -90, position: 'insideLeft',
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
-              <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
+              <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)}` : '—', n]} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Line type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
               <Line type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+              <Line type="monotone" dataKey="RH CNG DGE"           stroke="#2ca02c" strokeWidth={2} strokeDasharray="6 2" dot={false} connectNulls />
               <Line type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls />
               {hasBau && <Line type="monotone" dataKey="Business as Usual" stroke="#d62728" strokeWidth={1.5} strokeDasharray="5 3" dot={false} connectNulls />}
             </LineChart>
           </ResponsiveContainer>
         </AdminChartCard>
 
-        <AdminChartCard title="IFTA MPG and Adoption" subtitle="LH and RH duty cycles, diesel MPG"
+        <AdminChartCard title="IFTA MPG and Adoption" subtitle="LH and RH duty cycles — diesel/biodiesel &amp; CNG DGE"
           isAdmin={isAdminRole} defaultSql={sqlMpg} sqlKey="chart_sql_mpg"
           onRunQuery={sql => runChartQuery(sql, 'mpg')} onSaveSql={saveSqlPermanent}
           lineDashes={{ 'LH Adoption': [5, 3], 'RH Adoption': [5, 3] }}
@@ -5008,16 +5018,17 @@ ORDER BY t.technology, a.adoption_year`;
               <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
               <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
               <YAxis yAxisId="left"  stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                label={{ value: 'MPG / DGE', angle: -90, position: 'insideLeft',
                          style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
               <YAxis yAxisId="right" orientation="right" stroke="#9CA3AF" tick={{ fontSize: 10 }} tickFormatter={fmtPct} />
               <Tooltip formatter={(v, n) => {
                 const isPct = n === 'LH Adoption' || n === 'RH Adoption';
-                return [v != null ? (isPct ? fmtPct(v) : `${fmtMpg(v)} mpg`) : '—', n];
+                return [v != null ? (isPct ? fmtPct(v) : `${fmtMpg(v)}`) : '—', n];
               }} contentStyle={{ fontSize: 11 }} />
               <Legend wrapperStyle={{ fontSize: 11 }} />
               <Line yAxisId="left"  type="monotone" dataKey="Line Haul MPG"        stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="left"  type="monotone" dataKey="Regional Haul MPG"    stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls legendType="plainline" />
+              <Line yAxisId="left"  type="monotone" dataKey="RH CNG DGE"           stroke="#2ca02c" strokeWidth={2} strokeDasharray="6 2" dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="left"  type="monotone" dataKey="All US Trucks (FHWA)" stroke="#111"    strokeWidth={2} dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="right" type="monotone" dataKey="LH Adoption" stroke="#1f77b4" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls legendType="plainline" />
               <Line yAxisId="right" type="monotone" dataKey="RH Adoption" stroke="#ff7f0e" strokeWidth={2} strokeDasharray="5 3" dot={false} connectNulls legendType="plainline" />
@@ -5078,18 +5089,18 @@ ORDER BY t.technology, a.adoption_year`;
           );
         })}
 
-        {/* ── Per-fleet charts (LH and RH separately) ── */}
+        {/* ── Per-fleet charts (LH and RH separately, diesel and CNG split) ── */}
         {byFleetData && (() => {
-          const { lhMpgFleets, rhMpgFleets, lhMpgRows, rhMpgRows,
+          const { lhMpgFleets, rhMpgFleets, cngMpgFleets, lhMpgRows, rhMpgRows, cngMpgRows,
                   lhAdoptFleets, rhAdoptFleets, lhAdoptRows, rhAdoptRows } = byFleetData;
           const fleetLegItems = (fleets) => fleets.map((f, i) => ({ value: f, color: CC[i % CC.length] }));
-          const fleetLines = (fleets, rows) => fleets.map((f, i) => (
+          const fleetLines = (fleets) => fleets.map((f, i) => (
             <Line key={f} type="monotone" dataKey={f}
               stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
           ));
 
           return (<>
-            <AdminChartCard title="IFTA MPG by Fleet" subtitle="Line Haul fleets"
+            <AdminChartCard title="Diesel &amp; Biodiesel MPG by Fleet" subtitle="Line Haul fleets"
               legendItems={fleetLegItems(lhMpgFleets)} csvData={lhMpgRows}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={lhMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
@@ -5099,12 +5110,12 @@ ORDER BY t.technology, a.adoption_year`;
                     label={{ value: 'MPG', angle: -90, position: 'insideLeft',
                              style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
                   <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(lhMpgFleets, lhMpgRows)}
+                  {fleetLines(lhMpgFleets)}
                 </LineChart>
               </ResponsiveContainer>
             </AdminChartCard>
 
-            <AdminChartCard title="IFTA MPG by Fleet" subtitle="Regional Haul fleets"
+            <AdminChartCard title="Diesel &amp; Biodiesel MPG by Fleet" subtitle="Regional Haul fleets"
               legendItems={fleetLegItems(rhMpgFleets)} csvData={rhMpgRows}>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={rhMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
@@ -5114,10 +5125,27 @@ ORDER BY t.technology, a.adoption_year`;
                     label={{ value: 'MPG', angle: -90, position: 'insideLeft',
                              style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
                   <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(rhMpgFleets, rhMpgRows)}
+                  {fleetLines(rhMpgFleets)}
                 </LineChart>
               </ResponsiveContainer>
             </AdminChartCard>
+
+            {cngMpgFleets.length > 0 && (
+              <AdminChartCard title="CNG DGE MPG by Fleet" subtitle="Fleets with CNG data"
+                legendItems={fleetLegItems(cngMpgFleets)} csvData={cngMpgRows}>
+                <ResponsiveContainer width="100%" height={CH}>
+                  <LineChart data={cngMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                    <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                    <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                      label={{ value: 'DGE', angle: -90, position: 'insideLeft',
+                               style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
+                    <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} dge` : '—', n]} contentStyle={{ fontSize: 10 }} />
+                    {fleetLines(cngMpgFleets)}
+                  </LineChart>
+                </ResponsiveContainer>
+              </AdminChartCard>
+            )}
 
             <AdminChartCard title="Adoption % by Fleet" subtitle="Line Haul fleets (sleeper cab)"
               legendItems={fleetLegItems(lhAdoptFleets)} csvData={lhAdoptRows}>
@@ -5128,7 +5156,7 @@ ORDER BY t.technology, a.adoption_year`;
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={adoptYLabel} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(lhAdoptFleets, lhAdoptRows)}
+                  {fleetLines(lhAdoptFleets)}
                 </LineChart>
               </ResponsiveContainer>
             </AdminChartCard>
@@ -5142,7 +5170,7 @@ ORDER BY t.technology, a.adoption_year`;
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={adoptYLabel} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(rhAdoptFleets, rhAdoptRows)}
+                  {fleetLines(rhAdoptFleets)}
                 </LineChart>
               </ResponsiveContainer>
             </AdminChartCard>

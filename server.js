@@ -2793,21 +2793,29 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
     }
     const minYear = 2003;
 
-    // Split fleet average MPG by duty cycle (LH / RH).
-    // LOWER() normalises stored values ('LH','lh','Lh' → 'lh') so the
-    // JS check below is case-insensitive without an exhaustive IN list.
-    // Fleets with no duty_cycle set are excluded from both series.
+    // Split fleet average MPG by duty cycle (LH / RH) and fuel type (diesel/biodiesel vs CNG).
+    // Diesel/biodiesel: multiplier * ifta_miles / ifta_fuel (multiplier accounts for biodiesel energy content)
+    // CNG DGE:          ifta_miles / nat_gas_dge  (nat_gas_dge is already in diesel-gallon-equivalent)
+    // Never blend the two in a single denominator.
     const [fleetRows] = await db.query(`
       SELECT m.mpg_year AS year,
              LOWER(f.default_duty_cycle) AS duty_cycle,
-             ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS fleet_mpg
+             CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
+             ROUND(AVG(
+               CASE WHEN m.fuel_type = 'CNG'
+                    THEN m.ifta_miles / NULLIF(m.nat_gas_dge, 0)
+                    ELSE m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel, 0)
+               END
+             ), 3) AS fleet_mpg
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
-        AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+        AND m.ifta_miles > 0
+        AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
         AND m.mpg_year >= ? AND m.mpg_year <= ?
         AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
-      GROUP BY m.mpg_year, LOWER(f.default_duty_cycle)
+      GROUP BY m.mpg_year, LOWER(f.default_duty_cycle),
+               CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END
       ORDER BY m.mpg_year
     `, [minYear, maxYear]);
     const [fhwaRows] = await db.query(`
@@ -2829,14 +2837,14 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
         AND adoption_year >= ? AND adoption_year <= ?
       GROUP BY adoption_year ORDER BY adoption_year
     `, [minYear, maxYear]);
-    // Combined MPG across all fleets regardless of duty cycle
+    // Combined diesel MPG across all fleets (diesel/biodiesel rows only)
     const [combinedRows] = await db.query(`
       SELECT m.mpg_year AS year,
-             ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0)), 3) AS combined_mpg
+             ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel, 0)), 3) AS combined_mpg
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
-        AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+        AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
         AND m.mpg_year >= ? AND m.mpg_year <= ?
         AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
       GROUP BY m.mpg_year
@@ -2867,8 +2875,9 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
     const map = {};
     fleetRows.forEach(r => {
       if (!map[r.year]) map[r.year] = { year: r.year };
-      if (r.duty_cycle === 'lh') map[r.year].lh_mpg = parseFloat(r.fleet_mpg);
-      if (r.duty_cycle === 'rh') map[r.year].rh_mpg = parseFloat(r.fleet_mpg);
+      if (r.duty_cycle === 'lh' && r.fuel_cat === 'diesel') map[r.year].lh_mpg     = parseFloat(r.fleet_mpg);
+      if (r.duty_cycle === 'rh' && r.fuel_cat === 'diesel') map[r.year].rh_mpg     = parseFloat(r.fleet_mpg);
+      if (r.duty_cycle === 'rh' && r.fuel_cat === 'cng')    map[r.year].rh_cng_mpg = parseFloat(r.fleet_mpg);
     });
     fhwaRows.forEach(r       => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].fhwa_mpg    = parseFloat(r.mpg); });
     bauRows.forEach(r        => { if (!map[r.year]) map[r.year] = { year: r.year }; map[r.year].bau_mpg     = parseFloat(r.mpg); });
@@ -2900,14 +2909,22 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
     }
     const minYear = 2003;
 
-    // Per-fleet MPG by duty cycle
+    // Per-fleet MPG split by fuel type: diesel/biodiesel vs CNG DGE.
+    // Never blend diesel gallons + CNG DGE in one denominator.
     const [mpgRows] = await db.query(`
       SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle, f.fleet_name,
-             ROUND(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel + COALESCE(m.nat_gas_dge,0), 0), 3) AS mpg
+             CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
+             ROUND(
+               CASE WHEN m.fuel_type = 'CNG'
+                    THEN m.ifta_miles / NULLIF(m.nat_gas_dge, 0)
+                    ELSE m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel, 0)
+               END
+             , 3) AS mpg
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0,45,46)
-        AND m.ifta_fuel > 0 AND m.ifta_miles > 0
+        AND m.ifta_miles > 0
+        AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
         AND LOWER(f.default_duty_cycle) IN ('lh','rh')
         AND m.mpg_year >= ? AND m.mpg_year <= ?
       ORDER BY m.mpg_year, f.fleet_name
@@ -2932,38 +2949,55 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
       ORDER BY a.adoption_year, f.fleet_name
     `, [minYear, maxYear]);
 
-    // Pivot into { lhMpg: [{year, FleetA, FleetB, ...}], rhMpg: [...], lhAdopt: [...], rhAdopt: [...] }
-    const pivot = (rows, valueKey) => {
-      const lhMap = {}, rhMap = {}, lhFleets = new Set(), rhFleets = new Set();
-      rows.forEach(r => {
-        const dc = r.duty_cycle;
-        const map = dc === 'lh' ? lhMap : rhMap;
-        const set = dc === 'lh' ? lhFleets : rhFleets;
-        if (!map[r.year]) map[r.year] = { year: r.year };
-        map[r.year][r.fleet_name] = r[valueKey] != null ? parseFloat(r[valueKey]) : null;
-        set.add(r.fleet_name);
-      });
-      const toRows = m => Object.values(m).sort((a, b) => a.year - b.year);
-      return {
-        lhFleets: [...lhFleets].sort(),
-        rhFleets: [...rhFleets].sort(),
-        lhRows:   toRows(lhMap),
-        rhRows:   toRows(rhMap),
-      };
-    };
+    // Pivot MPG rows into separate diesel and CNG maps per duty cycle
+    const lhDieselMap = {}, rhDieselMap = {}, cngMap = {};
+    const lhDieselFleets = new Set(), rhDieselFleets = new Set(), cngFleets = new Set();
+    mpgRows.forEach(r => {
+      const v = r.mpg != null ? parseFloat(r.mpg) : null;
+      if (r.fuel_cat === 'cng') {
+        if (!cngMap[r.year]) cngMap[r.year] = { year: r.year };
+        cngMap[r.year][r.fleet_name] = v;
+        cngFleets.add(r.fleet_name);
+      } else if (r.duty_cycle === 'lh') {
+        if (!lhDieselMap[r.year]) lhDieselMap[r.year] = { year: r.year };
+        lhDieselMap[r.year][r.fleet_name] = v;
+        lhDieselFleets.add(r.fleet_name);
+      } else {
+        if (!rhDieselMap[r.year]) rhDieselMap[r.year] = { year: r.year };
+        rhDieselMap[r.year][r.fleet_name] = v;
+        rhDieselFleets.add(r.fleet_name);
+      }
+    });
 
-    const mpg   = pivot(mpgRows,   'mpg');
-    const adopt = pivot(adoptRows, 'adoption');
+    // Pivot adoption rows
+    const lhAdoptMap = {}, rhAdoptMap = {};
+    const lhAdoptFleets = new Set(), rhAdoptFleets = new Set();
+    adoptRows.forEach(r => {
+      const v = r.adoption != null ? parseFloat(r.adoption) : null;
+      if (r.duty_cycle === 'lh') {
+        if (!lhAdoptMap[r.year]) lhAdoptMap[r.year] = { year: r.year };
+        lhAdoptMap[r.year][r.fleet_name] = v;
+        lhAdoptFleets.add(r.fleet_name);
+      } else {
+        if (!rhAdoptMap[r.year]) rhAdoptMap[r.year] = { year: r.year };
+        rhAdoptMap[r.year][r.fleet_name] = v;
+        rhAdoptFleets.add(r.fleet_name);
+      }
+    });
+
+    const toRows = m => Object.values(m).sort((a, b) => a.year - b.year);
 
     res.json({
-      lhMpgFleets:   mpg.lhFleets,
-      rhMpgFleets:   mpg.rhFleets,
-      lhMpgRows:     mpg.lhRows,
-      rhMpgRows:     mpg.rhRows,
-      lhAdoptFleets: adopt.lhFleets,
-      rhAdoptFleets: adopt.rhFleets,
-      lhAdoptRows:   adopt.lhRows,
-      rhAdoptRows:   adopt.rhRows,
+      lhMpgFleets:   [...lhDieselFleets].sort(),
+      rhMpgFleets:   [...rhDieselFleets].sort(),
+      cngMpgFleets:  [...cngFleets].sort(),
+      lhMpgRows:     toRows(lhDieselMap),
+      rhMpgRows:     toRows(rhDieselMap),
+      cngMpgRows:    toRows(cngMap),
+      lhAdoptFleets: [...lhAdoptFleets].sort(),
+      rhAdoptFleets: [...rhAdoptFleets].sort(),
+      lhAdoptRows:   toRows(lhAdoptMap),
+      rhAdoptRows:   toRows(rhAdoptMap),
     });
   } catch (err) {
     console.error(err);
