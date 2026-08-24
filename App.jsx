@@ -4160,8 +4160,8 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     const clone = svgEl.cloneNode(true);
     clone.setAttribute('xmlns',       'http://www.w3.org/2000/svg');
     clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-    clone.setAttribute('width',  svgW);
-    clone.setAttribute('height', svgH);
+    clone.setAttribute('width',  svgW * scale);
+    clone.setAttribute('height', svgH * scale);
     if (!clone.getAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
     clone.style.width = ''; clone.style.height = '';
     const svgStr  = new XMLSerializer().serializeToString(clone);
