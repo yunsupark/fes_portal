@@ -2810,7 +2810,7 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
-        AND m.ifta_miles > 0
+        AND m.ifta_miles > 10000
         AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
         AND m.mpg_year >= ? AND m.mpg_year <= ?
         AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
@@ -2844,7 +2844,7 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
-        AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
+        AND m.ifta_fuel > 0 AND m.ifta_miles > 10000 AND m.fuel_type != 'CNG'
         AND m.mpg_year >= ? AND m.mpg_year <= ?
         AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
       GROUP BY m.mpg_year
@@ -2923,7 +2923,7 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0,45,46)
-        AND m.ifta_miles > 0
+        AND m.ifta_miles > 10000
         AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
         AND LOWER(f.default_duty_cycle) IN ('lh','rh')
         AND m.mpg_year >= ? AND m.mpg_year <= ?

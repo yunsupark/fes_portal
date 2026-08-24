@@ -5094,9 +5094,10 @@ ORDER BY t.technology, a.adoption_year`;
           const { lhMpgFleets, rhMpgFleets, cngMpgFleets, lhMpgRows, rhMpgRows, cngMpgRows,
                   lhAdoptFleets, rhAdoptFleets, lhAdoptRows, rhAdoptRows } = byFleetData;
           const fleetLegItems = (fleets) => fleets.map((f, i) => ({ value: f, color: CC[i % CC.length] }));
+          // connectNulls intentionally omitted: missing years show as line breaks, not interpolations
           const fleetLines = (fleets) => fleets.map((f, i) => (
             <Line key={f} type="monotone" dataKey={f}
-              stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
+              stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} />
           ));
 
           return (<>
