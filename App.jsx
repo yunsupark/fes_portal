@@ -5226,27 +5226,25 @@ ORDER BY t.technology, a.adoption_year`;
             return row;
           });
 
-          const legItems = BUCKETS.map(b => ({ value: b.label, color: b.color }));
           const csvData = chartData;
           return (
             <AdminChartCard
               title="5-Year Avg MPG by Fleet Adoption Rate" subtitle="Five-year trailing average MPG, grouped by fleet adoption bucket"
-              legendItems={legItems} csvData={csvData}
-              style={{ gridColumn: '1 / -1' }}>
+              csvData={csvData}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
                 <DcBtn val="all" label="All" />
                 <DcBtn val="lh"  label="Line Haul" />
                 <DcBtn val="rh"  label="Regional Haul" />
               </div>
-              <ResponsiveContainer width="100%" height={360}>
+              <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={chartData} margin={{ top: 8, right: 24, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                  <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                  <YAxis domain={[4, 10]} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={{ value: 'Five Year Running Avg MPG', angle: -90, position: 'insideLeft', offset: -4,
                              style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
                   <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
-                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: 11, paddingBottom: 4 }} />
                   {BUCKETS.map(b => (
                     <Line key={b.key} type="monotone" dataKey={b.label}
                       stroke={b.color} strokeWidth={2} dot={false} connectNulls />
