@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from 'xlsx';
 
-import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ZAxis } from "recharts";
+import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -5180,18 +5180,14 @@ ORDER BY t.technology, a.adoption_year`;
           </>);
         })()}
 
-        {/* ── Adoption vs MPG scatter ── */}
+        {/* ── 5-yr running avg MPG by adoption bucket ── */}
         {adoptVsMpgPts.length > 0 && (() => {
-          const filtered = adoptVsMpgFilter === 'all'
-            ? adoptVsMpgPts
-            : adoptVsMpgPts.filter(p => p.duty_cycle === adoptVsMpgFilter);
-          const fleets = [...new Set(filtered.map(p => p.fleet_name))].sort();
-          const byFleet = {};
-          filtered.forEach(p => {
-            if (!byFleet[p.fleet_name]) byFleet[p.fleet_name] = [];
-            byFleet[p.fleet_name].push({ x: p.adoption, y: p.mpg, year: p.year, fleet: p.fleet_name });
-          });
-          const legItems = fleets.map((f, i) => ({ value: f, color: CC[i % CC.length] }));
+          const BUCKETS = [
+            { key: '<30',   label: '< 30%',  test: a => a < 30,              color: '#d62728' },
+            { key: '30-39', label: '30-39%', test: a => a >= 30 && a < 40,   color: '#7f7f7f' },
+            { key: '40-49', label: '40-49%', test: a => a >= 40 && a < 50,   color: '#e6b800' },
+            { key: '50+',   label: '50+%',   test: a => a >= 50,             color: '#1f77b4' },
+          ];
           const DcBtn = ({ val, label }) => (
             <button onClick={() => setAdoptVsMpgFilter(val)}
               style={{ padding: '3px 10px', fontSize: 11, borderRadius: 5, cursor: 'pointer', border: '1px solid',
@@ -5201,10 +5197,40 @@ ORDER BY t.technology, a.adoption_year`;
               {label}
             </button>
           );
-          const csvData = filtered.map(p => ({ fleet: p.fleet_name, duty_cycle: p.duty_cycle, year: p.year, adoption_pct: p.adoption, mpg: p.mpg }));
+
+          const filtered = adoptVsMpgFilter === 'all'
+            ? adoptVsMpgPts
+            : adoptVsMpgPts.filter(p => p.duty_cycle === adoptVsMpgFilter);
+
+          // Raw avg MPG per bucket per year
+          const byYear = {};
+          filtered.forEach(p => { if (!byYear[p.year]) byYear[p.year] = []; byYear[p.year].push(p); });
+          const years = Object.keys(byYear).map(Number).sort((a, b) => a - b);
+          const rawAvg = {};
+          years.forEach(yr => {
+            rawAvg[yr] = {};
+            BUCKETS.forEach(b => {
+              const pts = byYear[yr].filter(p => b.test(p.adoption));
+              if (pts.length > 0) rawAvg[yr][b.key] = pts.reduce((s, p) => s + p.mpg, 0) / pts.length;
+            });
+          });
+
+          // 5-year trailing average
+          const chartData = years.map((yr, idx) => {
+            const row = { year: yr };
+            BUCKETS.forEach(b => {
+              const win = years.slice(Math.max(0, idx - 4), idx + 1);
+              const vals = win.map(y => rawAvg[y]?.[b.key]).filter(v => v != null);
+              row[b.label] = vals.length > 0 ? parseFloat((vals.reduce((s, v) => s + v, 0) / vals.length).toFixed(3)) : null;
+            });
+            return row;
+          });
+
+          const legItems = BUCKETS.map(b => ({ value: b.label, color: b.color }));
+          const csvData = chartData;
           return (
             <AdminChartCard
-              title="Adoption vs MPG" subtitle="Each point = one fleet-year"
+              title="5-Year Avg MPG by Fleet Adoption Rate" subtitle="Five-year trailing average MPG, grouped by fleet adoption bucket"
               legendItems={legItems} csvData={csvData}
               style={{ gridColumn: '1 / -1' }}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
@@ -5213,33 +5239,19 @@ ORDER BY t.technology, a.adoption_year`;
                 <DcBtn val="rh"  label="Regional Haul" />
               </div>
               <ResponsiveContainer width="100%" height={360}>
-                <ScatterChart margin={{ top: 8, right: 24, left: 16, bottom: 20 }}>
+                <LineChart data={chartData} margin={{ top: 8, right: 24, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
-                    tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                    label={{ value: 'Adoption %', position: 'insideBottom', offset: -12,
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={{ value: 'Five Year Running Avg MPG', angle: -90, position: 'insideLeft', offset: -4,
                              style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
-                  <YAxis type="number" dataKey="y" name="MPG" stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                    label={{ value: 'MPG', angle: -90, position: 'insideLeft',
-                             style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
-                  <ZAxis range={[24, 24]} />
-                  <Tooltip cursor={{ strokeDasharray: '3 3' }} content={({ active, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const d = payload[0].payload;
-                    return (
-                      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '6px 10px', fontSize: 11 }}>
-                        <div style={{ fontWeight: 600, marginBottom: 2 }}>{d.fleet}</div>
-                        <div>Year: {d.year}</div>
-                        <div>Adoption: {d.x.toFixed(1)}%</div>
-                        <div>MPG: {d.y.toFixed(3)}</div>
-                      </div>
-                    );
-                  }} />
-                  {fleets.map((f, i) => (
-                    <Scatter key={f} name={f} data={byFleet[f]}
-                      fill={CC[i % CC.length]} fillOpacity={0.75} />
+                  <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
+                  <Legend wrapperStyle={{ fontSize: 11 }} />
+                  {BUCKETS.map(b => (
+                    <Line key={b.key} type="monotone" dataKey={b.label}
+                      stroke={b.color} strokeWidth={2} dot={false} connectNulls />
                   ))}
-                </ScatterChart>
+                </LineChart>
               </ResponsiveContainer>
             </AdminChartCard>
           );
