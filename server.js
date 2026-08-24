@@ -2802,7 +2802,7 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
       FROM (
         SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
                CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
-               SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.ifta_miles        ELSE m.multiplier * m.ifta_miles END)
+               SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.ifta_miles        ELSE COALESCE(m.multiplier, 1) * m.ifta_miles END)
                / NULLIF(
                  SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.nat_gas_dge     ELSE m.ifta_fuel               END)
                , 0) AS fleet_mpg
@@ -2844,7 +2844,7 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
       SELECT year, ROUND(AVG(fleet_mpg), 3) AS combined_mpg
       FROM (
         SELECT m.mpg_year AS year,
-               SUM(m.multiplier * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0) AS fleet_mpg
+               SUM(COALESCE(m.multiplier, 1) * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0) AS fleet_mpg
         FROM ffs_mpg m
         JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
         WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
@@ -2965,7 +2965,7 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
       SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle, f.fleet_name,
              CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
              ROUND(
-               SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.ifta_miles    ELSE m.multiplier * m.ifta_miles END)
+               SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.ifta_miles    ELSE COALESCE(m.multiplier, 1) * m.ifta_miles END)
                / NULLIF(
                  SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.nat_gas_dge ELSE m.ifta_fuel               END)
                , 0)
@@ -3125,7 +3125,7 @@ app.get("/api/admin/charts/adoption-vs-mpg", requireAuth, requireAdmin, async (r
 
     const [mpgRows] = await db.execute(`
       SELECT m.mpg_year AS year, f.fleet_name,
-             ROUND(SUM(m.multiplier * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0), 3) AS mpg
+             ROUND(SUM(COALESCE(m.multiplier, 1) * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0), 3) AS mpg
       FROM ffs_mpg m JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
       WHERE COALESCE(m.mpg_quarter, '') = '' AND m.fleet_id NOT IN (0,45,46)
         AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
