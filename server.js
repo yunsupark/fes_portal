@@ -3081,6 +3081,86 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
 });
 
 /**
+ * GET /api/admin/charts/adoption-vs-mpg
+ * Per-fleet, per-year adoption % and diesel MPG for the scatter chart.
+ * Reuses the same Day Cab fallback logic as the by-fleet adoption query.
+ */
+app.get("/api/admin/charts/adoption-vs-mpg", requireAuth, requireAdmin, async (req, res) => {
+  const maxYear = parseInt(req.query.max_year, 10) || new Date().getFullYear();
+  const minYear = 2003;
+  try {
+    const [adoptRows] = await db.execute(`
+      SELECT ta.adoption_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle, f.fleet_name,
+             ROUND(SUM(ta.avg_pct) * 100 / NULLIF(
+               (SELECT COUNT(*) FROM ffs_tech t2
+                WHERE t2.active_to IS NULL
+                  AND IF(LOWER(f.default_duty_cycle) = 'lh' OR dc.has_daycab = 0,
+                         t2.applies_sleeper = 1 OR t2.applies_sleeper IS NULL,
+                         t2.applies_daycab  = 1 OR t2.applies_daycab  IS NULL))
+             , 0), 2) AS adoption
+      FROM ffs_fleet f
+      JOIN (
+        SELECT fleet_id, adoption_year, tech_id, cab_type, AVG(adoption_percent) AS avg_pct
+        FROM ffs_adoption GROUP BY fleet_id, adoption_year, tech_id, cab_type
+      ) ta ON ta.fleet_id = f.fleet_id
+      JOIN (
+        SELECT fleet_id, adoption_year,
+               MAX(CASE WHEN cab_type = 'Day Cab' THEN 1 ELSE 0 END) AS has_daycab
+        FROM ffs_adoption WHERE fleet_id NOT IN (0,45,46)
+        GROUP BY fleet_id, adoption_year
+      ) dc ON dc.fleet_id = f.fleet_id AND dc.adoption_year = ta.adoption_year
+      WHERE f.fleet_id NOT IN (0,45,46)
+        AND LOWER(f.default_duty_cycle) IN ('lh','rh')
+        AND (
+          (LOWER(f.default_duty_cycle) = 'lh' AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
+          OR (LOWER(f.default_duty_cycle) = 'rh' AND (
+            (dc.has_daycab = 1 AND ta.cab_type = 'Day Cab')
+            OR (dc.has_daycab = 0 AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
+          ))
+        )
+        AND ta.adoption_year >= ? AND ta.adoption_year <= ?
+      GROUP BY ta.adoption_year, f.fleet_id, f.fleet_name, LOWER(f.default_duty_cycle)
+      ORDER BY ta.adoption_year, f.fleet_name
+    `, [minYear, maxYear]);
+
+    const [mpgRows] = await db.execute(`
+      SELECT m.mpg_year AS year, f.fleet_name,
+             ROUND(SUM(m.multiplier * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0), 3) AS mpg
+      FROM ffs_mpg m JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+      WHERE COALESCE(m.mpg_quarter, '') = '' AND m.fleet_id NOT IN (0,45,46)
+        AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
+        AND LOWER(f.default_duty_cycle) IN ('lh','rh')
+        AND m.mpg_year >= ? AND m.mpg_year <= ?
+      GROUP BY m.mpg_year, f.fleet_id, f.fleet_name
+      ORDER BY m.mpg_year, f.fleet_name
+    `, [minYear, maxYear]);
+
+    // Index MPG by fleet+year for O(1) join
+    const mpgMap = {};
+    mpgRows.forEach(r => { mpgMap[`${r.fleet_name}|${r.year}`] = parseFloat(r.mpg); });
+
+    const points = [];
+    adoptRows.forEach(r => {
+      const mpg = mpgMap[`${r.fleet_name}|${r.year}`];
+      if (mpg != null && r.adoption != null) {
+        points.push({
+          fleet_name: r.fleet_name,
+          duty_cycle: r.duty_cycle,
+          year: r.year,
+          adoption: parseFloat(r.adoption),
+          mpg,
+        });
+      }
+    });
+
+    res.json({ points });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch adoption-vs-mpg data" });
+  }
+});
+
+/**
  * POST /api/admin/charts/run-query
  * Executes an admin-supplied SELECT query and returns the result rows.
  * Restricted to NACFE admin role. Only SELECT statements are permitted;

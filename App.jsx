@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import * as XLSX from 'xlsx';
 
-import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ZAxis } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -3989,7 +3989,7 @@ const CHART_COLORS_30 = [
  *  legendItems – optional [{value, color}] array; renders an HTML legend
  *  sidebar and paints it onto the canvas when downloading.
  */
-function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, isAdmin, defaultSql, sqlKey, onRunQuery, onSaveSql, csvData }) {
+function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, isAdmin, defaultSql, sqlKey, onRunQuery, onSaveSql, csvData, style }) {
   const ref = useRef(null);
 
   // ── SQL editor state (NACFE admin only) ──────────────────────────────────────
@@ -4220,7 +4220,7 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
   };
 
   return (
-    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '18px 22px' }}>
+    <div style={{ background: '#fff', borderRadius: 12, border: '1px solid #E5E7EB', padding: '18px 22px', ...style }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
         <div>
           <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: '#111827' }}>{title}</h3>
@@ -4546,7 +4546,9 @@ function AdminChartsPage({ token }) {
   const [mpgRows,     setMpgRows]     = useState([]);
   const [catData,     setCatData]     = useState({ data: [], groups: [] });
   const [groupData,   setGroupData]   = useState({});
-  const [byFleetData, setByFleetData] = useState(null);
+  const [byFleetData,      setByFleetData]      = useState(null);
+  const [adoptVsMpgPts,   setAdoptVsMpgPts]   = useState([]);
+  const [adoptVsMpgFilter, setAdoptVsMpgFilter] = useState('all'); // 'all' | 'lh' | 'rh'
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
 
@@ -4625,9 +4627,11 @@ function AdminChartsPage({ token }) {
       fetch(`/api/admin/charts/mpg?${qs}`,                                       { headers }).then(r => r.json()),
       fetch(`/api/admin/charts/adoption?${qs}&haul_type=${haulType}`, { headers }).then(r => r.json()),
       fetch(`/api/admin/charts/by-fleet?${qs}`,                                  { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/admin/charts/adoption-vs-mpg?${qs}`,                           { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
       ...customSqlKeys.map(k => runCustomSql(k).then(d => ({ key: k, d }))),
-    ]).then(([mpgData, adoptData, byFleet, ...customResults]) => {
+    ]).then(([mpgData, adoptData, byFleet, avmData, ...customResults]) => {
       if (byFleet) setByFleetData(byFleet);
+      if (avmData?.points) setAdoptVsMpgPts(avmData.points);
       // Index custom results by key for easy lookup
       const customByKey = {};
       customResults.forEach(({ key, d }) => { if (d?.rows) customByKey[key] = d.rows; });
@@ -5174,6 +5178,71 @@ ORDER BY t.technology, a.adoption_year`;
               </ResponsiveContainer>
             </AdminChartCard>
           </>);
+        })()}
+
+        {/* ── Adoption vs MPG scatter ── */}
+        {adoptVsMpgPts.length > 0 && (() => {
+          const filtered = adoptVsMpgFilter === 'all'
+            ? adoptVsMpgPts
+            : adoptVsMpgPts.filter(p => p.duty_cycle === adoptVsMpgFilter);
+          const fleets = [...new Set(filtered.map(p => p.fleet_name))].sort();
+          const byFleet = {};
+          filtered.forEach(p => {
+            if (!byFleet[p.fleet_name]) byFleet[p.fleet_name] = [];
+            byFleet[p.fleet_name].push({ x: p.adoption, y: p.mpg, year: p.year, fleet: p.fleet_name });
+          });
+          const legItems = fleets.map((f, i) => ({ value: f, color: CC[i % CC.length] }));
+          const DcBtn = ({ val, label }) => (
+            <button onClick={() => setAdoptVsMpgFilter(val)}
+              style={{ padding: '3px 10px', fontSize: 11, borderRadius: 5, cursor: 'pointer', border: '1px solid',
+                       borderColor: adoptVsMpgFilter === val ? '#2563EB' : '#D1D5DB',
+                       background: adoptVsMpgFilter === val ? '#2563EB' : '#fff',
+                       color: adoptVsMpgFilter === val ? '#fff' : '#374151', fontWeight: 500 }}>
+              {label}
+            </button>
+          );
+          const csvData = filtered.map(p => ({ fleet: p.fleet_name, duty_cycle: p.duty_cycle, year: p.year, adoption_pct: p.adoption, mpg: p.mpg }));
+          return (
+            <AdminChartCard
+              title="Adoption vs MPG" subtitle="Each point = one fleet-year"
+              legendItems={legItems} csvData={csvData}
+              style={{ gridColumn: '1 / -1' }}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <DcBtn val="all" label="All" />
+                <DcBtn val="lh"  label="Line Haul" />
+                <DcBtn val="rh"  label="Regional Haul" />
+              </div>
+              <ResponsiveContainer width="100%" height={360}>
+                <ScatterChart margin={{ top: 8, right: 24, left: 16, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
+                    tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={{ value: 'Adoption %', position: 'insideBottom', offset: -12,
+                             style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
+                  <YAxis type="number" dataKey="y" name="MPG" stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={{ value: 'MPG', angle: -90, position: 'insideLeft',
+                             style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
+                  <ZAxis range={[24, 24]} />
+                  <Tooltip cursor={{ strokeDasharray: '3 3' }} content={({ active, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const d = payload[0].payload;
+                    return (
+                      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '6px 10px', fontSize: 11 }}>
+                        <div style={{ fontWeight: 600, marginBottom: 2 }}>{d.fleet}</div>
+                        <div>Year: {d.year}</div>
+                        <div>Adoption: {d.x.toFixed(1)}%</div>
+                        <div>MPG: {d.y.toFixed(3)}</div>
+                      </div>
+                    );
+                  }} />
+                  {fleets.map((f, i) => (
+                    <Scatter key={f} name={f} data={byFleet[f]}
+                      fill={CC[i % CC.length]} fillOpacity={0.75} />
+                  ))}
+                </ScatterChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+          );
         })()}
 
       </div>
