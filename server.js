@@ -2794,29 +2794,30 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
     const minYear = 2003;
 
     // Split fleet average MPG by duty cycle (LH / RH) and fuel type (diesel/biodiesel vs CNG).
-    // Diesel/biodiesel: multiplier * ifta_miles / ifta_fuel (multiplier accounts for biodiesel energy content)
-    // CNG DGE:          ifta_miles / nat_gas_dge  (nat_gas_dge is already in diesel-gallon-equivalent)
-    // Never blend the two in a single denominator.
+    // Diesel/biodiesel rows for the same fleet+year are summed (miles+fuel) before dividing —
+    // never averaged as separate per-row MPG values.  CNG uses nat_gas_dge as denominator.
+    // Two-level aggregation: inner sums per fleet → outer averages across fleets.
     const [fleetRows] = await db.query(`
-      SELECT m.mpg_year AS year,
-             LOWER(f.default_duty_cycle) AS duty_cycle,
-             CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
-             ROUND(AVG(
-               CASE WHEN m.fuel_type = 'CNG'
-                    THEN m.ifta_miles / NULLIF(m.nat_gas_dge, 0)
-                    ELSE m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel, 0)
-               END
-             ), 3) AS fleet_mpg
-      FROM ffs_mpg m
-      JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
-      WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
-        AND m.ifta_miles > 0
-        AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
-        AND m.mpg_year >= ? AND m.mpg_year <= ?
-        AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
-      GROUP BY m.mpg_year, LOWER(f.default_duty_cycle),
-               CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END
-      ORDER BY m.mpg_year
+      SELECT year, duty_cycle, fuel_cat, ROUND(AVG(fleet_mpg), 3) AS fleet_mpg
+      FROM (
+        SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
+               CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
+               SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.ifta_miles        ELSE m.multiplier * m.ifta_miles END)
+               / NULLIF(
+                 SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.nat_gas_dge     ELSE m.ifta_fuel               END)
+               , 0) AS fleet_mpg
+        FROM ffs_mpg m
+        JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+        WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
+          AND m.ifta_miles > 0
+          AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
+          AND m.mpg_year >= ? AND m.mpg_year <= ?
+          AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+        GROUP BY m.mpg_year, f.fleet_id, LOWER(f.default_duty_cycle),
+                 CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END
+      ) sub
+      GROUP BY year, duty_cycle, fuel_cat
+      ORDER BY year
     `, [minYear, maxYear]);
     const [fhwaRows] = await db.query(`
       SELECT mpg_year AS year, ROUND(ifta_miles / NULLIF(ifta_fuel, 0), 3) AS mpg
@@ -2837,18 +2838,23 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
         AND adoption_year >= ? AND adoption_year <= ?
       GROUP BY adoption_year ORDER BY adoption_year
     `, [minYear, maxYear]);
-    // Combined diesel MPG across all fleets (diesel/biodiesel rows only)
+    // Combined diesel MPG across all fleets (diesel/biodiesel rows only).
+    // Sum miles+fuel per fleet first so Diesel+Biodiesel rows merge before averaging.
     const [combinedRows] = await db.query(`
-      SELECT m.mpg_year AS year,
-             ROUND(AVG(m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel, 0)), 3) AS combined_mpg
-      FROM ffs_mpg m
-      JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
-      WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
-        AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
-        AND m.mpg_year >= ? AND m.mpg_year <= ?
-        AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
-      GROUP BY m.mpg_year
-      ORDER BY m.mpg_year
+      SELECT year, ROUND(AVG(fleet_mpg), 3) AS combined_mpg
+      FROM (
+        SELECT m.mpg_year AS year,
+               SUM(m.multiplier * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0) AS fleet_mpg
+        FROM ffs_mpg m
+        JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+        WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
+          AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
+          AND m.mpg_year >= ? AND m.mpg_year <= ?
+          AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+        GROUP BY m.mpg_year, f.fleet_id
+      ) sub
+      GROUP BY year
+      ORDER BY year
     `, [minYear, maxYear]);
     // LH adoption (line-haul fleets, sleeper cab rows only)
     const [lhAdoptRows] = await db.query(`
@@ -2910,15 +2916,16 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
     const minYear = 2003;
 
     // Per-fleet MPG split by fuel type: diesel/biodiesel vs CNG DGE.
-    // Never blend diesel gallons + CNG DGE in one denominator.
+    // Diesel and Biodiesel rows for the same fleet+year are summed (miles+fuel) before
+    // dividing so a small biodiesel batch doesn't distort the average.
     const [mpgRows] = await db.query(`
       SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle, f.fleet_name,
              CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END AS fuel_cat,
              ROUND(
-               CASE WHEN m.fuel_type = 'CNG'
-                    THEN m.ifta_miles / NULLIF(m.nat_gas_dge, 0)
-                    ELSE m.multiplier * m.ifta_miles / NULLIF(m.ifta_fuel, 0)
-               END
+               SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.ifta_miles    ELSE m.multiplier * m.ifta_miles END)
+               / NULLIF(
+                 SUM(CASE WHEN m.fuel_type = 'CNG' THEN m.nat_gas_dge ELSE m.ifta_fuel               END)
+               , 0)
              , 3) AS mpg
       FROM ffs_mpg m
       JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
@@ -2927,6 +2934,8 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
         AND ((m.fuel_type = 'CNG' AND m.nat_gas_dge > 0) OR (m.fuel_type != 'CNG' AND m.ifta_fuel > 0))
         AND LOWER(f.default_duty_cycle) IN ('lh','rh')
         AND m.mpg_year >= ? AND m.mpg_year <= ?
+      GROUP BY m.mpg_year, f.fleet_id, f.fleet_name, LOWER(f.default_duty_cycle),
+               CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END
       ORDER BY m.mpg_year, f.fleet_name
     `, [minYear, maxYear]);
 
