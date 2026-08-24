@@ -2856,27 +2856,45 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
       GROUP BY year
       ORDER BY year
     `, [minYear, maxYear]);
-    // LH adoption (line-haul fleets, sleeper cab rows only)
+    // LH adoption — sum per fleet / sleeper active-tech count, then average across fleets
     const [lhAdoptRows] = await db.query(`
-      SELECT a.adoption_year AS year, AVG(a.adoption_percent) * 100 AS lh_adoption
-      FROM ffs_adoption a
-      JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
-      WHERE a.fleet_id NOT IN (0, 45, 46)
-        AND LOWER(f.default_duty_cycle) = 'lh'
-        AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab')
-        AND a.adoption_year >= ? AND a.adoption_year <= ?
-      GROUP BY a.adoption_year ORDER BY a.adoption_year
+      SELECT year, AVG(fleet_pct) AS lh_adoption
+      FROM (
+        SELECT a.adoption_year AS year,
+               SUM(a.adoption_percent) * 100 / NULLIF(
+                 (SELECT COUNT(*) FROM ffs_tech t2
+                  WHERE t2.active_to IS NULL
+                    AND (t2.applies_sleeper = 1 OR t2.applies_sleeper IS NULL))
+               , 0) AS fleet_pct
+        FROM ffs_adoption a
+        JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
+        WHERE a.fleet_id NOT IN (0, 45, 46)
+          AND LOWER(f.default_duty_cycle) = 'lh'
+          AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab')
+          AND a.adoption_year >= ? AND a.adoption_year <= ?
+        GROUP BY a.adoption_year, f.fleet_id
+      ) sub
+      GROUP BY year ORDER BY year
     `, [minYear, maxYear]);
-    // RH adoption (regional-haul fleets + LH day-cab rows)
+    // RH adoption — sum per fleet / day-cab active-tech count, then average across fleets
     const [rhAdoptRows] = await db.query(`
-      SELECT a.adoption_year AS year, AVG(a.adoption_percent) * 100 AS rh_adoption
-      FROM ffs_adoption a
-      JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
-      WHERE a.fleet_id NOT IN (0, 45, 46)
-        AND (LOWER(f.default_duty_cycle) = 'rh'
-             OR (LOWER(f.default_duty_cycle) = 'lh' AND a.cab_type = 'Day Cab'))
-        AND a.adoption_year >= ? AND a.adoption_year <= ?
-      GROUP BY a.adoption_year ORDER BY a.adoption_year
+      SELECT year, AVG(fleet_pct) AS rh_adoption
+      FROM (
+        SELECT a.adoption_year AS year,
+               SUM(a.adoption_percent) * 100 / NULLIF(
+                 (SELECT COUNT(*) FROM ffs_tech t2
+                  WHERE t2.active_to IS NULL
+                    AND (t2.applies_daycab = 1 OR t2.applies_daycab IS NULL))
+               , 0) AS fleet_pct
+        FROM ffs_adoption a
+        JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
+        WHERE a.fleet_id NOT IN (0, 45, 46)
+          AND (LOWER(f.default_duty_cycle) = 'rh'
+               OR (LOWER(f.default_duty_cycle) = 'lh' AND a.cab_type = 'Day Cab'))
+          AND a.adoption_year >= ? AND a.adoption_year <= ?
+        GROUP BY a.adoption_year, f.fleet_id
+      ) sub
+      GROUP BY year ORDER BY year
     `, [minYear, maxYear]);
     const map = {};
     fleetRows.forEach(r => {
@@ -2939,11 +2957,18 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
       ORDER BY m.mpg_year, f.fleet_name
     `, [minYear, maxYear]);
 
-    // Per-fleet adoption by duty cycle
-    // LH fleets: sleeper cab rows; RH fleets: day cab rows (+ RH-flagged fleets all cab)
+    // Per-fleet adoption: SUM / total active techs for that cab type.
+    // Fixes years where only a subset of rows were entered (all 100%) inflating AVG.
     const [adoptRows] = await db.query(`
       SELECT a.adoption_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
-             f.fleet_name, AVG(a.adoption_percent) * 100 AS adoption
+             f.fleet_name,
+             SUM(a.adoption_percent) * 100 / NULLIF(
+               (SELECT COUNT(*) FROM ffs_tech t2
+                WHERE t2.active_to IS NULL
+                  AND IF(LOWER(f.default_duty_cycle) = 'lh',
+                         t2.applies_sleeper = 1 OR t2.applies_sleeper IS NULL,
+                         t2.applies_daycab  = 1 OR t2.applies_daycab  IS NULL))
+             , 0) AS adoption
       FROM ffs_adoption a
       JOIN ffs_fleet f ON a.fleet_id = f.fleet_id
       WHERE a.fleet_id NOT IN (0,45,46)
