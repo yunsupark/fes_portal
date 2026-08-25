@@ -4549,8 +4549,10 @@ function AdminChartsPage({ token }) {
   const [byFleetData,      setByFleetData]      = useState(null);
   const [adoptVsMpgPts,    setAdoptVsMpgPts]    = useState([]);
   const [adoptVsMpgFilter, setAdoptVsMpgFilter] = useState('all'); // 'all' | 'lh' | 'rh'
-  const [fleetMpgFilter,   setFleetMpgFilter]   = useState('all'); // 'all' | 'lh' | 'rh'
-  const [fleetAdoptFilter, setFleetAdoptFilter] = useState('all'); // 'all' | 'lh' | 'rh'
+  const [fleetMpgFilter,    setFleetMpgFilter]    = useState('all'); // 'all' | 'lh' | 'rh'
+  const [fleetAdoptFilter,  setFleetAdoptFilter]  = useState('all'); // 'all' | 'lh' | 'rh'
+  const [showMpgLegend,     setShowMpgLegend]     = useState(true);
+  const [showAdoptLegend,   setShowAdoptLegend]   = useState(true);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
 
@@ -5131,6 +5133,14 @@ ORDER BY t.technology, a.adoption_year`;
                                   : fleetAdoptFilter === 'rh' ? rhAdoptFleets
                                   : sortedAllAdoptFleets;
 
+          // Mask US Foods adoption before 2024 (data not reliable before then)
+          const maskUsFoodsAdopt = (rows) => rows.map(r =>
+            r.year < 2024 && r['US Foods'] !== undefined ? { ...r, 'US Foods': null } : r
+          );
+          const lhAdoptRowsMasked  = maskUsFoodsAdopt(lhAdoptRows);
+          const rhAdoptRowsMasked  = maskUsFoodsAdopt(rhAdoptRows);
+          const allAdoptRowsMasked = maskUsFoodsAdopt(allAdoptRows);
+
           const FleetFilterBtn = ({ val, label, active, onSet }) => (
             <button onClick={() => onSet(val)}
               style={{ padding: '3px 10px', fontSize: 11, borderRadius: 5, cursor: 'pointer', border: '1px solid',
@@ -5140,19 +5150,30 @@ ORDER BY t.technology, a.adoption_year`;
               {label}
             </button>
           );
+          const LegendToggle = ({ show, onToggle }) => (
+            <button onClick={onToggle}
+              style={{ padding: '3px 10px', fontSize: 11, borderRadius: 5, cursor: 'pointer', border: '1px solid',
+                       borderColor: '#D1D5DB', background: '#fff', color: '#374151', marginLeft: 'auto' }}>
+              {show ? 'Hide legend' : 'Show legend'}
+            </button>
+          );
+
+          const activeMpgRows   = fleetMpgFilter   === 'lh' ? lhMpgRows   : fleetMpgFilter   === 'rh' ? rhMpgRows   : allMpgRows;
+          const activeAdoptRows = fleetAdoptFilter === 'lh' ? lhAdoptRowsMasked : fleetAdoptFilter === 'rh' ? rhAdoptRowsMasked : allAdoptRowsMasked;
 
           return (<>
             <AdminChartCard title="Diesel &amp; Biodiesel MPG by Fleet"
               subtitle={fleetMpgFilter === 'lh' ? 'Line Haul fleets' : fleetMpgFilter === 'rh' ? 'Regional Haul fleets' : 'All fleets'}
-              legendItems={fleetLegItems(activeMpgFleets)} csvData={fleetMpgFilter === 'lh' ? lhMpgRows : fleetMpgFilter === 'rh' ? rhMpgRows : allMpgRows}>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              legendItems={showMpgLegend ? fleetLegItems(activeMpgFleets) : undefined}
+              csvData={activeMpgRows}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
                 <FleetFilterBtn val="all" label="All"           active={fleetMpgFilter} onSet={setFleetMpgFilter} />
                 <FleetFilterBtn val="lh"  label="Line Haul"     active={fleetMpgFilter} onSet={setFleetMpgFilter} />
                 <FleetFilterBtn val="rh"  label="Regional Haul" active={fleetMpgFilter} onSet={setFleetMpgFilter} />
+                <LegendToggle show={showMpgLegend} onToggle={() => setShowMpgLegend(v => !v)} />
               </div>
               <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={fleetMpgFilter === 'lh' ? lhMpgRows : fleetMpgFilter === 'rh' ? rhMpgRows : allMpgRows}
-                  margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                <LineChart data={activeMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
@@ -5183,15 +5204,16 @@ ORDER BY t.technology, a.adoption_year`;
 
             <AdminChartCard title="Adoption % by Fleet"
               subtitle={fleetAdoptFilter === 'lh' ? 'Line Haul fleets' : fleetAdoptFilter === 'rh' ? 'Regional Haul fleets' : 'All fleets'}
-              legendItems={fleetLegItems(activeAdoptFleets)} csvData={fleetAdoptFilter === 'lh' ? lhAdoptRows : fleetAdoptFilter === 'rh' ? rhAdoptRows : allAdoptRows}>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+              legendItems={showAdoptLegend ? fleetLegItems(activeAdoptFleets) : undefined}
+              csvData={activeAdoptRows}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center' }}>
                 <FleetFilterBtn val="all" label="All"           active={fleetAdoptFilter} onSet={setFleetAdoptFilter} />
                 <FleetFilterBtn val="lh"  label="Line Haul"     active={fleetAdoptFilter} onSet={setFleetAdoptFilter} />
                 <FleetFilterBtn val="rh"  label="Regional Haul" active={fleetAdoptFilter} onSet={setFleetAdoptFilter} />
+                <LegendToggle show={showAdoptLegend} onToggle={() => setShowAdoptLegend(v => !v)} />
               </div>
               <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={fleetAdoptFilter === 'lh' ? lhAdoptRows : fleetAdoptFilter === 'rh' ? rhAdoptRows : allAdoptRows}
-                  margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                <LineChart data={activeAdoptRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
