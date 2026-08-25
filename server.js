@@ -2982,46 +2982,50 @@ app.get("/api/admin/charts/by-fleet", requireAuth, requireAdmin, async (req, res
       ORDER BY m.mpg_year, f.fleet_name
     `, [minYear, maxYear]);
 
-    // Per-fleet adoption: avg per-tech across configs, then SUM / active techs for the
-    // applicable cab type.  RH fleets prefer Day Cab rows; if a fleet has no Day Cab
-    // data (e.g. NFI which submitted Sleeper rows) fall back to Sleeper and use sleeper
-    // tech count as the denominator so the percentage stays correct.
+    // Per-fleet adoption: avg per-tech across configs, then SUM / active techs.
+    // Fleets that report BOTH Day Cab and Sleeper data are split: Sleeper → LH,
+    // Day Cab → RH.  Single-cab-type fleets use default_duty_cycle as before,
+    // with a Sleeper fallback for RH fleets that submitted no Day Cab rows.
     const [adoptRows] = await db.query(`
-      SELECT ta.adoption_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
-             f.fleet_name,
-             SUM(ta.avg_pct) * 100 / NULLIF(
-               (SELECT COUNT(*) FROM ffs_tech t2
-                WHERE t2.active_to IS NULL
-                  AND IF(LOWER(f.default_duty_cycle) = 'lh' OR dc.has_daycab = 0,
-                         t2.applies_sleeper = 1 OR t2.applies_sleeper IS NULL,
-                         t2.applies_daycab  = 1 OR t2.applies_daycab  IS NULL))
-             , 0) AS adoption
-      FROM ffs_fleet f
-      JOIN (
-        SELECT fleet_id, adoption_year, tech_id, cab_type, AVG(adoption_percent) AS avg_pct
-        FROM ffs_adoption
-        GROUP BY fleet_id, adoption_year, tech_id, cab_type
-      ) ta ON ta.fleet_id = f.fleet_id
-      JOIN (
-        SELECT fleet_id, adoption_year,
-               MAX(CASE WHEN cab_type = 'Day Cab' THEN 1 ELSE 0 END) AS has_daycab
-        FROM ffs_adoption
-        WHERE fleet_id NOT IN (0,45,46)
-        GROUP BY fleet_id, adoption_year
-      ) dc ON dc.fleet_id = f.fleet_id AND dc.adoption_year = ta.adoption_year
-      WHERE f.fleet_id NOT IN (0,45,46)
-        AND LOWER(f.default_duty_cycle) IN ('lh','rh')
-        AND (
-          (LOWER(f.default_duty_cycle) = 'lh' AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
-          OR
-          (LOWER(f.default_duty_cycle) = 'rh' AND (
-            (dc.has_daycab = 1 AND ta.cab_type = 'Day Cab')
-            OR (dc.has_daycab = 0 AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
-          ))
-        )
-        AND ta.adoption_year >= ? AND ta.adoption_year <= ?
-      GROUP BY ta.adoption_year, f.fleet_id, f.fleet_name, LOWER(f.default_duty_cycle)
-      ORDER BY ta.adoption_year, f.fleet_name
+      SELECT inner_q.year, inner_q.duty_cycle, inner_q.fleet_name,
+             inner_q.sum_pct * 100 / NULLIF(IF(inner_q.is_sleeper, sc.n, dcc.n), 0) AS adoption
+      FROM (
+        SELECT ta.adoption_year AS year,
+               IF(dc.has_daycab=1 AND dc.has_sleeper=1,
+                  IF(ta.cab_type='Day Cab', 'rh', 'lh'),
+                  LOWER(f.default_duty_cycle)) AS duty_cycle,
+               IF(dc.has_daycab=1 AND dc.has_sleeper=1,
+                  IF(ta.cab_type='Day Cab', 0, 1),
+                  IF(LOWER(f.default_duty_cycle)='lh' OR dc.has_daycab=0, 1, 0)) AS is_sleeper,
+               f.fleet_name,
+               SUM(ta.avg_pct) AS sum_pct
+        FROM ffs_fleet f
+        JOIN (
+          SELECT fleet_id, adoption_year, tech_id, cab_type, AVG(adoption_percent) AS avg_pct
+          FROM ffs_adoption
+          GROUP BY fleet_id, adoption_year, tech_id, cab_type
+        ) ta ON ta.fleet_id = f.fleet_id
+        JOIN (
+          SELECT fleet_id, adoption_year,
+                 MAX(CASE WHEN cab_type = 'Day Cab' THEN 1 ELSE 0 END) AS has_daycab,
+                 MAX(CASE WHEN cab_type IS NULL OR cab_type != 'Day Cab' THEN 1 ELSE 0 END) AS has_sleeper
+          FROM ffs_adoption
+          WHERE fleet_id NOT IN (0,45,46)
+          GROUP BY fleet_id, adoption_year
+        ) dc ON dc.fleet_id = f.fleet_id AND dc.adoption_year = ta.adoption_year
+        WHERE f.fleet_id NOT IN (0,45,46)
+          AND LOWER(f.default_duty_cycle) IN ('lh','rh')
+          AND (
+            (dc.has_daycab=1 AND dc.has_sleeper=1)
+            OR (dc.has_daycab=0 AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
+            OR (dc.has_sleeper=0 AND ta.cab_type = 'Day Cab')
+          )
+          AND ta.adoption_year >= ? AND ta.adoption_year <= ?
+        GROUP BY ta.adoption_year, f.fleet_id, f.fleet_name, duty_cycle, is_sleeper
+      ) inner_q
+      CROSS JOIN (SELECT COUNT(*) AS n FROM ffs_tech WHERE active_to IS NULL AND (applies_sleeper=1 OR applies_sleeper IS NULL)) sc
+      CROSS JOIN (SELECT COUNT(*) AS n FROM ffs_tech WHERE active_to IS NULL AND (applies_daycab=1  OR applies_daycab  IS NULL)) dcc
+      ORDER BY inner_q.year, inner_q.fleet_name
     `, [minYear, maxYear]);
 
     // Pivot MPG rows into separate diesel and CNG maps per duty cycle
@@ -3107,37 +3111,43 @@ app.get("/api/admin/charts/adoption-vs-mpg", requireAuth, requireAdmin, async (r
   const minYear = 2003;
   try {
     const [adoptRows] = await db.execute(`
-      SELECT ta.adoption_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle, f.fleet_name,
-             ROUND(SUM(ta.avg_pct) * 100 / NULLIF(
-               (SELECT COUNT(*) FROM ffs_tech t2
-                WHERE t2.active_to IS NULL
-                  AND IF(LOWER(f.default_duty_cycle) = 'lh' OR dc.has_daycab = 0,
-                         t2.applies_sleeper = 1 OR t2.applies_sleeper IS NULL,
-                         t2.applies_daycab  = 1 OR t2.applies_daycab  IS NULL))
-             , 0), 2) AS adoption
-      FROM ffs_fleet f
-      JOIN (
-        SELECT fleet_id, adoption_year, tech_id, cab_type, AVG(adoption_percent) AS avg_pct
-        FROM ffs_adoption GROUP BY fleet_id, adoption_year, tech_id, cab_type
-      ) ta ON ta.fleet_id = f.fleet_id
-      JOIN (
-        SELECT fleet_id, adoption_year,
-               MAX(CASE WHEN cab_type = 'Day Cab' THEN 1 ELSE 0 END) AS has_daycab
-        FROM ffs_adoption WHERE fleet_id NOT IN (0,45,46)
-        GROUP BY fleet_id, adoption_year
-      ) dc ON dc.fleet_id = f.fleet_id AND dc.adoption_year = ta.adoption_year
-      WHERE f.fleet_id NOT IN (0,45,46)
-        AND LOWER(f.default_duty_cycle) IN ('lh','rh')
-        AND (
-          (LOWER(f.default_duty_cycle) = 'lh' AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
-          OR (LOWER(f.default_duty_cycle) = 'rh' AND (
-            (dc.has_daycab = 1 AND ta.cab_type = 'Day Cab')
-            OR (dc.has_daycab = 0 AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
-          ))
-        )
-        AND ta.adoption_year >= ? AND ta.adoption_year <= ?
-      GROUP BY ta.adoption_year, f.fleet_id, f.fleet_name, LOWER(f.default_duty_cycle)
-      ORDER BY ta.adoption_year, f.fleet_name
+      SELECT inner_q.year, inner_q.duty_cycle, inner_q.fleet_name,
+             ROUND(inner_q.sum_pct * 100 / NULLIF(IF(inner_q.is_sleeper, sc.n, dcc.n), 0), 2) AS adoption
+      FROM (
+        SELECT ta.adoption_year AS year,
+               IF(dc.has_daycab=1 AND dc.has_sleeper=1,
+                  IF(ta.cab_type='Day Cab', 'rh', 'lh'),
+                  LOWER(f.default_duty_cycle)) AS duty_cycle,
+               IF(dc.has_daycab=1 AND dc.has_sleeper=1,
+                  IF(ta.cab_type='Day Cab', 0, 1),
+                  IF(LOWER(f.default_duty_cycle)='lh' OR dc.has_daycab=0, 1, 0)) AS is_sleeper,
+               f.fleet_name,
+               SUM(ta.avg_pct) AS sum_pct
+        FROM ffs_fleet f
+        JOIN (
+          SELECT fleet_id, adoption_year, tech_id, cab_type, AVG(adoption_percent) AS avg_pct
+          FROM ffs_adoption GROUP BY fleet_id, adoption_year, tech_id, cab_type
+        ) ta ON ta.fleet_id = f.fleet_id
+        JOIN (
+          SELECT fleet_id, adoption_year,
+                 MAX(CASE WHEN cab_type = 'Day Cab' THEN 1 ELSE 0 END) AS has_daycab,
+                 MAX(CASE WHEN cab_type IS NULL OR cab_type != 'Day Cab' THEN 1 ELSE 0 END) AS has_sleeper
+          FROM ffs_adoption WHERE fleet_id NOT IN (0,45,46)
+          GROUP BY fleet_id, adoption_year
+        ) dc ON dc.fleet_id = f.fleet_id AND dc.adoption_year = ta.adoption_year
+        WHERE f.fleet_id NOT IN (0,45,46)
+          AND LOWER(f.default_duty_cycle) IN ('lh','rh')
+          AND (
+            (dc.has_daycab=1 AND dc.has_sleeper=1)
+            OR (dc.has_daycab=0 AND (ta.cab_type IS NULL OR ta.cab_type != 'Day Cab'))
+            OR (dc.has_sleeper=0 AND ta.cab_type = 'Day Cab')
+          )
+          AND ta.adoption_year >= ? AND ta.adoption_year <= ?
+        GROUP BY ta.adoption_year, f.fleet_id, f.fleet_name, duty_cycle, is_sleeper
+      ) inner_q
+      CROSS JOIN (SELECT COUNT(*) AS n FROM ffs_tech WHERE active_to IS NULL AND (applies_sleeper=1 OR applies_sleeper IS NULL)) sc
+      CROSS JOIN (SELECT COUNT(*) AS n FROM ffs_tech WHERE active_to IS NULL AND (applies_daycab=1  OR applies_daycab  IS NULL)) dcc
+      ORDER BY inner_q.year, inner_q.fleet_name
     `, [minYear, maxYear]);
 
     const [mpgRows] = await db.execute(`
