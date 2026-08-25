@@ -3990,8 +3990,7 @@ function AdminTablesPage({ token }) {
     fetch('/api/admin/settings', { headers })
       .then(r => r.ok ? r.json() : Promise.reject(r.status))
       .then(s => {
-        const yr = parseInt(s.find?.(x => x.setting_key === 'max_year')?.setting_value, 10)
-                   || new Date().getFullYear();
+        const yr = parseInt(s.charts_max_year, 10) || new Date().getFullYear();
         setMaxYear(yr);
       })
       .catch(() => setMaxYear(new Date().getFullYear()));
