@@ -4543,9 +4543,10 @@ function AdminChartsPage({ token }) {
     catch { return false; }
   })();
 
-  const [mpgRows,     setMpgRows]     = useState([]);
-  const [catData,     setCatData]     = useState({ data: [], groups: [] });
-  const [groupData,   setGroupData]   = useState({});
+  const [mpgRows,          setMpgRows]          = useState([]);
+  const [catData,          setCatData]          = useState({ data: [], groups: [] });
+  const [groupData,        setGroupData]        = useState({});
+  const [adoptByHaulType,  setAdoptByHaulType]  = useState({});
   const [byFleetData,      setByFleetData]      = useState(null);
   const [adoptVsMpgPts,    setAdoptVsMpgPts]    = useState([]);
   const [adoptVsMpgFilter, setAdoptVsMpgFilter] = useState('all'); // 'all' | 'lh' | 'rh'
@@ -4603,16 +4604,15 @@ function AdminChartsPage({ token }) {
     setCustomSqlSettings(prev => ({ ...prev, [sqlKey]: template }));
   };
 
-  // Fetch chart data whenever maxYear, haulType, or customSqlSettings changes.
-  // customSqlSettings is included so that saved custom SQLs are applied immediately
-  // on load (not only when the user manually clicks Run).
+  // Fetch chart data whenever maxYear or customSqlSettings changes.
+  // All three haul types are fetched in parallel so the per-chart filter
+  // switches client-side without triggering a reload.
   useEffect(() => {
     if (!maxYear) return;
     setLoading(true);
     setError(null);
     const qs = `max_year=${encodeURIComponent(maxYear)}`;
 
-    // Build parallel fetch for any saved custom SQL templates.
     const runCustomSql = (sqlKey) => {
       const tmpl = customSqlSettings[sqlKey];
       if (!tmpl) return Promise.resolve(null);
@@ -4627,20 +4627,61 @@ function AdminChartsPage({ token }) {
     const customSqlKeys = ['chart_sql_mpg', 'chart_sql_cat',
       ...Object.keys(customSqlSettings).filter(k => k.startsWith('chart_sql_tech_'))];
 
+    // Helper: process raw adoption API response into {catData, groupData}
+    const processAdopt = ({ techRows = [], catRows = [] }, customCatRows = null, customTechByKey = {}) => {
+      const effectiveCatRows = customCatRows || catRows;
+      const catByYear = {};
+      effectiveCatRows.forEach(r => {
+        const yr = r.year ?? r.adoption_year;
+        if (!catByYear[yr]) catByYear[yr] = { year: yr };
+        catByYear[yr][r.tech_group] = parseFloat(r.adoption);
+      });
+      const catGroups = [...new Set(effectiveCatRows.map(r => r.tech_group))].sort();
+      const catData = { data: Object.values(catByYear).sort((a, b) => a.year - b.year), groups: catGroups };
+
+      const gd = {};
+      techRows.forEach(r => {
+        if (!gd[r.tech_group]) gd[r.tech_group] = { techs: [], byYear: {} };
+        if (!gd[r.tech_group].techs.includes(r.technology)) gd[r.tech_group].techs.push(r.technology);
+        if (!gd[r.tech_group].byYear[r.year]) gd[r.tech_group].byYear[r.year] = { year: r.year };
+        gd[r.tech_group].byYear[r.year][r.technology] = r.adoption;
+      });
+      Object.keys(customTechByKey).forEach(k => {
+        const grp = k.replace('chart_sql_tech_', '');
+        const rows = customTechByKey[k];
+        if (!rows?.length) return;
+        if (!gd[grp]) gd[grp] = { techs: [], byYear: {} };
+        gd[grp].techs = []; gd[grp].byYear = {};
+        rows.forEach(r => {
+          const yr = r.year ?? r.adoption_year;
+          if (!gd[grp].techs.includes(r.technology)) gd[grp].techs.push(r.technology);
+          if (!gd[grp].byYear[yr]) gd[grp].byYear[yr] = { year: yr };
+          gd[grp].byYear[yr][r.technology] = parseFloat(r.adoption);
+        });
+      });
+      const groupData = {};
+      Object.entries(gd).forEach(([grp, { techs, byYear }]) => {
+        groupData[grp] = { techs, data: Object.values(byYear).sort((a, b) => a.year - b.year) };
+      });
+      return { catData, groupData };
+    };
+
     Promise.all([
-      fetch(`/api/admin/charts/mpg?${qs}`,                                       { headers }).then(r => r.json()),
-      fetch(`/api/admin/charts/adoption?${qs}&haul_type=${haulType}`, { headers }).then(r => r.json()),
-      fetch(`/api/admin/charts/by-fleet?${qs}`,                                  { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch(`/api/admin/charts/adoption-vs-mpg?${qs}`,                           { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/admin/charts/mpg?${qs}`,                                        { headers }).then(r => r.json()),
+      fetch(`/api/admin/charts/adoption?${qs}&haul_type=combined`,                { headers }).then(r => r.json()),
+      fetch(`/api/admin/charts/adoption?${qs}&haul_type=lh`,                      { headers }).then(r => r.json()),
+      fetch(`/api/admin/charts/adoption?${qs}&haul_type=rh`,                      { headers }).then(r => r.json()),
+      fetch(`/api/admin/charts/by-fleet?${qs}`,                                   { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
+      fetch(`/api/admin/charts/adoption-vs-mpg?${qs}`,                            { headers }).then(r => r.ok ? r.json() : null).catch(() => null),
       ...customSqlKeys.map(k => runCustomSql(k).then(d => ({ key: k, d }))),
-    ]).then(([mpgData, adoptData, byFleet, avmData, ...customResults]) => {
+    ]).then(([mpgData, adoptCombined, adoptLh, adoptRh, byFleet, avmData, ...customResults]) => {
       if (byFleet) setByFleetData(byFleet);
       if (avmData?.points) setAdoptVsMpgPts(avmData.points);
-      // Index custom results by key for easy lookup
+
       const customByKey = {};
       customResults.forEach(({ key, d }) => { if (d?.rows) customByKey[key] = d.rows; });
 
-      // Base MPG rows from the API endpoint
+      // MPG rows
       const baseRows = (mpgData.rows || []).map(r => ({
         year:                  r.year,
         'Combined MPG':        r.combined_mpg  ?? null,
@@ -4653,8 +4694,6 @@ function AdminChartsPage({ token }) {
         'LH Adoption':         r.lh_adoption   ?? null,
         'RH Adoption':         r.rh_adoption   ?? null,
       }));
-
-      // Overlay custom MPG SQL results (LH/RH series only) if a saved query exists.
       if (customByKey['chart_sql_mpg']) {
         const map = {};
         baseRows.forEach(r => { map[r.year] = { ...r }; });
@@ -4670,54 +4709,19 @@ function AdminChartsPage({ token }) {
         setMpgRows(baseRows);
       }
 
-      const { techRows = [], catRows = [] } = adoptData;
+      // Adoption: process all three haul types; custom SQL only applies to combined
+      const customTechByKey = Object.fromEntries(
+        Object.keys(customByKey).filter(k => k.startsWith('chart_sql_tech_')).map(k => [k, customByKey[k]])
+      );
+      const combined = processAdopt(adoptCombined, customByKey['chart_sql_cat'] || null, customTechByKey);
+      const lh       = processAdopt(adoptLh);
+      const rh       = processAdopt(adoptRh);
 
-      // Category chart — use custom SQL rows if saved, otherwise API rows
-      const effectiveCatRows = customByKey['chart_sql_cat']
-        ? customByKey['chart_sql_cat']
-        : catRows;
-      const catByYear = {};
-      effectiveCatRows.forEach(r => {
-        const yr = r.year ?? r.adoption_year;
-        if (!catByYear[yr]) catByYear[yr] = { year: yr };
-        catByYear[yr][r.tech_group] = parseFloat(r.adoption);
-      });
-      const catGroups = [...new Set(effectiveCatRows.map(r => r.tech_group))].sort();
-      setCatData({
-        data:   Object.values(catByYear).sort((a, b) => a.year - b.year),
-        groups: catGroups,
-      });
-
-      // Per-group tech charts — use custom SQL if saved for that group
-      const gd = {};
-      techRows.forEach(r => {
-        if (!gd[r.tech_group]) gd[r.tech_group] = { techs: [], byYear: {} };
-        if (!gd[r.tech_group].techs.includes(r.technology)) gd[r.tech_group].techs.push(r.technology);
-        if (!gd[r.tech_group].byYear[r.year]) gd[r.tech_group].byYear[r.year] = { year: r.year };
-        gd[r.tech_group].byYear[r.year][r.technology] = r.adoption;
-      });
-      // Overlay per-group custom SQL results
-      Object.keys(customByKey).filter(k => k.startsWith('chart_sql_tech_')).forEach(k => {
-        const grp = k.replace('chart_sql_tech_', '');
-        const rows = customByKey[k];
-        if (!rows?.length) return;
-        if (!gd[grp]) gd[grp] = { techs: [], byYear: {} };
-        gd[grp].techs = [];
-        gd[grp].byYear = {};
-        rows.forEach(r => {
-          const yr = r.year ?? r.adoption_year;
-          if (!gd[grp].techs.includes(r.technology)) gd[grp].techs.push(r.technology);
-          if (!gd[grp].byYear[yr]) gd[grp].byYear[yr] = { year: yr };
-          gd[grp].byYear[yr][r.technology] = parseFloat(r.adoption);
-        });
-      });
-      const built = {};
-      Object.entries(gd).forEach(([grp, { techs, byYear }]) => {
-        built[grp] = { techs, data: Object.values(byYear).sort((a, b) => a.year - b.year) };
-      });
-      setGroupData(built);
+      setCatData(combined.catData);
+      setGroupData(combined.groupData);
+      setAdoptByHaulType({ combined, lh, rh });
     }).catch(err => setError(err.message)).finally(() => setLoading(false));
-  }, [token, maxYear, haulType, customSqlSettings]); // eslint-disable-line
+  }, [token, maxYear, customSqlSettings]); // eslint-disable-line
 
   // Save maxYear to DB and update the active filter.
   const saveMaxYear = async () => {
@@ -4801,9 +4805,18 @@ function AdminChartsPage({ token }) {
 
   const groupOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
                       'Chassis','Idle Reduction','Practices'];
+
+  // Derive active adoption data from pre-fetched haul-type cache (client-side switch, no reload)
+  const activeCatData   = (haulType === 'combined' || !adoptByHaulType[haulType])
+    ? catData
+    : (adoptByHaulType[haulType].catData   ?? { data: [], groups: [] });
+  const activeGroupData = (haulType === 'combined' || !adoptByHaulType[haulType])
+    ? groupData
+    : (adoptByHaulType[haulType].groupData ?? {});
+
   const sortedGroups = [
-    ...groupOrder.filter(g => groupData[g]),
-    ...Object.keys(groupData).filter(g => !groupOrder.includes(g)).sort(),
+    ...groupOrder.filter(g => activeGroupData[g]),
+    ...Object.keys(activeGroupData).filter(g => !groupOrder.includes(g)).sort(),
   ];
 
   // Sort a list of series keys by their last non-null value in data, descending.
@@ -5030,27 +5043,27 @@ ORDER BY t.technology, a.adoption_year`;
 
         {/* Adoption by Category */}
         {(() => {
-          const sortedCats = byLastValue(catData.groups, catData.data);
+          const sortedCats = byLastValue(activeCatData.groups, activeCatData.data);
           const legItems   = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
           return (
             <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel} legendItems={legItems}
               isAdmin={isAdminRole} defaultSql={sqlCat} sqlKey="chart_sql_cat"
               onRunQuery={sql => runChartQuery(sql, 'cat')} onSaveSql={saveSqlPermanent}
-              csvData={catData.data}>
+              csvData={activeCatData.data}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
                 <HaulBtn val="combined" label="Combined" />
                 <HaulBtn val="lh"       label="Line Haul" />
                 <HaulBtn val="rh"       label="Regional Haul" />
               </div>
               <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={catData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                <LineChart data={activeCatData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={adoptYLabel} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 11 }} />
-                  {sortedCats.map((grp, i) => (
-                    <Line key={grp} type="monotone" dataKey={grp}
+                  {sortedCats.map((cat, i) => (
+                    <Line key={cat} type="monotone" dataKey={cat}
                       stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
                   ))}
                 </LineChart>
@@ -5061,7 +5074,7 @@ ORDER BY t.technology, a.adoption_year`;
 
         {/* Per-group adoption charts */}
         {sortedGroups.map(grp => {
-          const { techs, data } = groupData[grp];
+          const { techs, data } = activeGroupData[grp];
           const sortedTechs = byLastValue(techs, data);
           const legItems    = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
           return (
