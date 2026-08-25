@@ -4547,8 +4547,10 @@ function AdminChartsPage({ token }) {
   const [catData,     setCatData]     = useState({ data: [], groups: [] });
   const [groupData,   setGroupData]   = useState({});
   const [byFleetData,      setByFleetData]      = useState(null);
-  const [adoptVsMpgPts,   setAdoptVsMpgPts]   = useState([]);
+  const [adoptVsMpgPts,    setAdoptVsMpgPts]    = useState([]);
   const [adoptVsMpgFilter, setAdoptVsMpgFilter] = useState('all'); // 'all' | 'lh' | 'rh'
+  const [fleetMpgFilter,   setFleetMpgFilter]   = useState('all'); // 'all' | 'lh' | 'rh'
+  const [fleetAdoptFilter, setFleetAdoptFilter] = useState('all'); // 'all' | 'lh' | 'rh'
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState(null);
 
@@ -4925,20 +4927,6 @@ ORDER BY t.technology, a.adoption_year`;
           )}
         </div>
 
-        {/* Vertical divider */}
-        <div style={{ width: 1, height: 28, background: '#E5E7EB', flexShrink: 0 }} />
-
-        {/* Haul type (adoption charts only) */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: '#374151', whiteSpace: 'nowrap' }}>
-            Adoption filter:
-          </span>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <HaulBtn val="combined" label="Combined" />
-            <HaulBtn val="lh"       label="Line Haul" />
-            <HaulBtn val="rh"       label="Regional Haul" />
-          </div>
-        </div>
       </div>
 
       {/* ── All charts in a uniform 2-column grid ── */}
@@ -5047,6 +5035,11 @@ ORDER BY t.technology, a.adoption_year`;
               isAdmin={isAdminRole} defaultSql={sqlCat} sqlKey="chart_sql_cat"
               onRunQuery={sql => runChartQuery(sql, 'cat')} onSaveSql={saveSqlPermanent}
               csvData={catData.data}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <HaulBtn val="combined" label="Combined" />
+                <HaulBtn val="lh"       label="Line Haul" />
+                <HaulBtn val="rh"       label="Regional Haul" />
+              </div>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={catData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -5074,6 +5067,11 @@ ORDER BY t.technology, a.adoption_year`;
               isAdmin={isAdminRole} defaultSql={sqlTech(grp)} sqlKey={`chart_sql_tech_${grp}`}
               onRunQuery={sql => runChartQuery(sql, 'tech', grp)} onSaveSql={saveSqlPermanent}
               csvData={data}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <HaulBtn val="combined" label="Combined" />
+                <HaulBtn val="lh"       label="Line Haul" />
+                <HaulBtn val="rh"       label="Regional Haul" />
+              </div>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
@@ -5102,33 +5100,66 @@ ORDER BY t.technology, a.adoption_year`;
               stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} />
           ));
 
-          return (<>
-            <AdminChartCard title="Diesel &amp; Biodiesel MPG by Fleet" subtitle="Line Haul fleets"
-              legendItems={fleetLegItems(lhMpgFleets)} csvData={lhMpgRows}>
-              <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={lhMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                  <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                    label={{ value: 'MPG', angle: -90, position: 'insideLeft',
-                             style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
-                  <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(lhMpgFleets)}
-                </LineChart>
-              </ResponsiveContainer>
-            </AdminChartCard>
+          // Merge LH+RH rows by year for combined view
+          const mergeRows = (rowsA, rowsB) => {
+            const m = {};
+            [...rowsA, ...rowsB].forEach(r => {
+              if (!m[r.year]) m[r.year] = { year: r.year };
+              Object.assign(m[r.year], r);
+            });
+            return Object.values(m).sort((a, b) => a.year - b.year);
+          };
+          const allMpgRows   = mergeRows(lhMpgRows,   rhMpgRows);
+          const allAdoptRows = mergeRows(lhAdoptRows, rhAdoptRows);
 
-            <AdminChartCard title="Diesel &amp; Biodiesel MPG by Fleet" subtitle="Regional Haul fleets"
-              legendItems={fleetLegItems(rhMpgFleets)} csvData={rhMpgRows}>
+          // Sort combined fleet list by latest available value desc
+          const latestVal = (rows, name) => {
+            for (let i = rows.length - 1; i >= 0; i--) {
+              if (rows[i][name] != null) return rows[i][name];
+            }
+            return -Infinity;
+          };
+          const sortedAllMpgFleets = [...lhMpgFleets, ...rhMpgFleets]
+            .sort((a, b) => latestVal(allMpgRows, b) - latestVal(allMpgRows, a));
+          const sortedAllAdoptFleets = [...lhAdoptFleets, ...rhAdoptFleets]
+            .sort((a, b) => latestVal(allAdoptRows, b) - latestVal(allAdoptRows, a));
+
+          const activeMpgFleets   = fleetMpgFilter   === 'lh' ? lhMpgFleets
+                                  : fleetMpgFilter   === 'rh' ? rhMpgFleets
+                                  : sortedAllMpgFleets;
+          const activeAdoptFleets = fleetAdoptFilter === 'lh' ? lhAdoptFleets
+                                  : fleetAdoptFilter === 'rh' ? rhAdoptFleets
+                                  : sortedAllAdoptFleets;
+
+          const FleetFilterBtn = ({ val, label, active, onSet }) => (
+            <button onClick={() => onSet(val)}
+              style={{ padding: '3px 10px', fontSize: 11, borderRadius: 5, cursor: 'pointer', border: '1px solid',
+                       borderColor: active === val ? '#2563EB' : '#D1D5DB',
+                       background:  active === val ? '#2563EB' : '#fff',
+                       color:        active === val ? '#fff'    : '#374151', fontWeight: 500 }}>
+              {label}
+            </button>
+          );
+
+          return (<>
+            <AdminChartCard title="Diesel &amp; Biodiesel MPG by Fleet"
+              subtitle={fleetMpgFilter === 'lh' ? 'Line Haul fleets' : fleetMpgFilter === 'rh' ? 'Regional Haul fleets' : 'All fleets'}
+              legendItems={fleetLegItems(activeMpgFleets)} csvData={fleetMpgFilter === 'lh' ? lhMpgRows : fleetMpgFilter === 'rh' ? rhMpgRows : allMpgRows}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <FleetFilterBtn val="all" label="All"           active={fleetMpgFilter} onSet={setFleetMpgFilter} />
+                <FleetFilterBtn val="lh"  label="Line Haul"     active={fleetMpgFilter} onSet={setFleetMpgFilter} />
+                <FleetFilterBtn val="rh"  label="Regional Haul" active={fleetMpgFilter} onSet={setFleetMpgFilter} />
+              </div>
               <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={rhMpgRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                <LineChart data={fleetMpgFilter === 'lh' ? lhMpgRows : fleetMpgFilter === 'rh' ? rhMpgRows : allMpgRows}
+                  margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                   <YAxis stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={{ value: 'MPG', angle: -90, position: 'insideLeft',
                              style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
                   <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(rhMpgFleets)}
+                  {fleetLines(activeMpgFleets)}
                 </LineChart>
               </ResponsiveContainer>
             </AdminChartCard>
@@ -5150,30 +5181,23 @@ ORDER BY t.technology, a.adoption_year`;
               </AdminChartCard>
             )}
 
-            <AdminChartCard title="Adoption % by Fleet" subtitle="Line Haul fleets (sleeper cab)"
-              legendItems={fleetLegItems(lhAdoptFleets)} csvData={lhAdoptRows}>
+            <AdminChartCard title="Adoption % by Fleet"
+              subtitle={fleetAdoptFilter === 'lh' ? 'Line Haul fleets' : fleetAdoptFilter === 'rh' ? 'Regional Haul fleets' : 'All fleets'}
+              legendItems={fleetLegItems(activeAdoptFleets)} csvData={fleetAdoptFilter === 'lh' ? lhAdoptRows : fleetAdoptFilter === 'rh' ? rhAdoptRows : allAdoptRows}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <FleetFilterBtn val="all" label="All"           active={fleetAdoptFilter} onSet={setFleetAdoptFilter} />
+                <FleetFilterBtn val="lh"  label="Line Haul"     active={fleetAdoptFilter} onSet={setFleetAdoptFilter} />
+                <FleetFilterBtn val="rh"  label="Regional Haul" active={fleetAdoptFilter} onSet={setFleetAdoptFilter} />
+              </div>
               <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={lhAdoptRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                <LineChart data={fleetAdoptFilter === 'lh' ? lhAdoptRows : fleetAdoptFilter === 'rh' ? rhAdoptRows : allAdoptRows}
+                  margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                   <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={adoptYLabel} />
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(lhAdoptFleets)}
-                </LineChart>
-              </ResponsiveContainer>
-            </AdminChartCard>
-
-            <AdminChartCard title="Adoption % by Fleet" subtitle="Regional Haul fleets"
-              legendItems={fleetLegItems(rhAdoptFleets)} csvData={rhAdoptRows}>
-              <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={rhAdoptRows} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                    label={adoptYLabel} />
-                  <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
-                  {fleetLines(rhAdoptFleets)}
+                  {fleetLines(activeAdoptFleets)}
                 </LineChart>
               </ResponsiveContainer>
             </AdminChartCard>
