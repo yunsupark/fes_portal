@@ -3987,20 +3987,16 @@ function AdminTablesPage({ token }) {
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
-    fetch('/api/admin/settings', { headers })
-      .then(r => r.ok ? r.json() : Promise.reject(r.status))
-      .then(s => {
-        const yr = parseInt(s.charts_max_year, 10) || new Date().getFullYear();
-        setMaxYear(yr);
-      })
-      .catch(() => setMaxYear(new Date().getFullYear()));
+    // Fetch data directly — server resolves maxYear from charts_max_year setting
+    setMaxYear('ready');
   }, []); // eslint-disable-line
 
   useEffect(() => {
     if (!maxYear) return;
     setLoading(true);
     setError(null);
-    fetch(`/api/admin/tables/yoy-adoption?max_year=${maxYear}&haul_type=${haulType}`, { headers })
+    // max_year omitted — server resolves from charts_max_year setting
+    fetch(`/api/admin/tables/yoy-adoption?haul_type=${haulType}`, { headers })
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || `HTTP ${r.status}`)))
       .then(d => { setRows(d.rows || []); setPriorYear(d.priorYear || maxYear - 1); })
       .catch(e => setError(String(e)))

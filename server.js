@@ -3193,8 +3193,18 @@ app.get("/api/admin/charts/adoption-vs-mpg", requireAuth, requireAdmin, async (r
  * Query params: max_year, haul_type ('combined'|'lh'|'rh')
  */
 app.get("/api/admin/tables/yoy-adoption", requireAuth, requireAdmin, async (req, res) => {
-  const maxYear   = parseInt(req.query.max_year, 10) || new Date().getFullYear();
-  const priorYear = maxYear - 1;
+  let maxYear = parseInt(req.query.max_year, 10);
+  if (!maxYear || isNaN(maxYear)) {
+    // Fall back to charts_max_year setting, then to max year with adoption data
+    const [[setting]] = await db.query(`SELECT setting_value FROM ffs_settings WHERE setting_key = 'charts_max_year'`);
+    if (setting?.setting_value) {
+      maxYear = parseInt(setting.setting_value, 10);
+    } else {
+      const [[maxRow]] = await db.query(`SELECT MAX(adoption_year) AS yr FROM ffs_adoption`);
+      maxYear = maxRow?.yr || new Date().getFullYear();
+    }
+  }
+  const priorYear = maxYear - 2; // compare to 2 years prior (e.g. 2025 vs 2023)
   const haulType  = (req.query.haul_type || 'combined').toLowerCase();
   const dcFilter  = haulType === 'combined' ? '' : `AND LOWER(f.default_duty_cycle) = '${haulType === 'lh' ? 'lh' : 'rh'}'`;
 
