@@ -3987,28 +3987,21 @@ function AdminTablesPage({ token }) {
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
-    // Fetch data directly — server resolves maxYear from charts_max_year setting
-    setMaxYear('ready');
-  }, []); // eslint-disable-line
-
-  useEffect(() => {
-    if (!maxYear) return;
     setLoading(true);
     setError(null);
-    // max_year omitted — server resolves from charts_max_year setting
     fetch(`/api/admin/tables/yoy-adoption?haul_type=${haulType}`, { headers })
       .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || `HTTP ${r.status}`)))
-      .then(d => { setRows(d.rows || []); setPriorYear(d.priorYear || maxYear - 1); })
+      .then(d => { setRows(d.rows || []); setMaxYear(d.maxYear || ''); setPriorYear(d.priorYear || ''); })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
-  }, [maxYear, haulType]); // eslint-disable-line
+  }, [haulType]); // eslint-disable-line
 
   const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
   const fmtYoy = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(parseFloat(v) * 100).toFixed(0)}%`;
 
-  const increases = rows.filter(r => parseFloat(r.yoy) >  0)
+  const increases = rows.filter(r => parseFloat(r.yoy) >= 0.20)
                         .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
-  const decreases = rows.filter(r => parseFloat(r.yoy) <  0)
+  const decreases = rows.filter(r => parseFloat(r.yoy) <= -0.20)
                         .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
 
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
@@ -4033,10 +4026,9 @@ function AdminTablesPage({ token }) {
     const TITLEH = 48;
     const PAD    = 16;
     const cols   = [
-      { label: 'Technology',     key: 'technology',  align: 'left',  w: 280 },
-      { label: String(maxYear),  key: 'curr_adopt',  align: 'right', w: 80, fmt: fmtPct },
-      { label: String(priorYear),key: 'prev_adopt',  align: 'right', w: 80, fmt: fmtPct },
-      { label: 'YOY',            key: 'yoy',         align: 'right', w: 80, fmt: fmtYoy },
+      { label: 'Technology',    key: 'technology', align: 'left',  w: 360 },
+      { label: String(maxYear), key: 'curr_adopt', align: 'right', w: 100, fmt: fmtPct },
+      { label: 'YOY',           key: 'yoy',        align: 'right', w: 100, fmt: fmtYoy },
     ];
     const H = TITLEH + HEADH + tableRows.length * ROWH + PAD;
 
@@ -4100,7 +4092,7 @@ function AdminTablesPage({ token }) {
         const text = col.fmt ? col.fmt(raw) : (raw ?? '—');
         const isYoy = col.key === 'yoy';
         ctx.font = isYoy ? 'bold 11px sans-serif' : '11px sans-serif';
-        ctx.fillStyle = isYoy ? yoyColor : (col.key === 'prev_adopt' ? '#9CA3AF' : '#111827');
+        ctx.fillStyle = isYoy ? yoyColor : '#111827';
         ctx.textAlign = col.align;
         const cx = col.align === 'right' ? rx + col.w - PAD : rx;
         ctx.fillText(text, cx, y + 18);
@@ -4115,8 +4107,8 @@ function AdminTablesPage({ token }) {
   };
 
   const downloadCsv = (title, tableRows) => {
-    const csvRows = [['Technology', 'Tech Group', `${maxYear} Adoption`, `${priorYear} Adoption`, 'YOY Change']]
-      .concat(tableRows.map(r => [r.technology, r.tech_group, fmtPct(r.curr_adopt), fmtPct(r.prev_adopt), fmtYoy(r.yoy)]));
+    const csvRows = [['Technology', 'Tech Group', `${maxYear} Adoption`, 'YOY Change']]
+      .concat(tableRows.map(r => [r.technology, r.tech_group, fmtPct(r.curr_adopt), fmtYoy(r.yoy)]));
     const csv = csvRows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
@@ -4148,7 +4140,6 @@ function AdminTablesPage({ token }) {
             <tr style={{ background: '#F9FAFB' }}>
               <th style={{ textAlign: 'left',  padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>Technology</th>
               <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{maxYear}</th>
-              <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{priorYear}</th>
               <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>YOY</th>
             </tr>
           </thead>
@@ -4157,12 +4148,11 @@ function AdminTablesPage({ token }) {
               <tr key={i} style={{ borderBottom: '1px solid #F3F4F6', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
                 <td style={{ padding: '7px 12px', color: '#111827' }}>{r.technology}</td>
                 <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>{fmtPct(r.curr_adopt)}</td>
-                <td style={{ padding: '7px 12px', textAlign: 'right', color: '#9CA3AF' }}>{fmtPct(r.prev_adopt)}</td>
                 <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: yoyColor }}>{fmtYoy(r.yoy)}</td>
               </tr>
             ))}
             {tableRows.length === 0 && !loading && (
-              <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>
+              <tr><td colSpan={3} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>
                 {error ? `Error: ${error}` : 'No data'}
               </td></tr>
             )}
