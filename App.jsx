@@ -3974,6 +3974,132 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
   );
 }
 
+// ─── Admin Tables ─────────────────────────────────────────────────────────────
+
+function AdminTablesPage({ token }) {
+  const [maxYear,    setMaxYear]    = useState('');
+  const [haulType,   setHaulType]   = useState('combined');
+  const [rows,       setRows]       = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
+  const [priorYear,  setPriorYear]  = useState('');
+
+  const headers = { Authorization: `Bearer ${token}` };
+
+  // Load maxYear from settings then fetch data
+  useEffect(() => {
+    fetch('/api/admin/settings', { headers }).then(r => r.json()).then(s => {
+      const yr = parseInt(s.find?.(x => x.setting_key === 'max_year')?.setting_value, 10)
+                 || new Date().getFullYear();
+      setMaxYear(yr);
+    }).catch(() => setMaxYear(new Date().getFullYear()));
+  }, []); // eslint-disable-line
+
+  useEffect(() => {
+    if (!maxYear) return;
+    setLoading(true);
+    setError(null);
+    const qs = `max_year=${maxYear}&haul_type=${haulType}`;
+    fetch(`/api/admin/tables/yoy-adoption?${qs}`, { headers })
+      .then(r => r.json())
+      .then(d => { setRows(d.rows || []); setPriorYear(d.priorYear || maxYear - 1); })
+      .catch(e => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [maxYear, haulType]); // eslint-disable-line
+
+  const fmtPct = v => v == null ? '—' : `${(parseFloat(v)).toFixed(1)}%`;
+  const fmtYoy = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(parseFloat(v) * 100).toFixed(0)}%`;
+
+  const increases = rows.filter(r => parseFloat(r.yoy) > 0)
+                        .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
+  const decreases = rows.filter(r => parseFloat(r.yoy) < 0)
+                        .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
+
+  const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
+
+  const HaulBtn = ({ val, label }) => (
+    <button onClick={() => setHaulType(val)} style={{
+      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
+      border: '1px solid', transition: 'background 0.15s',
+      borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
+      background:  haulType === val ? '#2563EB' : '#F9FAFB',
+      color:       haulType === val ? '#fff'    : '#374151',
+      fontWeight:  haulType === val ? 600       : 400,
+    }}>{label}</button>
+  );
+
+  const TableBlock = ({ title, tableRows, yoyColor }) => {
+    const csvRows = [['Technology', 'Tech Group', `${maxYear} Adoption`, `${priorYear} Adoption`, 'YOY Change']]
+      .concat(tableRows.map(r => [r.technology, r.tech_group, fmtPct(r.curr_adopt), fmtPct(r.prev_adopt), fmtYoy(r.yoy)]));
+    const csv = csvRows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const download = () => {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+      a.download = `${title.replace(/\s+/g, '_')}_${maxYear}.csv`;
+      a.click();
+    };
+
+    return (
+      <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', overflow: 'hidden', flex: '1 1 0', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #F3F4F6' }}>
+          <div>
+            <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{title}</span>
+            <span style={{ marginLeft: 8, fontSize: 11, color: '#9CA3AF' }}>{haulLabel} · {priorYear}→{maxYear}</span>
+          </div>
+          <button onClick={download} style={{ fontSize: 11, padding: '4px 10px', border: '1px solid #D1D5DB', borderRadius: 5, background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
+            ↓ CSV
+          </button>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#F9FAFB' }}>
+                <th style={{ textAlign: 'left',  padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>Technology</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{maxYear}</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{priorYear}</th>
+                <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>YOY</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tableRows.map((r, i) => (
+                <tr key={i} style={{ borderBottom: '1px solid #F3F4F6', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                  <td style={{ padding: '7px 12px', color: '#111827' }}>{r.technology}</td>
+                  <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>{fmtPct(r.curr_adopt)}</td>
+                  <td style={{ padding: '7px 12px', textAlign: 'right', color: '#6B7280' }}>{fmtPct(r.prev_adopt)}</td>
+                  <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: yoyColor }}>{fmtYoy(r.yoy)}</td>
+                </tr>
+              ))}
+              {tableRows.length === 0 && (
+                <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No data</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px' }}>
+      {/* Controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
+        <span style={{ fontSize: 12, color: '#6B7280' }}>Duty cycle:</span>
+        <HaulBtn val="combined" label="Combined" />
+        <HaulBtn val="lh"       label="Line Haul" />
+        <HaulBtn val="rh"       label="Regional Haul" />
+        {loading && <span style={{ fontSize: 12, color: '#9CA3AF', marginLeft: 8 }}>Loading…</span>}
+        {error   && <span style={{ fontSize: 12, color: '#DC2626', marginLeft: 8 }}>{error}</span>}
+      </div>
+
+      {/* Two tables side by side */}
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <TableBlock title="YOY Adoption Increases"  tableRows={increases} yoyColor="#16a34a" />
+        <TableBlock title="YOY Adoption Decreases"  tableRows={decreases} yoyColor="#DC2626" />
+      </div>
+    </div>
+  );
+}
+
 // ─── Admin Charts ─────────────────────────────────────────────────────────────
 
 const CHART_COLORS_30 = [
@@ -5855,7 +5981,7 @@ function AdminView({ token, onSignOut }) {
       {/* ── Page tabs ── */}
       <div style={{ background: '#fff', borderBottom: '2px solid #E5E7EB' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 20px', display: 'flex' }}>
-          {[['data', 'Management'], ['charts', 'Charts']].map(([key, label]) => (
+          {[['data', 'Management'], ['charts', 'Charts'], ['tables', 'Tables']].map(([key, label]) => (
             <button key={key} onClick={() => setAdminPage(key)} style={{
               background: 'none', border: 'none', padding: '10px 20px',
               fontSize: 13, fontWeight: adminPage === key ? 700 : 400,
@@ -5868,6 +5994,7 @@ function AdminView({ token, onSignOut }) {
       </div>
 
       {adminPage === 'charts' && <AdminChartsPage token={token} />}
+      {adminPage === 'tables' && <AdminTablesPage token={token} />}
 
       {adminPage === 'data' && <>
       <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px', display: 'flex', gap: 16, alignItems: 'flex-start' }}>

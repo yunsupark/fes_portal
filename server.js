@@ -3188,6 +3188,49 @@ app.get("/api/admin/charts/adoption-vs-mpg", requireAuth, requireAdmin, async (r
 });
 
 /**
+ * GET /api/admin/tables/yoy-adoption
+ * Year-over-year adoption % change for all active technologies.
+ * Query params: max_year, haul_type ('combined'|'lh'|'rh')
+ */
+app.get("/api/admin/tables/yoy-adoption", requireAuth, requireAdmin, async (req, res) => {
+  const maxYear   = parseInt(req.query.max_year, 10) || new Date().getFullYear();
+  const priorYear = maxYear - 1;
+  const haulType  = (req.query.haul_type || 'combined').toLowerCase();
+  const dcFilter  = haulType === 'combined' ? '' : `AND LOWER(f.default_duty_cycle) = '${haulType === 'lh' ? 'lh' : 'rh'}'`;
+
+  try {
+    const [rows] = await db.query(`
+      SELECT t.tech_group, t.technology,
+             curr.adopt * 100 AS curr_adopt,
+             prev.adopt * 100 AS prev_adopt,
+             (curr.adopt - prev.adopt) / NULLIF(prev.adopt, 0) AS yoy
+      FROM (
+        SELECT a.tech_id, AVG(a.adoption_percent) AS adopt
+        FROM ffs_adoption a
+        JOIN ffs_fleet f ON f.fleet_id = a.fleet_id
+        WHERE a.adoption_year = ? AND a.fleet_id NOT IN (0,45,46) ${dcFilter}
+        GROUP BY a.tech_id
+      ) curr
+      JOIN (
+        SELECT a.tech_id, AVG(a.adoption_percent) AS adopt
+        FROM ffs_adoption a
+        JOIN ffs_fleet f ON f.fleet_id = a.fleet_id
+        WHERE a.adoption_year = ? AND a.fleet_id NOT IN (0,45,46) ${dcFilter}
+        GROUP BY a.tech_id
+      ) prev ON curr.tech_id = prev.tech_id
+      JOIN ffs_tech t ON t.tech_id = curr.tech_id
+      WHERE t.active_to IS NULL AND prev.adopt > 0
+      ORDER BY yoy DESC
+    `, [maxYear, priorYear]);
+
+    res.json({ rows, maxYear, priorYear });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch YOY adoption data" });
+  }
+});
+
+/**
  * POST /api/admin/charts/run-query
  * Executes an admin-supplied SELECT query and returns the result rows.
  * Restricted to NACFE admin role. Only SELECT statements are permitted;
