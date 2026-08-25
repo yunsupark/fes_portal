@@ -3999,10 +3999,13 @@ function AdminTablesPage({ token }) {
   const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
   const fmtYoy = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(parseFloat(v) * 100).toFixed(0)}%`;
 
-  const increases = rows.filter(r => parseFloat(r.yoy) >= 0.20)
-                        .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
-  const decreases = rows.filter(r => parseFloat(r.yoy) <= -0.20)
-                        .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
+  const absDelta = r => parseFloat(r.curr_adopt) - parseFloat(r.prev_adopt); // percentage points
+  const increases = rows.filter(r => absDelta(r) >= 0)
+                        .sort((a, b) => absDelta(b) - absDelta(a))
+                        .slice(0, 15);
+  const decreases = rows.filter(r => absDelta(r) <  0)
+                        .sort((a, b) => absDelta(a) - absDelta(b))
+                        .slice(0, 15);
 
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
 

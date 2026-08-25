@@ -3230,7 +3230,7 @@ app.get("/api/admin/tables/yoy-adoption", requireAuth, requireAdmin, async (req,
       ) prev ON curr.tech_id = prev.tech_id
       JOIN ffs_tech t ON t.tech_id = curr.tech_id
       WHERE t.active_to IS NULL AND prev.adopt > 0
-      ORDER BY yoy DESC
+      ORDER BY (curr.adopt - prev.adopt) DESC
     `, [maxYear, priorYear]);
 
     res.json({ rows, maxYear, priorYear });
