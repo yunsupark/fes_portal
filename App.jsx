@@ -3977,42 +3977,43 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
 // ─── Admin Tables ─────────────────────────────────────────────────────────────
 
 function AdminTablesPage({ token }) {
-  const [maxYear,    setMaxYear]    = useState('');
-  const [haulType,   setHaulType]   = useState('combined');
-  const [rows,       setRows]       = useState([]);
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState(null);
-  const [priorYear,  setPriorYear]  = useState('');
+  const [maxYear,   setMaxYear]   = useState('');
+  const [haulType,  setHaulType]  = useState('combined');
+  const [rows,      setRows]      = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState(null);
+  const [priorYear, setPriorYear] = useState('');
 
   const headers = { Authorization: `Bearer ${token}` };
 
-  // Load maxYear from settings then fetch data
   useEffect(() => {
-    fetch('/api/admin/settings', { headers }).then(r => r.json()).then(s => {
-      const yr = parseInt(s.find?.(x => x.setting_key === 'max_year')?.setting_value, 10)
-                 || new Date().getFullYear();
-      setMaxYear(yr);
-    }).catch(() => setMaxYear(new Date().getFullYear()));
+    fetch('/api/admin/settings', { headers })
+      .then(r => r.ok ? r.json() : Promise.reject(r.status))
+      .then(s => {
+        const yr = parseInt(s.find?.(x => x.setting_key === 'max_year')?.setting_value, 10)
+                   || new Date().getFullYear();
+        setMaxYear(yr);
+      })
+      .catch(() => setMaxYear(new Date().getFullYear()));
   }, []); // eslint-disable-line
 
   useEffect(() => {
     if (!maxYear) return;
     setLoading(true);
     setError(null);
-    const qs = `max_year=${maxYear}&haul_type=${haulType}`;
-    fetch(`/api/admin/tables/yoy-adoption?${qs}`, { headers })
-      .then(r => r.json())
+    fetch(`/api/admin/tables/yoy-adoption?max_year=${maxYear}&haul_type=${haulType}`, { headers })
+      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || `HTTP ${r.status}`)))
       .then(d => { setRows(d.rows || []); setPriorYear(d.priorYear || maxYear - 1); })
-      .catch(e => setError(e.message))
+      .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
   }, [maxYear, haulType]); // eslint-disable-line
 
-  const fmtPct = v => v == null ? '—' : `${(parseFloat(v)).toFixed(1)}%`;
+  const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
   const fmtYoy = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(parseFloat(v) * 100).toFixed(0)}%`;
 
-  const increases = rows.filter(r => parseFloat(r.yoy) > 0)
+  const increases = rows.filter(r => parseFloat(r.yoy) >  0)
                         .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
-  const decreases = rows.filter(r => parseFloat(r.yoy) < 0)
+  const decreases = rows.filter(r => parseFloat(r.yoy) <  0)
                         .sort((a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt));
 
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
@@ -4028,73 +4029,167 @@ function AdminTablesPage({ token }) {
     }}>{label}</button>
   );
 
-  const TableBlock = ({ title, tableRows, yoyColor }) => {
+  // Draw table to canvas and trigger PNG download
+  const downloadPng = (title, tableRows, yoyColor) => {
+    const SCALE  = 2;
+    const W      = 560;
+    const ROWH   = 28;
+    const HEADH  = 36;
+    const TITLEH = 48;
+    const PAD    = 16;
+    const cols   = [
+      { label: 'Technology',     key: 'technology',  align: 'left',  w: 280 },
+      { label: String(maxYear),  key: 'curr_adopt',  align: 'right', w: 80, fmt: fmtPct },
+      { label: String(priorYear),key: 'prev_adopt',  align: 'right', w: 80, fmt: fmtPct },
+      { label: 'YOY',            key: 'yoy',         align: 'right', w: 80, fmt: fmtYoy },
+    ];
+    const H = TITLEH + HEADH + tableRows.length * ROWH + PAD;
+
+    const canvas = document.createElement('canvas');
+    canvas.width  = W * SCALE;
+    canvas.height = H * SCALE;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(SCALE, SCALE);
+
+    // Background
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, W, H);
+
+    // Title bar
+    ctx.fillStyle = '#1c3660';
+    ctx.fillRect(0, 0, W, TITLEH);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillText(title, PAD, 18);
+    ctx.font = '11px sans-serif';
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.fillText(`${haulLabel} · ${priorYear}→${maxYear}`, PAD, 35);
+
+    // Header row
+    ctx.fillStyle = '#F3F4F6';
+    ctx.fillRect(0, TITLEH, W, HEADH);
+    ctx.font = 'bold 11px sans-serif';
+    ctx.fillStyle = '#6B7280';
+    let x = PAD;
+    cols.forEach(col => {
+      const cx = col.align === 'right' ? x + col.w - PAD : x;
+      ctx.textAlign = col.align;
+      ctx.fillText(col.label, cx, TITLEH + 22);
+      x += col.w;
+    });
+
+    // Separator line under header
+    ctx.strokeStyle = '#E5E7EB';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, TITLEH + HEADH);
+    ctx.lineTo(W, TITLEH + HEADH);
+    ctx.stroke();
+
+    // Data rows
+    tableRows.forEach((row, i) => {
+      const y = TITLEH + HEADH + i * ROWH;
+      ctx.fillStyle = i % 2 === 0 ? '#ffffff' : '#F9FAFB';
+      ctx.fillRect(0, y, W, ROWH);
+
+      // Row separator
+      ctx.strokeStyle = '#F3F4F6';
+      ctx.beginPath();
+      ctx.moveTo(0, y + ROWH);
+      ctx.lineTo(W, y + ROWH);
+      ctx.stroke();
+
+      let rx = PAD;
+      cols.forEach(col => {
+        const raw = row[col.key];
+        const text = col.fmt ? col.fmt(raw) : (raw ?? '—');
+        const isYoy = col.key === 'yoy';
+        ctx.font = isYoy ? 'bold 11px sans-serif' : '11px sans-serif';
+        ctx.fillStyle = isYoy ? yoyColor : (col.key === 'prev_adopt' ? '#9CA3AF' : '#111827');
+        ctx.textAlign = col.align;
+        const cx = col.align === 'right' ? rx + col.w - PAD : rx;
+        ctx.fillText(text, cx, y + 18);
+        rx += col.w;
+      });
+    });
+
+    const link = document.createElement('a');
+    link.download = `${title.replace(/\s+/g, '_')}_${maxYear}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  };
+
+  const downloadCsv = (title, tableRows) => {
     const csvRows = [['Technology', 'Tech Group', `${maxYear} Adoption`, `${priorYear} Adoption`, 'YOY Change']]
       .concat(tableRows.map(r => [r.technology, r.tech_group, fmtPct(r.curr_adopt), fmtPct(r.prev_adopt), fmtYoy(r.yoy)]));
-    const csv = csvRows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const download = () => {
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-      a.download = `${title.replace(/\s+/g, '_')}_${maxYear}.csv`;
-      a.click();
-    };
+    const csv = csvRows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = `${title.replace(/\s+/g, '_')}_${maxYear}.csv`;
+    a.click();
+  };
 
-    return (
-      <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', overflow: 'hidden', flex: '1 1 0', minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #F3F4F6' }}>
-          <div>
-            <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{title}</span>
-            <span style={{ marginLeft: 8, fontSize: 11, color: '#9CA3AF' }}>{haulLabel} · {priorYear}→{maxYear}</span>
-          </div>
-          <button onClick={download} style={{ fontSize: 11, padding: '4px 10px', border: '1px solid #D1D5DB', borderRadius: 5, background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
+  const TableBlock = ({ title, tableRows, yoyColor }) => (
+    <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', overflow: 'hidden', flex: '1 1 0', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #F3F4F6' }}>
+        <div>
+          <span style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{title}</span>
+          <span style={{ marginLeft: 8, fontSize: 11, color: '#9CA3AF' }}>{haulLabel} · {priorYear}→{maxYear}</span>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => downloadPng(title, tableRows, yoyColor)}
+            style={{ fontSize: 11, padding: '4px 10px', border: '1px solid #D1D5DB', borderRadius: 5, background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
+            ↓ PNG
+          </button>
+          <button onClick={() => downloadCsv(title, tableRows)}
+            style={{ fontSize: 11, padding: '4px 10px', border: '1px solid #D1D5DB', borderRadius: 5, background: '#F9FAFB', cursor: 'pointer', color: '#374151' }}>
             ↓ CSV
           </button>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-            <thead>
-              <tr style={{ background: '#F9FAFB' }}>
-                <th style={{ textAlign: 'left',  padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>Technology</th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{maxYear}</th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{priorYear}</th>
-                <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>YOY</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tableRows.map((r, i) => (
-                <tr key={i} style={{ borderBottom: '1px solid #F3F4F6', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
-                  <td style={{ padding: '7px 12px', color: '#111827' }}>{r.technology}</td>
-                  <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>{fmtPct(r.curr_adopt)}</td>
-                  <td style={{ padding: '7px 12px', textAlign: 'right', color: '#6B7280' }}>{fmtPct(r.prev_adopt)}</td>
-                  <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: yoyColor }}>{fmtYoy(r.yoy)}</td>
-                </tr>
-              ))}
-              {tableRows.length === 0 && (
-                <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>No data</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
       </div>
-    );
-  };
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+          <thead>
+            <tr style={{ background: '#F9FAFB' }}>
+              <th style={{ textAlign: 'left',  padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>Technology</th>
+              <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{maxYear}</th>
+              <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{priorYear}</th>
+              <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>YOY</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tableRows.map((r, i) => (
+              <tr key={i} style={{ borderBottom: '1px solid #F3F4F6', background: i % 2 === 0 ? '#fff' : '#FAFAFA' }}>
+                <td style={{ padding: '7px 12px', color: '#111827' }}>{r.technology}</td>
+                <td style={{ padding: '7px 12px', textAlign: 'right', color: '#374151' }}>{fmtPct(r.curr_adopt)}</td>
+                <td style={{ padding: '7px 12px', textAlign: 'right', color: '#9CA3AF' }}>{fmtPct(r.prev_adopt)}</td>
+                <td style={{ padding: '7px 12px', textAlign: 'right', fontWeight: 600, color: yoyColor }}>{fmtYoy(r.yoy)}</td>
+              </tr>
+            ))}
+            {tableRows.length === 0 && !loading && (
+              <tr><td colSpan={4} style={{ padding: 24, textAlign: 'center', color: '#9CA3AF' }}>
+                {error ? `Error: ${error}` : 'No data'}
+              </td></tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px' }}>
-      {/* Controls */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 20 }}>
         <span style={{ fontSize: 12, color: '#6B7280' }}>Duty cycle:</span>
         <HaulBtn val="combined" label="Combined" />
         <HaulBtn val="lh"       label="Line Haul" />
         <HaulBtn val="rh"       label="Regional Haul" />
         {loading && <span style={{ fontSize: 12, color: '#9CA3AF', marginLeft: 8 }}>Loading…</span>}
-        {error   && <span style={{ fontSize: 12, color: '#DC2626', marginLeft: 8 }}>{error}</span>}
+        {error && !loading && <span style={{ fontSize: 12, color: '#DC2626', marginLeft: 8 }}>Error: {error}</span>}
       </div>
-
-      {/* Two tables side by side */}
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
-        <TableBlock title="YOY Adoption Increases"  tableRows={increases} yoyColor="#16a34a" />
-        <TableBlock title="YOY Adoption Decreases"  tableRows={decreases} yoyColor="#DC2626" />
+        <TableBlock title="YOY Adoption Increases" tableRows={increases} yoyColor="#16a34a" />
+        <TableBlock title="YOY Adoption Decreases" tableRows={decreases} yoyColor="#DC2626" />
       </div>
     </div>
   );
