@@ -4563,8 +4563,9 @@ function AdminChartsPage({ token }) {
   const [maxYearInput,   setMaxYearInput]   = useState(''); // what's in the text box
   const [maxYearSaving,  setMaxYearSaving]  = useState(false);
   const [maxYearMsg,     setMaxYearMsg]     = useState('');
-  // haulType: which fleet subset to show for adoption charts.
-  const [haulType,       setHaulType]       = useState('combined'); // 'combined'|'lh'|'rh'
+  // Per-chart haul-type filters (independent, no shared state)
+  const [catHaulType,    setCatHaulType]    = useState('combined'); // category chart
+  const [grpHaulType,    setGrpHaulType]    = useState('combined'); // per-group tech charts
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -4806,13 +4807,14 @@ function AdminChartsPage({ token }) {
   const groupOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
                       'Chassis','Idle Reduction','Practices'];
 
-  // Derive active adoption data from pre-fetched haul-type cache (client-side switch, no reload)
-  const activeCatData   = (haulType === 'combined' || !adoptByHaulType[haulType])
-    ? catData
-    : (adoptByHaulType[haulType].catData   ?? { data: [], groups: [] });
-  const activeGroupData = (haulType === 'combined' || !adoptByHaulType[haulType])
-    ? groupData
-    : (adoptByHaulType[haulType].groupData ?? {});
+  // Helper: resolve active data for a given per-chart haul type
+  const resolveAdopt = (ht, base, baseGroup) => ({
+    catData:   ht === 'combined' || !adoptByHaulType[ht] ? base      : (adoptByHaulType[ht].catData   ?? { data: [], groups: [] }),
+    groupData: ht === 'combined' || !adoptByHaulType[ht] ? baseGroup : (adoptByHaulType[ht].groupData ?? {}),
+  });
+
+  const { catData: activeCatData }   = resolveAdopt(catHaulType, catData, groupData);
+  const { groupData: activeGroupData } = resolveAdopt(grpHaulType, catData, groupData);
 
   const sortedGroups = [
     ...groupOrder.filter(g => activeGroupData[g]),
@@ -4828,15 +4830,15 @@ function AdminChartsPage({ token }) {
   // All charts share the same height for visual consistency.
   const CH = 380;
 
-  // Haul-type pill button helper
-  const HaulBtn = ({ val, label }) => (
-    <button onClick={() => setHaulType(val)}
+  // Haul-type pill button helper — each chart passes its own active value and setter
+  const HaulBtn = ({ val, label, active, setter }) => (
+    <button onClick={() => setter(val)}
       style={{ padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
                border: '1px solid', transition: 'background 0.15s',
-               borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
-               background:  haulType === val ? '#2563EB' : '#F9FAFB',
-               color:       haulType === val ? '#fff'    : '#374151',
-               fontWeight:  haulType === val ? 600       : 400 }}>
+               borderColor: active === val ? '#2563EB' : '#D1D5DB',
+               background:  active === val ? '#2563EB' : '#F9FAFB',
+               color:       active === val ? '#fff'    : '#374151',
+               fontWeight:  active === val ? 600       : 400 }}>
       {label}
     </button>
   );
@@ -4845,10 +4847,8 @@ function AdminChartsPage({ token }) {
   const adoptYLabel = { value: '% Adoption', angle: -90, position: 'insideLeft',
                         style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } };
 
-  // Human-readable subtitle for the active haul-type filter.
-  const haulLabel = haulType === 'lh' ? 'Line Haul'
-                  : haulType === 'rh' ? 'Regional Haul'
-                  : 'Combined Duty Cycles';
+  // Human-readable label for a haul type value
+  const haulLabel = ht => ht === 'lh' ? 'Line Haul' : ht === 'rh' ? 'Regional Haul' : 'Combined Duty Cycles';
 
   // ── Default SQL strings for the SQL editor (NACFE admin only) ─────────────
   const yr = maxYear || new Date().getFullYear();
@@ -5046,14 +5046,14 @@ ORDER BY t.technology, a.adoption_year`;
           const sortedCats = byLastValue(activeCatData.groups, activeCatData.data);
           const legItems   = sortedCats.map((grp, i) => ({ value: grp, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel} legendItems={legItems}
+            <AdminChartCard title="Adoption Percent by Technology Category" subtitle={haulLabel(catHaulType)} legendItems={legItems}
               isAdmin={isAdminRole} defaultSql={sqlCat} sqlKey="chart_sql_cat"
               onRunQuery={sql => runChartQuery(sql, 'cat')} onSaveSql={saveSqlPermanent}
               csvData={activeCatData.data}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                <HaulBtn val="combined" label="Combined" />
-                <HaulBtn val="lh"       label="Line Haul" />
-                <HaulBtn val="rh"       label="Regional Haul" />
+                <HaulBtn val="combined" label="Combined" active={catHaulType} setter={setCatHaulType} />
+                <HaulBtn val="lh"       label="Line Haul" active={catHaulType} setter={setCatHaulType} />
+                <HaulBtn val="rh"       label="Regional Haul" active={catHaulType} setter={setCatHaulType} />
               </div>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={activeCatData.data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
@@ -5078,14 +5078,14 @@ ORDER BY t.technology, a.adoption_year`;
           const sortedTechs = byLastValue(techs, data);
           const legItems    = sortedTechs.map((tech, i) => ({ value: tech, color: CC[i % CC.length] }));
           return (
-            <AdminChartCard key={grp} title={grp} subtitle={haulLabel} legendItems={legItems}
+            <AdminChartCard key={grp} title={grp} subtitle={haulLabel(grpHaulType)} legendItems={legItems}
               isAdmin={isAdminRole} defaultSql={sqlTech(grp)} sqlKey={`chart_sql_tech_${grp}`}
               onRunQuery={sql => runChartQuery(sql, 'tech', grp)} onSaveSql={saveSqlPermanent}
               csvData={data}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                <HaulBtn val="combined" label="Combined" />
-                <HaulBtn val="lh"       label="Line Haul" />
-                <HaulBtn val="rh"       label="Regional Haul" />
+                <HaulBtn val="combined" label="Combined" active={grpHaulType} setter={setGrpHaulType} />
+                <HaulBtn val="lh"       label="Line Haul" active={grpHaulType} setter={setGrpHaulType} />
+                <HaulBtn val="rh"       label="Regional Haul" active={grpHaulType} setter={setGrpHaulType} />
               </div>
               <ResponsiveContainer width="100%" height={CH}>
                 <LineChart data={data} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
