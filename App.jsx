@@ -4003,14 +4003,19 @@ function AdminTablesPage({ token }) {
 
   const absDelta = r => parseFloat(r.curr_adopt) - parseFloat(r.prev_adopt); // percentage points
 
-  const applySortSlice = (subset, { key, dir }) => {
+  // Step 1: select the 15 biggest movers by absolute pp change (always).
+  // Step 2: re-sort that fixed set by whichever column the user picked.
+  const top15 = (subset, ascending) =>
+    [...subset].sort((a, b) => ascending ? absDelta(a) - absDelta(b) : absDelta(b) - absDelta(a)).slice(0, 15);
+
+  const applyDisplaySort = (subset, { key, dir }) => {
     const val = r => key === 'adopt' ? parseFloat(r.curr_adopt) : absDelta(r);
     const sign = dir === 'desc' ? -1 : 1;
-    return [...subset].sort((a, b) => sign * (val(b) - val(a))).slice(0, 15);
+    return [...subset].sort((a, b) => sign * (val(b) - val(a)));
   };
 
-  const increases = applySortSlice(rows.filter(r => absDelta(r) >= 0), incSort);
-  const decreases = applySortSlice(rows.filter(r => absDelta(r) <  0), decSort);
+  const increases = applyDisplaySort(top15(rows.filter(r => absDelta(r) >= 0), false), incSort);
+  const decreases = applyDisplaySort(top15(rows.filter(r => absDelta(r) <  0), true),  decSort);
 
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
 
