@@ -4039,7 +4039,7 @@ function AdminTablesPage({ token }) {
     const TITLEH = 48;
     const PAD    = 16;
     const cols   = [
-      { label: 'Technology',    key: 'technology', align: 'left',  w: 360 },
+      { label: 'Technology',    key: 'technology', align: 'left',  w: 328 },
       { label: String(maxYear), key: 'curr_adopt', align: 'right', w: 100, fmt: fmtPct },
       { label: 'YOY',           key: 'yoy',        align: 'right', w: 100, fmt: fmtYoy },
     ];
