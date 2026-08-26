@@ -5305,7 +5305,7 @@ ORDER BY t.technology, a.adoption_year`;
                   <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
                   {sortedTechs.map((tech, i) => (
                     <Line key={tech} type="monotone" dataKey={tech}
-                      stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
+                      stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>

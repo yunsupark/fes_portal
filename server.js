@@ -2747,6 +2747,7 @@ app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (req, res
       ${fleetJoin}
       WHERE ${fleetWhere}
         AND a.adoption_year >= ? AND a.adoption_year <= ?
+        AND (t.active_to IS NULL OR a.adoption_year <= t.active_to)
       GROUP BY a.tech_id, t.tech_group, t.technology, a.adoption_year
       ORDER BY t.tech_group, t.technology, a.adoption_year
     `, [minYear, maxYear]);
@@ -2759,6 +2760,7 @@ app.get("/api/admin/charts/adoption", requireAuth, requireAdmin, async (req, res
       ${fleetJoin}
       WHERE ${fleetWhere}
         AND a.adoption_year >= ? AND a.adoption_year <= ?
+        AND (t.active_to IS NULL OR a.adoption_year <= t.active_to)
       GROUP BY t.tech_group, a.adoption_year
       ORDER BY t.tech_group, a.adoption_year
     `, [minYear, maxYear]);
