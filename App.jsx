@@ -3977,23 +3977,34 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
 // ─── Admin Tables ─────────────────────────────────────────────────────────────
 
 function AdminTablesPage({ token }) {
-  const [maxYear,   setMaxYear]   = useState('');
-  const [haulType,  setHaulType]  = useState('combined');
-  const [rows,      setRows]      = useState([]);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState(null);
-  const [priorYear,    setPriorYear]    = useState('');
-  const [incSort, setIncSort] = useState({ key: 'yoy',  dir: 'desc' });
-  const [decSort, setDecSort] = useState({ key: 'yoy',  dir: 'asc'  });
+  const [maxYear,    setMaxYear]    = useState('');
+  const [haulType,   setHaulType]   = useState('combined');
+  const [rows,       setRows]       = useState([]);
+  const [panelRows,  setPanelRows]  = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(null);
+  const [priorYear,  setPriorYear]  = useState('');
+  const [incSort,    setIncSort]    = useState({ key: 'yoy', dir: 'desc' });
+  const [decSort,    setDecSort]    = useState({ key: 'yoy', dir: 'asc'  });
+  const [incSortP,   setIncSortP]   = useState({ key: 'yoy', dir: 'desc' });
+  const [decSortP,   setDecSortP]   = useState({ key: 'yoy', dir: 'asc'  });
 
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
     setLoading(true);
     setError(null);
-    fetch(`/api/admin/tables/yoy-adoption?haul_type=${haulType}`, { headers })
-      .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || `HTTP ${r.status}`)))
-      .then(d => { setRows(d.rows || []); setMaxYear(d.maxYear || ''); setPriorYear(d.priorYear || ''); })
+    const qs = `haul_type=${haulType}`;
+    Promise.all([
+      fetch(`/api/admin/tables/yoy-adoption?${qs}`,                { headers }).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || `HTTP ${r.status}`))),
+      fetch(`/api/admin/tables/yoy-adoption?${qs}&panel=balanced`, { headers }).then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e.error || `HTTP ${r.status}`))),
+    ])
+      .then(([all, panel]) => {
+        setRows(all.rows || []);
+        setPanelRows(panel.rows || []);
+        setMaxYear(all.maxYear || '');
+        setPriorYear(all.priorYear || '');
+      })
       .catch(e => setError(String(e)))
       .finally(() => setLoading(false));
   }, [haulType]); // eslint-disable-line
@@ -4014,8 +4025,10 @@ function AdminTablesPage({ token }) {
     return [...subset].sort((a, b) => sign * (val(b) - val(a)));
   };
 
-  const increases = applyDisplaySort(top15(rows.filter(r => absDelta(r) >= 0), false), incSort);
-  const decreases = applyDisplaySort(top15(rows.filter(r => absDelta(r) <  0), true),  decSort);
+  const increases  = applyDisplaySort(top15(rows.filter(r => absDelta(r) >= 0),      false), incSort);
+  const decreases  = applyDisplaySort(top15(rows.filter(r => absDelta(r) <  0),      true),  decSort);
+  const increasesP = applyDisplaySort(top15(panelRows.filter(r => absDelta(r) >= 0), false), incSortP);
+  const decreasesP = applyDisplaySort(top15(panelRows.filter(r => absDelta(r) <  0), true),  decSortP);
 
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
 
@@ -4203,9 +4216,16 @@ function AdminTablesPage({ token }) {
         {loading && <span style={{ fontSize: 12, color: '#9CA3AF', marginLeft: 8 }}>Loading…</span>}
         {error && !loading && <span style={{ fontSize: 12, color: '#DC2626', marginLeft: 8 }}>Error: {error}</span>}
       </div>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', marginBottom: 32 }}>
         <TableBlock title="YOY Adoption Increases" tableRows={increases} yoyColor="#16a34a" sort={incSort} setSort={setIncSort} />
         <TableBlock title="YOY Adoption Decreases" tableRows={decreases} yoyColor="#DC2626" sort={decSort} setSort={setDecSort} />
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 12 }}>
+        Fleets reporting in both {priorYear} and {maxYear}
+      </div>
+      <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+        <TableBlock title="YOY Adoption Increases (Balanced Panel)" tableRows={increasesP} yoyColor="#16a34a" sort={incSortP} setSort={setIncSortP} />
+        <TableBlock title="YOY Adoption Decreases (Balanced Panel)" tableRows={decreasesP} yoyColor="#DC2626" sort={decSortP} setSort={setDecSortP} />
       </div>
     </div>
   );

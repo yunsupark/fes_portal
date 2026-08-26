@@ -3209,6 +3209,16 @@ app.get("/api/admin/tables/yoy-adoption", requireAuth, requireAdmin, async (req,
   const priorYear = maxYear - 2; // compare to 2 years prior (e.g. 2025 vs 2023)
   const haulType  = (req.query.haul_type || 'combined').toLowerCase();
   const dcFilter  = haulType === 'combined' ? '' : `AND LOWER(f.default_duty_cycle) = '${haulType === 'lh' ? 'lh' : 'rh'}'`;
+  // balanced panel: restrict to fleets that reported in both years
+  const balanced  = req.query.panel === 'balanced';
+  const panelFilter = balanced
+    ? `AND a.fleet_id IN (
+         SELECT fleet_id FROM ffs_adoption WHERE adoption_year = ${maxYear}  AND fleet_id NOT IN (0,45,46)
+         AND fleet_id IN (
+           SELECT fleet_id FROM ffs_adoption WHERE adoption_year = ${priorYear} AND fleet_id NOT IN (0,45,46)
+         )
+       )`
+    : '';
 
   try {
     const [rows] = await db.query(`
@@ -3220,14 +3230,14 @@ app.get("/api/admin/tables/yoy-adoption", requireAuth, requireAdmin, async (req,
         SELECT a.tech_id, AVG(a.adoption_percent) AS adopt
         FROM ffs_adoption a
         JOIN ffs_fleet f ON f.fleet_id = a.fleet_id
-        WHERE a.adoption_year = ? AND a.fleet_id NOT IN (0,45,46) ${dcFilter}
+        WHERE a.adoption_year = ? AND a.fleet_id NOT IN (0,45,46) ${dcFilter} ${panelFilter}
         GROUP BY a.tech_id
       ) curr
       JOIN (
         SELECT a.tech_id, AVG(a.adoption_percent) AS adopt
         FROM ffs_adoption a
         JOIN ffs_fleet f ON f.fleet_id = a.fleet_id
-        WHERE a.adoption_year = ? AND a.fleet_id NOT IN (0,45,46) ${dcFilter}
+        WHERE a.adoption_year = ? AND a.fleet_id NOT IN (0,45,46) ${dcFilter} ${panelFilter}
         GROUP BY a.tech_id
       ) prev ON curr.tech_id = prev.tech_id
       JOIN ffs_tech t ON t.tech_id = curr.tech_id
