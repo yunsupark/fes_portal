@@ -3274,6 +3274,92 @@ app.post("/api/admin/charts/run-query", requireAuth, requireAdminRole, async (re
   }
 });
 
+// ─── Public Explorer ──────────────────────────────────────────────────────────
+/**
+ * GET /api/public/explorer
+ * No authentication required. Returns ONLY pre-aggregated data —
+ * no fleet IDs, no fleet names, no per-fleet values of any kind.
+ * Safe to expose on a public website; fleet data is structurally absent.
+ */
+app.get("/api/public/explorer", async (req, res) => {
+  try {
+    // Adoption: year + technology + all three duty-cycle cuts in one pass.
+    // Fleet identifiers never appear in the output.
+    const [techRows] = await db.query(`
+      SELECT t.tech_group, t.technology, a.adoption_year AS year,
+        ROUND(AVG(a.adoption_percent) * 100, 1)                                                              AS combined_pct,
+        ROUND(AVG(CASE WHEN LOWER(f.default_duty_cycle) = 'lh'
+                        AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab')
+                   THEN a.adoption_percent END) * 100, 1)                                                    AS lh_pct,
+        ROUND(AVG(CASE WHEN LOWER(f.default_duty_cycle) = 'rh'
+                        OR (LOWER(f.default_duty_cycle) = 'lh' AND a.cab_type = 'Day Cab')
+                   THEN a.adoption_percent END) * 100, 1)                                                    AS rh_pct,
+        COUNT(DISTINCT a.fleet_id)                                                                           AS n_fleets
+      FROM ffs_adoption a
+      JOIN ffs_tech    t ON a.tech_id  = t.tech_id
+      JOIN ffs_fleet   f ON a.fleet_id = f.fleet_id
+      WHERE a.fleet_id NOT IN (0, 45, 46)
+        AND (t.active_to IS NULL OR a.adoption_year <= t.active_to)
+      GROUP BY t.tech_group, t.technology, a.adoption_year
+      ORDER BY t.tech_group, t.technology, a.adoption_year
+    `);
+
+    // Industry-average MPG by year and duty cycle (no per-fleet rows).
+    const [mpgRows] = await db.query(`
+      SELECT year, duty_cycle, ROUND(AVG(fleet_mpg), 2) AS avg_mpg, COUNT(*) AS n_fleets
+      FROM (
+        SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
+               SUM(m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0) AS fleet_mpg
+        FROM ffs_mpg   m
+        JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+        WHERE COALESCE(m.mpg_quarter, '') = ''
+          AND m.fleet_id NOT IN (0, 45, 46)
+          AND m.fuel_type != 'CNG'
+          AND m.ifta_miles > 0 AND m.ifta_fuel > 0
+          AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+        GROUP BY m.mpg_year, m.fleet_id, LOWER(f.default_duty_cycle)
+      ) sub
+      GROUP BY year, duty_cycle
+      ORDER BY year, duty_cycle
+    `);
+
+    // Last publish timestamp from settings
+    const [[pubRow]] = await db.query(
+      `SELECT setting_value FROM ffs_settings WHERE setting_key = 'explorer_published_at'`
+    );
+
+    res.json({
+      generated_at:  new Date().toISOString(),
+      published_at:  pubRow?.setting_value || null,
+      techRows:      techRows.map(r => ({ ...r, year: Number(r.year) })),
+      mpgRows:       mpgRows.map(r => ({ ...r, year: Number(r.year), avg_mpg: parseFloat(r.avg_mpg) })),
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to generate explorer data' });
+  }
+});
+
+/**
+ * POST /api/admin/explorer/publish
+ * Admin-only. Records a publish timestamp (prototype).
+ * Production version would push the aggregated JSON to a CDN here.
+ */
+app.post("/api/admin/explorer/publish", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const ts = new Date().toISOString();
+    await db.query(
+      `INSERT INTO ffs_settings (setting_key, setting_value) VALUES ('explorer_published_at', ?)
+       ON DUPLICATE KEY UPDATE setting_value = ?`,
+      [ts, ts]
+    );
+    res.json({ ok: true, published_at: ts });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Publish failed' });
+  }
+});
+
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", async (req, res) => {
   try {

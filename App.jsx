@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from 'xlsx';
 
 import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
@@ -3974,6 +3974,248 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
   );
 }
 
+// ─── Public Explorer ──────────────────────────────────────────────────────────
+
+function AdminExplorerPage({ token }) {
+  const CC = CHART_COLORS_30;
+  const [data,       setData]       = useState(null);
+  const [loading,    setLoading]    = useState(true);
+  const [publishing, setPublishing] = useState(false);
+  const [pubMsg,     setPubMsg]     = useState('');
+  const [haulType,   setHaulType]   = useState('combined');
+  const [category,   setCategory]   = useState('');
+  const [view,       setView]       = useState('trends'); // 'trends' | 'mpg'
+
+  const headers = { Authorization: `Bearer ${token}` };
+
+  useEffect(() => {
+    setLoading(true);
+    fetch('/api/public/explorer')
+      .then(r => r.json())
+      .then(d => {
+        setData(d);
+        if (!category && d.techRows?.length) {
+          const first = d.techRows[0].tech_group;
+          setCategory(first);
+        }
+      })
+      .finally(() => setLoading(false));
+  }, []); // eslint-disable-line
+
+  const publish = () => {
+    setPublishing(true);
+    setPubMsg('');
+    fetch('/api/admin/explorer/publish', { method: 'POST', headers })
+      .then(r => r.json())
+      .then(d => {
+        setPubMsg(`Published ${new Date(d.published_at).toLocaleString()}`);
+        setData(prev => prev ? { ...prev, published_at: d.published_at } : prev);
+      })
+      .catch(() => setPubMsg('Publish failed'))
+      .finally(() => setPublishing(false));
+  };
+
+  const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
+  const fmtMpg = v => v == null ? '—' : parseFloat(v).toFixed(2);
+
+  // Build chart data for selected category + haul type
+  const chartData = useMemo(() => {
+    if (!data?.techRows || !category) return { rows: [], techs: [] };
+    const pctKey = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
+    const byYear = {};
+    const techSet = new Set();
+    data.techRows.filter(r => r.tech_group === category).forEach(r => {
+      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
+      const v = r[pctKey];
+      if (v != null) { byYear[r.year][r.technology] = parseFloat(v); techSet.add(r.technology); }
+    });
+    const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
+    // Sort techs by last-year value desc for legend ordering
+    const techs = [...techSet].sort((a, b) => {
+      const last = rows[rows.length - 1] || {};
+      return (last[b] ?? -1) - (last[a] ?? -1);
+    });
+    return { rows, techs };
+  }, [data, category, haulType]);
+
+  // Build MPG chart data
+  const mpgChartData = useMemo(() => {
+    if (!data?.mpgRows) return [];
+    const byYear = {};
+    data.mpgRows.forEach(r => {
+      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
+      if (r.duty_cycle === 'lh') byYear[r.year]['Line Haul'] = r.avg_mpg;
+      if (r.duty_cycle === 'rh') byYear[r.year]['Regional Haul'] = r.avg_mpg;
+    });
+    return Object.values(byYear).sort((a, b) => a.year - b.year);
+  }, [data]);
+
+  const categories = useMemo(() => {
+    if (!data?.techRows) return [];
+    return [...new Set(data.techRows.map(r => r.tech_group))].sort();
+  }, [data]);
+
+  const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
+
+  const HaulBtn = ({ val, label }) => (
+    <button onClick={() => setHaulType(val)} style={{
+      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
+      border: '1px solid', transition: 'background 0.15s',
+      borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
+      background:  haulType === val ? '#2563EB' : '#F9FAFB',
+      color:       haulType === val ? '#fff'    : '#374151',
+      fontWeight:  haulType === val ? 600       : 400,
+    }}>{label}</button>
+  );
+
+  const ViewBtn = ({ val, label }) => (
+    <button onClick={() => setView(val)} style={{
+      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
+      border: '1px solid', transition: 'background 0.15s',
+      borderColor: view === val ? '#374151' : '#D1D5DB',
+      background:  view === val ? '#374151' : '#F9FAFB',
+      color:       view === val ? '#fff'    : '#374151',
+      fontWeight:  view === val ? 600       : 400,
+    }}>{label}</button>
+  );
+
+  const pubDate = data?.published_at
+    ? new Date(data.published_at).toLocaleString()
+    : 'Never published';
+
+  return (
+    <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px' }}>
+
+      {/* Publish panel */}
+      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8,
+                    padding: '16px 20px', marginBottom: 24,
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Public Data Export</div>
+          <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
+            Publishes aggregated data (no fleet-level values). {pubMsg || `Last published: ${pubDate}`}
+          </div>
+        </div>
+        <button onClick={publish} disabled={publishing || loading} style={{
+          padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          borderRadius: 6, border: 'none', background: publishing ? '#9CA3AF' : '#1c3660',
+          color: '#fff', whiteSpace: 'nowrap',
+        }}>
+          {publishing ? 'Publishing…' : '▶ Publish Data'}
+        </button>
+      </div>
+
+      {/* Explorer preview header */}
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', letterSpacing: 1,
+                    textTransform: 'uppercase', marginBottom: 12 }}>
+        Public Tool Preview
+      </div>
+
+      {loading && <div style={{ color: '#9CA3AF', fontSize: 13 }}>Loading…</div>}
+
+      {!loading && data && (<>
+        {/* View + Haul controls */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <ViewBtn val="trends" label="Adoption Trends" />
+            <ViewBtn val="mpg"    label="Industry MPG" />
+          </div>
+          {view === 'trends' && (
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ fontSize: 12, color: '#6B7280' }}>Duty cycle:</span>
+              <HaulBtn val="combined" label="Combined" />
+              <HaulBtn val="lh"       label="Line Haul" />
+              <HaulBtn val="rh"       label="Regional Haul" />
+            </div>
+          )}
+        </div>
+
+        {/* Adoption Trends view */}
+        {view === 'trends' && (<>
+          {/* Category picker */}
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
+            {categories.map(cat => (
+              <button key={cat} onClick={() => setCategory(cat)} style={{
+                padding: '5px 12px', fontSize: 11, cursor: 'pointer', borderRadius: 20,
+                border: '1px solid',
+                borderColor: category === cat ? '#1c3660' : '#D1D5DB',
+                background:  category === cat ? '#1c3660' : '#F9FAFB',
+                color:       category === cat ? '#fff'    : '#374151',
+                fontWeight:  category === cat ? 600       : 400,
+              }}>{cat}</button>
+            ))}
+          </div>
+
+          {/* Line chart */}
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8,
+                        padding: '16px 20px', marginBottom: 24 }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>
+              {category}
+            </div>
+            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 16 }}>
+              {haulLabel} · average adoption across participating fleets
+            </div>
+
+            {/* Custom legend */}
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginBottom: 12 }}>
+              {chartData.techs.map((tech, i) => (
+                <div key={tech} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+                  <div style={{ width: 20, height: 2, background: CC[i % CC.length], borderRadius: 1 }} />
+                  <span style={{ color: '#374151' }}>{tech}</span>
+                </div>
+              ))}
+            </div>
+
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={chartData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                <Tooltip formatter={(v, n) => [fmtPct(v), n]} contentStyle={{ fontSize: 11 }} />
+                {chartData.techs.map((tech, i) => (
+                  <Line key={tech} type="monotone" dataKey={tech}
+                    stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        </>)}
+
+        {/* Industry MPG view */}
+        {view === 'mpg' && (
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8,
+                        padding: '16px 20px' }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>
+              Industry Average Fuel Economy
+            </div>
+            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 16 }}>
+              IFTA miles per gallon · fleet average by duty cycle · diesel only
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+              {[['Line Haul', '#1f77b4'], ['Regional Haul', '#ff7f0e']].map(([label, color]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+                  <div style={{ width: 20, height: 2, background: color }} />
+                  <span style={{ color: '#374151' }}>{label}</span>
+                </div>
+              ))}
+            </div>
+            <ResponsiveContainer width="100%" height={320}>
+              <LineChart data={mpgChartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                <YAxis domain={['auto', 'auto']} tickFormatter={fmtMpg} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                <Tooltip formatter={(v, n) => [fmtMpg(v) + ' mpg', n]} contentStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="Line Haul"      stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="Regional Haul"  stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
 // ─── Admin Tables ─────────────────────────────────────────────────────────────
 
 function AdminTablesPage({ token }) {
@@ -6112,7 +6354,7 @@ function AdminView({ token, onSignOut }) {
       {/* ── Page tabs ── */}
       <div style={{ background: '#fff', borderBottom: '2px solid #E5E7EB' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 20px', display: 'flex' }}>
-          {[['data', 'Management'], ['charts', 'Charts'], ['tables', 'Tables']].map(([key, label]) => (
+          {[['data', 'Management'], ['charts', 'Charts'], ['tables', 'Tables'], ['explorer', 'Explorer']].map(([key, label]) => (
             <button key={key} onClick={() => setAdminPage(key)} style={{
               background: 'none', border: 'none', padding: '10px 20px',
               fontSize: 13, fontWeight: adminPage === key ? 700 : 400,
@@ -6124,8 +6366,9 @@ function AdminView({ token, onSignOut }) {
         </div>
       </div>
 
-      {adminPage === 'charts' && <AdminChartsPage token={token} />}
-      {adminPage === 'tables' && <AdminTablesPage token={token} />}
+      {adminPage === 'charts'   && <AdminChartsPage   token={token} />}
+      {adminPage === 'tables'   && <AdminTablesPage   token={token} />}
+      {adminPage === 'explorer' && <AdminExplorerPage token={token} />}
 
       {adminPage === 'data' && <>
       <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
