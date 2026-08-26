@@ -5786,9 +5786,9 @@ ORDER BY t.technology, a.adoption_year`;
             }
             return -Infinity;
           };
-          const sortedAllMpgFleets = [...lhMpgFleets, ...rhMpgFleets]
+          const sortedAllMpgFleets = [...new Set([...lhMpgFleets, ...rhMpgFleets])]
             .sort((a, b) => latestVal(allMpgRows, b) - latestVal(allMpgRows, a));
-          const sortedAllAdoptFleets = [...lhAdoptFleets, ...rhAdoptFleets]
+          const sortedAllAdoptFleets = [...new Set([...lhAdoptFleets, ...rhAdoptFleets])]
             .sort((a, b) => latestVal(allAdoptRows, b) - latestVal(allAdoptRows, a));
 
           const activeMpgFleets   = fleetMpgFilter   === 'lh' ? lhMpgFleets
