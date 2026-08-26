@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from 'xlsx';
 
-import { ComposedChart, LineChart, Bar, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend } from "recharts";
+import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -3978,13 +3978,15 @@ function TechFormFields({ form, setForm, techGroups, labelStyle, inputStyle }) {
 
 function AdminExplorerPage({ token }) {
   const CC = CHART_COLORS_30;
-  const [data,       setData]       = useState(null);
-  const [loading,    setLoading]    = useState(true);
-  const [publishing, setPublishing] = useState(false);
-  const [pubMsg,     setPubMsg]     = useState('');
-  const [haulType,   setHaulType]   = useState('combined');
-  const [category,   setCategory]   = useState('');
-  const [view,       setView]       = useState('trends'); // 'trends' | 'mpg'
+  const [data,         setData]         = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [publishing,   setPublishing]   = useState(false);
+  const [pubMsg,       setPubMsg]       = useState('');
+  const [haulType,     setHaulType]     = useState('combined');
+  const [category,     setCategory]     = useState('');
+  const [view,         setView]         = useState('trends'); // 'trends'|'mpg'|'compare'|'landscape'
+  const [selectedTechs, setSelectedTechs] = useState([]);
+  const [techSearch,   setTechSearch]   = useState('');
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -3994,51 +3996,98 @@ function AdminExplorerPage({ token }) {
       .then(r => r.json())
       .then(d => {
         setData(d);
-        if (!category && d.techRows?.length) {
-          const first = d.techRows[0].tech_group;
-          setCategory(first);
-        }
+        if (!category && d.techRows?.length) setCategory(d.techRows[0].tech_group);
       })
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line
 
   const publish = () => {
-    setPublishing(true);
-    setPubMsg('');
+    setPublishing(true); setPubMsg('');
     fetch('/api/admin/explorer/publish', { method: 'POST', headers })
       .then(r => r.json())
-      .then(d => {
-        setPubMsg(`Published ${new Date(d.published_at).toLocaleString()}`);
-        setData(prev => prev ? { ...prev, published_at: d.published_at } : prev);
-      })
+      .then(d => { setPubMsg(`Published ${new Date(d.published_at).toLocaleString()}`); setData(prev => prev ? { ...prev, published_at: d.published_at } : prev); })
       .catch(() => setPubMsg('Publish failed'))
       .finally(() => setPublishing(false));
   };
 
   const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
   const fmtMpg = v => v == null ? '—' : parseFloat(v).toFixed(2);
+  const pctKey = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
+  const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
 
-  // Build chart data for selected category + haul type
+  // ── Derived data ────────────────────────────────────────────────────────────
+
+  const categories = useMemo(() => {
+    if (!data?.techRows) return [];
+    return [...new Set(data.techRows.map(r => r.tech_group))].sort();
+  }, [data]);
+
+  // Stable category→color map
+  const catColors = useMemo(() => {
+    const m = {}; categories.forEach((c, i) => { m[c] = CC[i % CC.length]; }); return m;
+  }, [categories]); // eslint-disable-line
+
+  // All unique technologies (for picker)
+  const allTechs = useMemo(() => {
+    if (!data?.techRows) return [];
+    const seen = new Set(); const out = [];
+    data.techRows.forEach(r => { const k = `${r.tech_group}||${r.technology}`; if (!seen.has(k)) { seen.add(k); out.push({ tech_group: r.tech_group, technology: r.technology }); }});
+    return out.sort((a, b) => a.tech_group.localeCompare(b.tech_group) || a.technology.localeCompare(b.technology));
+  }, [data]);
+
+  // Filtered list for picker search
+  const filteredTechs = useMemo(() => {
+    const q = techSearch.toLowerCase();
+    return q ? allTechs.filter(t => t.technology.toLowerCase().includes(q) || t.tech_group.toLowerCase().includes(q)) : allTechs;
+  }, [allTechs, techSearch]);
+
+  // Adoption trends (category view)
   const chartData = useMemo(() => {
     if (!data?.techRows || !category) return { rows: [], techs: [] };
-    const pctKey = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
-    const byYear = {};
-    const techSet = new Set();
+    const byYear = {}; const techSet = new Set();
     data.techRows.filter(r => r.tech_group === category).forEach(r => {
       if (!byYear[r.year]) byYear[r.year] = { year: r.year };
-      const v = r[pctKey];
-      if (v != null) { byYear[r.year][r.technology] = parseFloat(v); techSet.add(r.technology); }
+      const v = r[pctKey]; if (v != null) { byYear[r.year][r.technology] = parseFloat(v); techSet.add(r.technology); }
     });
     const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
-    // Sort techs by last-year value desc for legend ordering
-    const techs = [...techSet].sort((a, b) => {
-      const last = rows[rows.length - 1] || {};
-      return (last[b] ?? -1) - (last[a] ?? -1);
-    });
+    const techs = [...techSet].sort((a, b) => { const last = rows[rows.length - 1] || {}; return (last[b] ?? -1) - (last[a] ?? -1); });
     return { rows, techs };
-  }, [data, category, haulType]);
+  }, [data, category, pctKey]);
 
-  // Build MPG chart data
+  // Compare view: selected techs overlaid
+  const compareData = useMemo(() => {
+    if (!data?.techRows || !selectedTechs.length) return [];
+    const byYear = {};
+    data.techRows.filter(r => selectedTechs.includes(r.technology)).forEach(r => {
+      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
+      const v = r[pctKey]; if (v != null) byYear[r.year][r.technology] = parseFloat(v);
+    });
+    return Object.values(byYear).sort((a, b) => a.year - b.year);
+  }, [data, selectedTechs, pctKey]);
+
+  // Landscape scatter: latest year adoption vs delta from 2 years prior
+  const scatterData = useMemo(() => {
+    if (!data?.techRows) return {};
+    const years = [...new Set(data.techRows.map(r => r.year))].sort((a, b) => a - b);
+    const maxYr = years[years.length - 1];
+    const priorYr = maxYr - 2;
+    const byTech = {};
+    data.techRows.forEach(r => {
+      if (!byTech[r.technology]) byTech[r.technology] = { tech_group: r.tech_group, byYear: {} };
+      const v = r[pctKey]; if (v != null) byTech[r.technology].byYear[r.year] = parseFloat(v);
+    });
+    const byCat = {};
+    Object.entries(byTech).forEach(([tech, { tech_group, byYear }]) => {
+      const curr = byYear[maxYr]; if (curr == null) return;
+      const prior = byYear[priorYr];
+      const delta = prior != null ? parseFloat((curr - prior).toFixed(1)) : null;
+      if (!byCat[tech_group]) byCat[tech_group] = [];
+      byCat[tech_group].push({ technology: tech, tech_group, x: curr, y: delta ?? 0, hasYoy: delta != null });
+    });
+    return { byCat, maxYr, priorYr };
+  }, [data, pctKey]);
+
+  // MPG chart
   const mpgChartData = useMemo(() => {
     if (!data?.mpgRows) return [];
     const byYear = {};
@@ -4050,17 +4099,18 @@ function AdminExplorerPage({ token }) {
     return Object.values(byYear).sort((a, b) => a.year - b.year);
   }, [data]);
 
-  const categories = useMemo(() => {
-    if (!data?.techRows) return [];
-    return [...new Set(data.techRows.map(r => r.tech_group))].sort();
-  }, [data]);
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
+  const toggleTech = tech => {
+    setSelectedTechs(prev =>
+      prev.includes(tech) ? prev.filter(t => t !== tech)
+        : prev.length < 8 ? [...prev, tech] : prev
+    );
+  };
 
   const HaulBtn = ({ val, label }) => (
     <button onClick={() => setHaulType(val)} style={{
-      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
-      border: '1px solid', transition: 'background 0.15s',
+      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
       borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
       background:  haulType === val ? '#2563EB' : '#F9FAFB',
       color:       haulType === val ? '#fff'    : '#374151',
@@ -4070,8 +4120,7 @@ function AdminExplorerPage({ token }) {
 
   const ViewBtn = ({ val, label }) => (
     <button onClick={() => setView(val)} style={{
-      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
-      border: '1px solid', transition: 'background 0.15s',
+      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
       borderColor: view === val ? '#374151' : '#D1D5DB',
       background:  view === val ? '#374151' : '#F9FAFB',
       color:       view === val ? '#fff'    : '#374151',
@@ -4079,48 +4128,68 @@ function AdminExplorerPage({ token }) {
     }}>{label}</button>
   );
 
-  const pubDate = data?.published_at
-    ? new Date(data.published_at).toLocaleString()
-    : 'Never published';
+  const MiniLegend = ({ items }) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginBottom: 12 }}>
+      {items.map(([label, color]) => (
+        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+          <div style={{ width: 20, height: 2, background: color, borderRadius: 1 }} />
+          <span style={{ color: '#374151' }}>{label}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const ScatterTooltip = ({ active, payload }) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0]?.payload;
+    if (!d) return null;
+    return (
+      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '8px 12px', fontSize: 11, maxWidth: 220 }}>
+        <div style={{ fontWeight: 600, color: '#111827', marginBottom: 2 }}>{d.technology}</div>
+        <div style={{ color: '#9CA3AF', marginBottom: 6 }}>{d.tech_group}</div>
+        <div>Adoption: <b>{d.x?.toFixed(1)}%</b></div>
+        {d.hasYoy
+          ? <div>YOY change: <b style={{ color: d.y >= 0 ? '#16a34a' : '#DC2626' }}>{d.y >= 0 ? '+' : ''}{d.y}pp</b></div>
+          : <div style={{ color: '#9CA3AF', fontSize: 10 }}>No prior-year data</div>}
+      </div>
+    );
+  };
+
+  const pubDate = data?.published_at ? new Date(data.published_at).toLocaleString() : 'Never published';
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px' }}>
 
       {/* Publish panel */}
-      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8,
-                    padding: '16px 20px', marginBottom: 24,
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Public Data Export</div>
           <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
             Publishes aggregated data (no fleet-level values). {pubMsg || `Last published: ${pubDate}`}
           </div>
         </div>
-        <button onClick={publish} disabled={publishing || loading} style={{
-          padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer',
-          borderRadius: 6, border: 'none', background: publishing ? '#9CA3AF' : '#1c3660',
-          color: '#fff', whiteSpace: 'nowrap',
-        }}>
+        <button onClick={publish} disabled={publishing || loading} style={{ padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderRadius: 6, border: 'none', background: publishing ? '#9CA3AF' : '#1c3660', color: '#fff', whiteSpace: 'nowrap' }}>
           {publishing ? 'Publishing…' : '▶ Publish Data'}
         </button>
       </div>
 
-      {/* Explorer preview header */}
-      <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', letterSpacing: 1,
-                    textTransform: 'uppercase', marginBottom: 12 }}>
-        Public Tool Preview
-      </div>
+      <div style={{ fontSize: 11, fontWeight: 600, color: '#9CA3AF', letterSpacing: 1, textTransform: 'uppercase', marginBottom: 12 }}>Public Tool Preview</div>
 
       {loading && <div style={{ color: '#9CA3AF', fontSize: 13 }}>Loading…</div>}
 
       {!loading && data && (<>
-        {/* View + Haul controls */}
+
+        {/* Controls row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6 }}>
-            <ViewBtn val="trends" label="Adoption Trends" />
-            <ViewBtn val="mpg"    label="Industry MPG" />
+            <ViewBtn val="trends"    label="Adoption Trends" />
+            <ViewBtn val="compare"   label="Compare" />
+            <ViewBtn val="landscape" label="Landscape" />
+            <ViewBtn val="mpg"       label="Industry MPG" />
           </div>
-          {view === 'trends' && (
+          {view !== 'mpg' && (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span style={{ fontSize: 12, color: '#6B7280' }}>Duty cycle:</span>
               <HaulBtn val="combined" label="Combined" />
@@ -4130,14 +4199,12 @@ function AdminExplorerPage({ token }) {
           )}
         </div>
 
-        {/* Adoption Trends view */}
+        {/* ── Adoption Trends ── */}
         {view === 'trends' && (<>
-          {/* Category picker */}
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
             {categories.map(cat => (
               <button key={cat} onClick={() => setCategory(cat)} style={{
-                padding: '5px 12px', fontSize: 11, cursor: 'pointer', borderRadius: 20,
-                border: '1px solid',
+                padding: '5px 12px', fontSize: 11, cursor: 'pointer', borderRadius: 20, border: '1px solid',
                 borderColor: category === cat ? '#1c3660' : '#D1D5DB',
                 background:  category === cat ? '#1c3660' : '#F9FAFB',
                 color:       category === cat ? '#fff'    : '#374151',
@@ -4145,27 +4212,10 @@ function AdminExplorerPage({ token }) {
               }}>{cat}</button>
             ))}
           </div>
-
-          {/* Line chart */}
-          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8,
-                        padding: '16px 20px', marginBottom: 24 }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>
-              {category}
-            </div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 16 }}>
-              {haulLabel} · average adoption across participating fleets
-            </div>
-
-            {/* Custom legend */}
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginBottom: 12 }}>
-              {chartData.techs.map((tech, i) => (
-                <div key={tech} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
-                  <div style={{ width: 20, height: 2, background: CC[i % CC.length], borderRadius: 1 }} />
-                  <span style={{ color: '#374151' }}>{tech}</span>
-                </div>
-              ))}
-            </div>
-
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>{category}</div>
+            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>{haulLabel} · average adoption across participating fleets</div>
+            <MiniLegend items={chartData.techs.map((t, i) => [t, CC[i % CC.length]])} />
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={chartData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
@@ -4173,40 +4223,143 @@ function AdminExplorerPage({ token }) {
                 <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                 <Tooltip formatter={(v, n) => [fmtPct(v), n]} contentStyle={{ fontSize: 11 }} />
                 {chartData.techs.map((tech, i) => (
-                  <Line key={tech} type="monotone" dataKey={tech}
-                    stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} />
+                  <Line key={tech} type="monotone" dataKey={tech} stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} />
                 ))}
               </LineChart>
             </ResponsiveContainer>
           </div>
         </>)}
 
-        {/* Industry MPG view */}
-        {view === 'mpg' && (
-          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8,
-                        padding: '16px 20px' }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>
-              Industry Average Fuel Economy
-            </div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 16 }}>
-              IFTA miles per gallon · fleet average by duty cycle · diesel only
-            </div>
-            <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
-              {[['Line Haul', '#1f77b4'], ['Regional Haul', '#ff7f0e']].map(([label, color]) => (
-                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
-                  <div style={{ width: 20, height: 2, background: color }} />
-                  <span style={{ color: '#374151' }}>{label}</span>
+        {/* ── Compare Technologies ── */}
+        {view === 'compare' && (
+          <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+
+            {/* Picker panel */}
+            <div style={{ width: 280, flexShrink: 0, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, overflow: 'hidden' }}>
+              <div style={{ padding: '12px 14px', borderBottom: '1px solid #F3F4F6' }}>
+                <div style={{ fontWeight: 600, fontSize: 13, color: '#111827', marginBottom: 8 }}>
+                  Select technologies <span style={{ fontSize: 11, fontWeight: 400, color: '#9CA3AF' }}>({selectedTechs.length}/8)</span>
                 </div>
-              ))}
+                <input
+                  value={techSearch} onChange={e => setTechSearch(e.target.value)}
+                  placeholder="Search…"
+                  style={{ width: '100%', padding: '6px 10px', fontSize: 12, border: '1px solid #D1D5DB', borderRadius: 6, outline: 'none', boxSizing: 'border-box' }}
+                />
+              </div>
+              <div style={{ maxHeight: 480, overflowY: 'auto' }}>
+                {(() => {
+                  const grouped = {};
+                  filteredTechs.forEach(t => { if (!grouped[t.tech_group]) grouped[t.tech_group] = []; grouped[t.tech_group].push(t.technology); });
+                  return Object.entries(grouped).map(([grp, techs]) => (
+                    <div key={grp}>
+                      <div style={{ padding: '7px 14px 4px', fontSize: 10, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, background: '#F9FAFB', borderBottom: '1px solid #F3F4F6' }}>{grp}</div>
+                      {techs.map(tech => {
+                        const sel = selectedTechs.includes(tech);
+                        const idx = selectedTechs.indexOf(tech);
+                        return (
+                          <div key={tech} onClick={() => toggleTech(tech)} style={{
+                            display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12,
+                            background: sel ? '#EFF6FF' : 'transparent', color: '#374151',
+                            borderBottom: '1px solid #F9FAFB',
+                          }}>
+                            <div style={{ width: 12, height: 12, borderRadius: 3, border: `2px solid ${sel ? CC[idx % CC.length] : '#D1D5DB'}`, background: sel ? CC[idx % CC.length] : 'transparent', flexShrink: 0 }} />
+                            {tech}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ));
+                })()}
+              </div>
+              {selectedTechs.length > 0 && (
+                <div style={{ padding: '10px 14px', borderTop: '1px solid #F3F4F6' }}>
+                  <button onClick={() => setSelectedTechs([])} style={{ fontSize: 11, color: '#6B7280', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Clear all</button>
+                </div>
+              )}
             </div>
+
+            {/* Chart panel */}
+            <div style={{ flex: 1, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+              {selectedTechs.length === 0
+                ? <div style={{ color: '#9CA3AF', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Select technologies from the list to compare them</div>
+                : (<>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>Technology Comparison</div>
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>{haulLabel} · up to 8 technologies across any category</div>
+                    <MiniLegend items={selectedTechs.map((t, i) => [t, CC[i % CC.length]])} />
+                    <ResponsiveContainer width="100%" height={380}>
+                      <LineChart data={compareData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                        <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                        <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                        <Tooltip formatter={(v, n) => [fmtPct(v), n]} contentStyle={{ fontSize: 11 }} />
+                        {selectedTechs.map((tech, i) => (
+                          <Line key={tech} type="monotone" dataKey={tech} stroke={CC[i % CC.length]} strokeWidth={2} dot={false} />
+                        ))}
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </>)
+              }
+            </div>
+          </div>
+        )}
+
+        {/* ── Landscape Scatter ── */}
+        {view === 'landscape' && (() => {
+          const { byCat = {}, maxYr, priorYr } = scatterData;
+          const catList = Object.keys(byCat).sort();
+          return (
+            <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>Technology Landscape</div>
+              <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 4 }}>
+                {haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.
+              </div>
+              {/* Quadrant labels */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, width: '100%', marginBottom: 4, paddingLeft: 60, paddingRight: 16, boxSizing: 'border-box' }}>
+                {[['Rising', '#16a34a'], ['Mainstream', '#2563EB'], ['Fading', '#9CA3AF'], ['Declining', '#DC2626']].map(([label, color]) => (
+                  <div key={label} style={{ fontSize: 10, fontWeight: 600, color, opacity: 0.6,
+                    textAlign: label === 'Rising' || label === 'Fading' ? 'left' : 'right',
+                    paddingBottom: label === 'Rising' || label === 'Mainstream' ? 0 : 2,
+                    order: label === 'Rising' ? 0 : label === 'Mainstream' ? 1 : label === 'Fading' ? 2 : 3,
+                  }}>{label}</div>
+                ))}
+              </div>
+              <MiniLegend items={catList.map(c => [c, catColors[c]])} />
+              <ResponsiveContainer width="100%" height={420}>
+                <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                  <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
+                    tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={{ value: `${maxYr} Adoption`, position: 'insideBottom', offset: -12, fontSize: 11, fill: '#6B7280' }} />
+                  <YAxis type="number" dataKey="y" name="Change (pp)"
+                    tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
+                  <ZAxis range={[40, 40]} />
+                  <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
+                  <ReferenceLine y={0}  stroke="#9CA3AF" strokeWidth={1.5} />
+                  <Tooltip content={<ScatterTooltip />} />
+                  {catList.map(cat => (
+                    <Scatter key={cat} name={cat} data={byCat[cat]} fill={catColors[cat]} fillOpacity={0.75} />
+                  ))}
+                </ScatterChart>
+              </ResponsiveContainer>
+            </div>
+          );
+        })()}
+
+        {/* ── Industry MPG ── */}
+        {view === 'mpg' && (
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>Industry Average Fuel Economy</div>
+            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>IFTA miles per gallon · fleet average by duty cycle · diesel only</div>
+            <MiniLegend items={[['Line Haul', '#1f77b4'], ['Regional Haul', '#ff7f0e']]} />
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={mpgChartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                 <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                 <YAxis domain={['auto', 'auto']} tickFormatter={fmtMpg} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                 <Tooltip formatter={(v, n) => [fmtMpg(v) + ' mpg', n]} contentStyle={{ fontSize: 11 }} />
-                <Line type="monotone" dataKey="Line Haul"      stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
-                <Line type="monotone" dataKey="Regional Haul"  stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="Line Haul"     stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+                <Line type="monotone" dataKey="Regional Haul" stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
               </LineChart>
             </ResponsiveContainer>
           </div>
