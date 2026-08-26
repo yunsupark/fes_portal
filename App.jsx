@@ -3983,6 +3983,7 @@ function AdminTablesPage({ token }) {
   const [loading,   setLoading]   = useState(true);
   const [error,     setError]     = useState(null);
   const [priorYear, setPriorYear] = useState('');
+  const [sortBy,    setSortBy]    = useState('yoy'); // 'yoy' | 'adopt'
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -4000,11 +4001,14 @@ function AdminTablesPage({ token }) {
   const fmtYoy = v => v == null ? '—' : `${v >= 0 ? '+' : ''}${(parseFloat(v) * 100).toFixed(0)}%`;
 
   const absDelta = r => parseFloat(r.curr_adopt) - parseFloat(r.prev_adopt); // percentage points
-  const increases = rows.filter(r => absDelta(r) >= 0)
-                        .sort((a, b) => absDelta(b) - absDelta(a))
-                        .slice(0, 15);
+  const sortFn = sortBy === 'adopt'
+    ? (a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt)
+    : (a, b) => absDelta(b) - absDelta(a);
+  const increases = rows.filter(r => absDelta(r) >= 0).sort(sortFn).slice(0, 15);
   const decreases = rows.filter(r => absDelta(r) <  0)
-                        .sort((a, b) => absDelta(a) - absDelta(b))
+                        .sort(sortBy === 'adopt'
+                          ? (a, b) => parseFloat(b.curr_adopt) - parseFloat(a.curr_adopt)
+                          : (a, b) => absDelta(a) - absDelta(b))
                         .slice(0, 15);
 
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
@@ -4119,6 +4123,19 @@ function AdminTablesPage({ token }) {
     a.click();
   };
 
+  const thBtn = (label, key) => {
+    const active = sortBy === key;
+    return (
+      <th onClick={() => setSortBy(key)} style={{
+        textAlign: 'right', padding: '8px 12px', fontWeight: 600,
+        color: active ? '#2563EB' : '#6B7280', borderBottom: '1px solid #E5E7EB',
+        whiteSpace: 'nowrap', cursor: 'pointer', userSelect: 'none',
+      }}>
+        {label} {active ? '▼' : ''}
+      </th>
+    );
+  };
+
   const TableBlock = ({ title, tableRows, yoyColor }) => (
     <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', overflow: 'hidden', flex: '1 1 0', minWidth: 0 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #F3F4F6' }}>
@@ -4142,8 +4159,8 @@ function AdminTablesPage({ token }) {
           <thead>
             <tr style={{ background: '#F9FAFB' }}>
               <th style={{ textAlign: 'left',  padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>Technology</th>
-              <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB', whiteSpace: 'nowrap' }}>{maxYear}</th>
-              <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 600, color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>YOY</th>
+              {thBtn(String(maxYear), 'adopt')}
+              {thBtn('YOY', 'yoy')}
             </tr>
           </thead>
           <tbody>
