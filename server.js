@@ -3299,6 +3299,8 @@ app.get("/api/public/explorer", async (req, res) => {
       JOIN ffs_tech    t ON a.tech_id  = t.tech_id
       JOIN ffs_fleet   f ON a.fleet_id = f.fleet_id
       WHERE a.fleet_id NOT IN (0, 45, 46)
+        AND a.adoption_year >= 2003
+        AND a.adoption_percent <= 1
         AND (t.active_to IS NULL OR a.adoption_year <= t.active_to)
       GROUP BY t.tech_group, t.technology, a.adoption_year
       ORDER BY t.tech_group, t.technology, a.adoption_year
