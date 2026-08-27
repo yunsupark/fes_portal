@@ -4420,10 +4420,10 @@ function AdminTablesPage({ token }) {
     return [...subset].sort((a, b) => sign * (val(b) - val(a)));
   };
 
-  const increases  = applyDisplaySort(top15(rows.filter(r => absDelta(r) >= 10),      false), incSort);
-  const decreases  = applyDisplaySort(top15(rows.filter(r => absDelta(r) <= -10),     true),  decSort);
-  const increasesP = applyDisplaySort(top15(panelRows.filter(r => absDelta(r) >= 10), false), incSortP);
-  const decreasesP = applyDisplaySort(top15(panelRows.filter(r => absDelta(r) <= -10),true),  decSortP);
+  const increases  = applyDisplaySort(top15(rows.filter(r => parseFloat(r.yoy) >= 0.10),       false), incSort);
+  const decreases  = applyDisplaySort(top15(rows.filter(r => parseFloat(r.yoy) <= -0.10),      true),  decSort);
+  const increasesP = applyDisplaySort(top15(panelRows.filter(r => parseFloat(r.yoy) >= 0.10),  false), incSortP);
+  const decreasesP = applyDisplaySort(top15(panelRows.filter(r => parseFloat(r.yoy) <= -0.10), true),  decSortP);
 
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
 
