@@ -5956,7 +5956,7 @@ ORDER BY t.technology, a.adoption_year`;
                              style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } }} />
                   <Tooltip formatter={(v, n) => [v != null ? `${fmtMpg(v)} mpg` : '—', n]} contentStyle={{ fontSize: 11 }} />
                   <Legend verticalAlign="top" align="right" wrapperStyle={{ fontSize: 11, paddingBottom: 4 }}
-                    payload={BUCKETS.map(b => ({ value: b.label, type: 'line', color: b.color }))} />
+                    payload={[...BUCKETS].reverse().map(b => ({ value: b.label, type: 'line', color: b.color }))} />
                   {BUCKETS.map(b => (
                     <Line key={b.key} type="monotone" dataKey={b.label}
                       stroke={b.color} strokeWidth={2} dot={false} connectNulls />
