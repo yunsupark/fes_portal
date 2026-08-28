@@ -5339,9 +5339,7 @@ function AdminChartsPage({ token }) {
       // MPG rows
       const baseRows = (mpgData.rows || []).map(r => ({
         year:                  r.year,
-        'Combined MPG':        (r.lh_mpg != null && r.rh_mpg != null)
-                                 ? parseFloat(((r.lh_mpg + r.rh_mpg) / 2).toFixed(3))
-                                 : (r.lh_mpg ?? r.rh_mpg ?? null),
+        'Combined MPG':        null, // recomputed after any custom SQL override
         'Line Haul MPG':       r.lh_mpg        ?? null,
         'Regional Haul MPG':   r.rh_mpg        ?? null,
         'RH CNG DGE':          r.rh_cng_mpg    ?? null,
@@ -5351,6 +5349,13 @@ function AdminChartsPage({ token }) {
         'LH Adoption':         r.lh_adoption   ?? null,
         'RH Adoption':         r.rh_adoption   ?? null,
       }));
+      const recomputeCombined = r => {
+        const lh = r['Line Haul MPG'], rh = r['Regional Haul MPG'];
+        r['Combined MPG'] = (lh != null && rh != null)
+          ? parseFloat(((lh + rh) / 2).toFixed(3))
+          : (lh ?? rh ?? null);
+        return r;
+      };
       if (customByKey['chart_sql_mpg']) {
         const map = {};
         baseRows.forEach(r => { map[r.year] = { ...r }; });
@@ -5361,9 +5366,9 @@ function AdminChartsPage({ token }) {
           if (dc === 'lh') map[yr]['Line Haul MPG']     = row.fleet_mpg != null ? parseFloat(row.fleet_mpg) : null;
           if (dc === 'rh') map[yr]['Regional Haul MPG'] = row.fleet_mpg != null ? parseFloat(row.fleet_mpg) : null;
         });
-        setMpgRows(Object.values(map).sort((a, b) => a.year - b.year));
+        setMpgRows(Object.values(map).map(recomputeCombined).sort((a, b) => a.year - b.year));
       } else {
-        setMpgRows(baseRows);
+        setMpgRows(baseRows.map(recomputeCombined));
       }
 
       // Adoption: process all three haul types; custom SQL only applies to combined
