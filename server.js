@@ -2840,19 +2840,23 @@ app.get("/api/admin/charts/mpg", requireAuth, requireAdmin, async (req, res) => 
         AND adoption_year >= ? AND adoption_year <= ?
       GROUP BY adoption_year ORDER BY adoption_year
     `, [minYear, maxYear]);
-    // Combined diesel MPG: same per-row methodology as the saved custom SQL
-    // (AVG of multiplier*miles/fuel per row, no duty-cycle split).
+    // Combined diesel MPG: two-level aggregation (sum miles/fuel per fleet → avg across fleets),
+    // consistent with Method A used for LH/RH fleetRows above.
     const [combinedRows] = await db.query(`
-      SELECT m.mpg_year AS year,
-             ROUND(AVG(COALESCE(m.multiplier, 1) * m.ifta_miles / m.ifta_fuel), 3) AS combined_mpg
-      FROM ffs_mpg m
-      JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
-      WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
-        AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
-        AND m.mpg_year >= ? AND m.mpg_year <= ?
-        AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
-      GROUP BY m.mpg_year
-      ORDER BY m.mpg_year
+      SELECT year, ROUND(AVG(fleet_mpg), 3) AS combined_mpg
+      FROM (
+        SELECT m.mpg_year AS year, m.fleet_id,
+               SUM(COALESCE(m.multiplier, 1) * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0) AS fleet_mpg
+        FROM ffs_mpg m
+        JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+        WHERE COALESCE(m.mpg_quarter,'') = '' AND m.fleet_id NOT IN (0, 45, 46)
+          AND m.ifta_fuel > 0 AND m.ifta_miles > 0 AND m.fuel_type != 'CNG'
+          AND m.mpg_year >= ? AND m.mpg_year <= ?
+          AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+        GROUP BY m.mpg_year, m.fleet_id
+      ) sub
+      GROUP BY year
+      ORDER BY year
     `, [minYear, maxYear]);
     // LH adoption aggregate: LH fleets, sleeper/NULL rows only.
     // Avg per-tech across configs (prevents double-count), sum / active sleeper techs, avg across fleets.
