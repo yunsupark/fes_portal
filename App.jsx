@@ -3987,6 +3987,7 @@ function AdminExplorerPage({ token }) {
   const [view,         setView]         = useState('trends'); // 'trends'|'mpg'|'compare'|'landscape'
   const [selectedTechs, setSelectedTechs] = useState([]);
   const [techSearch,   setTechSearch]   = useState('');
+  const [landscapeCat, setLandscapeCat] = useState(null); // null = all categories
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -4307,20 +4308,48 @@ function AdminExplorerPage({ token }) {
         {view === 'landscape' && (() => {
           const { byCat = {}, maxYr, priorYr } = scatterData;
           const catList = Object.keys(byCat).sort();
+          const visibleByCat = landscapeCat ? { [landscapeCat]: byCat[landscapeCat] || [] } : byCat;
+          // Compute symmetric Y domain from all data (not just filtered)
+          const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
+          const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
+          const yDomain = [-maxAbsDelta, maxAbsDelta];
+          // Custom label component: renders all 4 quadrant labels inside the chart area
+          const QuadrantLabels = ({ viewBox }) => {
+            if (!viewBox) return null;
+            const { x, y, width } = viewBox;
+            const pad = 6;
+            return (
+              <g style={{ pointerEvents: 'none' }}>
+                <text x={x + pad} y={y - pad} fill="#16a34a" fontSize={11} fontWeight={700} opacity={0.55} dominantBaseline="auto">Rising</text>
+                <text x={x + width - pad} y={y - pad} fill="#2563EB" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="auto">Mainstream</text>
+                <text x={x + pad} y={y + pad} fill="#9CA3AF" fontSize={11} fontWeight={700} opacity={0.7} dominantBaseline="hanging">Fading</text>
+                <text x={x + width - pad} y={y + pad} fill="#DC2626" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="hanging">Declining</text>
+              </g>
+            );
+          };
           return (
             <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
               <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>Technology Landscape</div>
-              <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 4 }}>
+              <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>
                 {haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.
               </div>
-              {/* Quadrant labels */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, width: '100%', marginBottom: 4, paddingLeft: 60, paddingRight: 16, boxSizing: 'border-box' }}>
-                {[['Rising', '#16a34a'], ['Mainstream', '#2563EB'], ['Fading', '#9CA3AF'], ['Declining', '#DC2626']].map(([label, color]) => (
-                  <div key={label} style={{ fontSize: 10, fontWeight: 600, color, opacity: 0.6,
-                    textAlign: label === 'Rising' || label === 'Fading' ? 'left' : 'right',
-                    paddingBottom: label === 'Rising' || label === 'Mainstream' ? 0 : 2,
-                    order: label === 'Rising' ? 0 : label === 'Mainstream' ? 1 : label === 'Fading' ? 2 : 3,
-                  }}>{label}</div>
+              {/* Category filter */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                <button onClick={() => setLandscapeCat(null)} style={{
+                  padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                  borderColor: landscapeCat === null ? '#374151' : '#D1D5DB',
+                  background:  landscapeCat === null ? '#374151' : '#F9FAFB',
+                  color:       landscapeCat === null ? '#fff'    : '#374151',
+                  fontWeight:  landscapeCat === null ? 600       : 400,
+                }}>All</button>
+                {catList.map(cat => (
+                  <button key={cat} onClick={() => setLandscapeCat(landscapeCat === cat ? null : cat)} style={{
+                    padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                    borderColor: landscapeCat === cat ? catColors[cat] : '#D1D5DB',
+                    background:  landscapeCat === cat ? catColors[cat] : '#F9FAFB',
+                    color:       landscapeCat === cat ? '#fff'          : '#374151',
+                    fontWeight:  landscapeCat === cat ? 600             : 400,
+                  }}>{cat}</button>
                 ))}
               </div>
               <MiniLegend items={catList.map(c => [c, catColors[c]])} />
@@ -4330,15 +4359,15 @@ function AdminExplorerPage({ token }) {
                   <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
                     tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={{ value: `${maxYr} Adoption`, position: 'insideBottom', offset: -12, fontSize: 11, fill: '#6B7280' }} />
-                  <YAxis type="number" dataKey="y" name="Change (pp)"
+                  <YAxis type="number" dataKey="y" name="Change (pp)" domain={yDomain}
                     tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
                   <ZAxis range={[40, 40]} />
                   <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
-                  <ReferenceLine y={0}  stroke="#9CA3AF" strokeWidth={1.5} />
+                  <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} label={<QuadrantLabels />} />
                   <Tooltip content={<ScatterTooltip />} />
-                  {catList.map(cat => (
-                    <Scatter key={cat} name={cat} data={byCat[cat]} fill={catColors[cat]} fillOpacity={0.75} />
+                  {Object.entries(visibleByCat).map(([cat, pts]) => (
+                    <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75} />
                   ))}
                 </ScatterChart>
               </ResponsiveContainer>
