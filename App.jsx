@@ -5339,7 +5339,9 @@ function AdminChartsPage({ token }) {
       // MPG rows
       const baseRows = (mpgData.rows || []).map(r => ({
         year:                  r.year,
-        'Combined MPG':        r.combined_mpg  ?? null,
+        'Combined MPG':        (r.lh_mpg != null && r.rh_mpg != null)
+                                 ? parseFloat(((r.lh_mpg + r.rh_mpg) / 2).toFixed(3))
+                                 : (r.lh_mpg ?? r.rh_mpg ?? null),
         'Line Haul MPG':       r.lh_mpg        ?? null,
         'Regional Haul MPG':   r.rh_mpg        ?? null,
         'RH CNG DGE':          r.rh_cng_mpg    ?? null,
