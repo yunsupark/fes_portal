@@ -3988,6 +3988,7 @@ function AdminExplorerPage({ token }) {
   const [selectedTechs, setSelectedTechs] = useState([]);
   const [techSearch,   setTechSearch]   = useState('');
   const [landscapeCat, setLandscapeCat] = useState(null); // null = all categories
+  const chartRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -4156,6 +4157,55 @@ function AdminExplorerPage({ token }) {
     );
   };
 
+  const dlCsv = (rows, filename) => {
+    if (!rows?.length) return;
+    const keys = Object.keys(rows[0]);
+    const escape = v => { const s = v ?? ''; return String(s).includes(',') || String(s).includes('"') ? `"${String(s).replace(/"/g, '""')}"` : s; };
+    const csv = [keys.join(','), ...rows.map(r => keys.map(k => escape(r[k])).join(','))].join('\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+    a.download = filename + '.csv'; a.click();
+  };
+
+  const dlPng = (filename) => {
+    const svg = chartRef.current?.querySelector('svg');
+    if (!svg) return;
+    const { width, height } = svg.getBoundingClientRect();
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('width', '100%'); bg.setAttribute('height', '100%'); bg.setAttribute('fill', 'white');
+    clone.insertBefore(bg, clone.firstChild);
+    const svgStr = new XMLSerializer().serializeToString(clone);
+    const scale = 2;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width * scale; canvas.height = height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale); ctx.drawImage(img, 0, 0, width, height);
+      const a = document.createElement('a');
+      a.download = filename + '.png'; a.href = canvas.toDataURL('image/png'); a.click();
+    };
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
+  };
+
+  const DlBtn = ({ onClick, children }) => (
+    <button onClick={onClick} style={{
+      padding: '3px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 5,
+      border: '1px solid #D1D5DB', background: '#F9FAFB', color: '#374151',
+      display: 'flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap',
+    }}>{children}</button>
+  );
+
+  const DownloadBar = ({ csvRows, csvName, pngName }) => (
+    <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+      <DlBtn onClick={() => dlCsv(csvRows, csvName)}>↓ CSV</DlBtn>
+      <DlBtn onClick={() => dlPng(pngName)}>↓ PNG</DlBtn>
+    </div>
+  );
+
   const pubDate = data?.published_at ? new Date(data.published_at).toLocaleString() : 'Never published';
 
   // ── Render ───────────────────────────────────────────────────────────────────
@@ -4213,9 +4263,18 @@ function AdminExplorerPage({ token }) {
               }}>{cat}</button>
             ))}
           </div>
-          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>{category}</div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>{haulLabel} · average adoption across participating fleets</div>
+          <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{category}</div>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · average adoption across participating fleets</div>
+              </div>
+              <DownloadBar
+                csvRows={chartData.rows.map(r => { const o = { year: r.year }; chartData.techs.forEach(t => { o[t] = r[t] != null ? +r[t].toFixed(1) : ''; }); return o; })}
+                csvName={`trends_${category.replace(/\s+/g,'_')}`}
+                pngName={`trends_${category.replace(/\s+/g,'_')}`}
+              />
+            </div>
             <MiniLegend items={chartData.techs.map((t, i) => [t, CC[i % CC.length]])} />
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={chartData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
@@ -4280,12 +4339,21 @@ function AdminExplorerPage({ token }) {
             </div>
 
             {/* Chart panel */}
-            <div style={{ flex: 1, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+            <div ref={chartRef} style={{ flex: 1, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
               {selectedTechs.length === 0
                 ? <div style={{ color: '#9CA3AF', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Select technologies from the list to compare them</div>
                 : (<>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>Technology Comparison</div>
-                    <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>{haulLabel} · up to 8 technologies across any category</div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Comparison</div>
+                        <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · up to 8 technologies across any category</div>
+                      </div>
+                      <DownloadBar
+                        csvRows={compareData.map(r => { const o = { year: r.year }; selectedTechs.forEach(t => { o[t] = r[t] != null ? +r[t].toFixed(1) : ''; }); return o; })}
+                        csvName="compare_technologies"
+                        pngName="compare_technologies"
+                      />
+                    </div>
                     <MiniLegend items={selectedTechs.map((t, i) => [t, CC[i % CC.length]])} />
                     <ResponsiveContainer width="100%" height={380}>
                       <LineChart data={compareData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
@@ -4328,10 +4396,21 @@ function AdminExplorerPage({ token }) {
             );
           };
           return (
-            <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
-              <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>Technology Landscape</div>
-              <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>
-                {haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.
+            <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Landscape</div>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                    {haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.
+                  </div>
+                </div>
+                <DownloadBar
+                  csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
+                    pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
+                  ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
+                  csvName={`landscape_${maxYr}`}
+                  pngName={`landscape_${maxYr}`}
+                />
               </div>
               {/* Category filter */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
@@ -4377,9 +4456,14 @@ function AdminExplorerPage({ token }) {
 
         {/* ── Industry MPG ── */}
         {view === 'mpg' && (
-          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
-            <div style={{ fontWeight: 700, fontSize: 14, color: '#111827', marginBottom: 4 }}>Industry Average Fuel Economy</div>
-            <div style={{ fontSize: 11, color: '#9CA3AF', marginBottom: 12 }}>IFTA miles per gallon · fleet average by duty cycle · diesel only</div>
+          <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Industry Average Fuel Economy</div>
+                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>IFTA miles per gallon · fleet average by duty cycle · diesel only</div>
+              </div>
+              <DownloadBar csvRows={mpgChartData} csvName="industry_mpg" pngName="industry_mpg" />
+            </div>
             <MiniLegend items={[['Line Haul', '#1f77b4'], ['Regional Haul', '#ff7f0e']]} />
             <ResponsiveContainer width="100%" height={320}>
               <LineChart data={mpgChartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
