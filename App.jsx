@@ -4067,17 +4067,20 @@ function AdminExplorerPage({ token }) {
     return Object.values(byYear).sort((a, b) => a.year - b.year);
   }, [data, selectedTechs, pctKey]);
 
-  // All-techs spaghetti chart
+  // All-techs spaghetti chart — use sanitized keys so Recharts dot-path lookup never fires
   const allTechsData = useMemo(() => {
     if (!data?.techRows) return { rows: [], techs: [] };
+    const sanitize = t => t.replace(/\./g, '·'); // replace dots with middle-dot (·)
     const byYear = {}; const techInfo = {};
     data.techRows.forEach(r => {
+      const key = sanitize(r.technology);
       if (!byYear[r.year]) byYear[r.year] = { year: r.year };
-      const v = r[pctKey]; if (v != null) byYear[r.year][r.technology] = parseFloat(v);
-      if (!techInfo[r.technology]) techInfo[r.technology] = r.tech_group;
+      const v = r[pctKey]; if (v != null) byYear[r.year][key] = parseFloat(v);
+      if (!techInfo[key]) techInfo[key] = { group: r.tech_group, label: r.technology };
     });
     const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
-    const techs = Object.entries(techInfo).sort((a, b) => a[1].localeCompare(b[1]) || a[0].localeCompare(b[0]));
+    const techs = Object.entries(techInfo).sort((a, b) =>
+      a[1].group.localeCompare(b[1].group) || a[1].label.localeCompare(b[1].label));
     return { rows, techs };
   }, [data, pctKey]);
 
@@ -4480,7 +4483,7 @@ function AdminExplorerPage({ token }) {
                 </div>
               </div>
               <DownloadBar
-                csvRows={allTechsData.rows.map(r => { const o = { year: r.year }; allTechsData.techs.forEach(([t]) => { o[t] = r[t] != null ? +r[t].toFixed(1) : ''; }); return o; })}
+                csvRows={allTechsData.rows.map(r => { const o = { year: r.year }; allTechsData.techs.forEach(([key, { label }]) => { o[label] = r[key] != null ? +r[key].toFixed(1) : ''; }); return o; })}
                 csvName="all_techs_adoption"
                 pngName="all_techs_adoption"
               />
@@ -4500,9 +4503,9 @@ function AdminExplorerPage({ token }) {
                       <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '8px 12px', fontSize: 11, maxWidth: 240 }}>
                         <div style={{ fontWeight: 600, color: '#111827', marginBottom: 4 }}>{label}</div>
                         {top.map(p => (
-                          <div key={p.dataKey} style={{ display: 'flex', justifyContent: 'space-between', gap: 12, color: p.stroke }}>
-                            <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{p.dataKey}</span>
-                            <span style={{ fontWeight: 600, flexShrink: 0 }}>{p.value.toFixed(1)}%</span>
+                          <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                            <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{p.name}</span>
+                            <span style={{ fontWeight: 600, color: p.stroke, flexShrink: 0 }}>{p.value.toFixed(1)}%</span>
                           </div>
                         ))}
                         {vals.length > 8 && <div style={{ color: '#9CA3AF', marginTop: 4 }}>+{vals.length - 8} more</div>}
@@ -4510,8 +4513,8 @@ function AdminExplorerPage({ token }) {
                     );
                   }}
                 />
-                {allTechsData.techs.map(([tech, group]) => (
-                  <Line key={tech} type="monotone" dataKey={row => row[tech] ?? null} name={tech}
+                {allTechsData.techs.map(([key, { group, label }]) => (
+                  <Line key={key} type="monotone" dataKey={key} name={label}
                     stroke={catColors[group]} strokeWidth={1} strokeOpacity={0.55}
                     dot={false} connectNulls isAnimationActive={false} />
                 ))}
