@@ -5633,32 +5633,18 @@ function AdminChartsPage({ token }) {
     }
   };
 
-  if (loading) return <div style={{ padding: 40, color: '#6B7280' }}>Loading charts…</div>;
-  if (error)   return <div style={{ padding: 40, color: '#DC2626' }}>Error: {error}</div>;
-
-  const CC = CHART_COLORS_30;
-  const fmtPct = v => `${Math.round(v)}%`;
-  const fmtMpg = v => `${parseFloat(v).toFixed(2)}`;
-  const hasBau = mpgRows.some(r => r['Business as Usual'] != null);
-
-  const groupOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
-                      'Chassis','Idle Reduction','Practices'];
-
-  // Helper: resolve active data for a given per-chart haul type
-  const resolveAdopt = (ht, base, baseGroup) => ({
-    catData:   ht === 'combined' || !adoptByHaulType[ht] ? base      : (adoptByHaulType[ht].catData   ?? { data: [], groups: [] }),
-    groupData: ht === 'combined' || !adoptByHaulType[ht] ? baseGroup : (adoptByHaulType[ht].groupData ?? {}),
-  });
-
-  const { catData: activeCatData }   = resolveAdopt(catHaulType, catData, groupData);
-  const { groupData: activeGroupData } = resolveAdopt(grpHaulType, catData, groupData);
-
+  // Must be before early returns to satisfy Rules of Hooks
   const allTechsChartData = useMemo(() => {
-    const { groupData: gd } = resolveAdopt(allTechsHaulType, catData, groupData);
+    const grpOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
+                      'Chassis','Idle Reduction','Practices'];
+    const palette  = CHART_COLORS_30;
+    const gd = allTechsHaulType === 'combined' || !adoptByHaulType[allTechsHaulType]
+      ? groupData
+      : (adoptByHaulType[allTechsHaulType]?.groupData ?? {});
     const sanitize = t => t.replace(/\./g, '·');
-    const allGroups = [...groupOrder, ...Object.keys(gd).filter(g => !groupOrder.includes(g)).sort()];
+    const allGroups = [...grpOrder, ...Object.keys(gd).filter(g => !grpOrder.includes(g)).sort()];
     const grpColor = {};
-    allGroups.forEach((g, i) => { grpColor[g] = CC[i % CC.length]; });
+    allGroups.forEach((g, i) => { grpColor[g] = palette[i % palette.length]; });
     const byYear = {};
     const techMeta = [];
     const seen = new Set();
@@ -5679,7 +5665,27 @@ function AdminChartsPage({ token }) {
     });
     const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
     return { rows, techMeta, grpColor };
-  }, [allTechsHaulType, catData, groupData, adoptByHaulType]); // eslint-disable-line
+  }, [allTechsHaulType, groupData, adoptByHaulType]); // eslint-disable-line
+
+  if (loading) return <div style={{ padding: 40, color: '#6B7280' }}>Loading charts…</div>;
+  if (error)   return <div style={{ padding: 40, color: '#DC2626' }}>Error: {error}</div>;
+
+  const CC = CHART_COLORS_30;
+  const fmtPct = v => `${Math.round(v)}%`;
+  const fmtMpg = v => `${parseFloat(v).toFixed(2)}`;
+  const hasBau = mpgRows.some(r => r['Business as Usual'] != null);
+
+  const groupOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
+                      'Chassis','Idle Reduction','Practices'];
+
+  // Helper: resolve active data for a given per-chart haul type
+  const resolveAdopt = (ht, base, baseGroup) => ({
+    catData:   ht === 'combined' || !adoptByHaulType[ht] ? base      : (adoptByHaulType[ht].catData   ?? { data: [], groups: [] }),
+    groupData: ht === 'combined' || !adoptByHaulType[ht] ? baseGroup : (adoptByHaulType[ht].groupData ?? {}),
+  });
+
+  const { catData: activeCatData }   = resolveAdopt(catHaulType, catData, groupData);
+  const { groupData: activeGroupData } = resolveAdopt(grpHaulType, catData, groupData);
 
   const sortedGroups = [
     ...groupOrder.filter(g => activeGroupData[g]),
