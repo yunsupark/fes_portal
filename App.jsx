@@ -5402,6 +5402,7 @@ function AdminChartsPage({ token }) {
   // Per-chart haul-type filters (independent, no shared state)
   const [catHaulType,    setCatHaulType]    = useState('combined'); // category chart
   const [grpHaulType,    setGrpHaulType]    = useState('combined'); // per-group tech charts
+  const [allTechsHaulType, setAllTechsHaulType] = useState('combined'); // all-techs spaghetti
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -5652,6 +5653,34 @@ function AdminChartsPage({ token }) {
   const { catData: activeCatData }   = resolveAdopt(catHaulType, catData, groupData);
   const { groupData: activeGroupData } = resolveAdopt(grpHaulType, catData, groupData);
 
+  const allTechsChartData = useMemo(() => {
+    const { groupData: gd } = resolveAdopt(allTechsHaulType, catData, groupData);
+    const sanitize = t => t.replace(/\./g, '·');
+    const allGroups = [...groupOrder, ...Object.keys(gd).filter(g => !groupOrder.includes(g)).sort()];
+    const grpColor = {};
+    allGroups.forEach((g, i) => { grpColor[g] = CC[i % CC.length]; });
+    const byYear = {};
+    const techMeta = [];
+    const seen = new Set();
+    allGroups.forEach(grp => {
+      if (!gd[grp]) return;
+      const { techs, data } = gd[grp];
+      techs.forEach(t => {
+        const key = sanitize(t);
+        if (!seen.has(key)) { seen.add(key); techMeta.push({ key, label: t, group: grp }); }
+      });
+      data.forEach(row => {
+        if (!byYear[row.year]) byYear[row.year] = { year: row.year };
+        techs.forEach(t => {
+          const key = sanitize(t);
+          if (row[t] != null) byYear[row.year][key] = row[t];
+        });
+      });
+    });
+    const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
+    return { rows, techMeta, grpColor };
+  }, [allTechsHaulType, catData, groupData, adoptByHaulType]); // eslint-disable-line
+
   const sortedGroups = [
     ...groupOrder.filter(g => activeGroupData[g]),
     ...Object.keys(activeGroupData).filter(g => !groupOrder.includes(g)).sort(),
@@ -5874,6 +5903,57 @@ ORDER BY t.technology, a.adoption_year`;
                   {sortedCats.map((cat, i) => (
                     <Line key={cat} type="monotone" dataKey={cat}
                       stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+          );
+        })()}
+
+        {/* All Technologies spaghetti */}
+        {(() => {
+          const { rows, techMeta, grpColor } = allTechsChartData;
+          const allTechsYLabel = { value: 'Technology Adoption', angle: -90, position: 'insideLeft',
+                                   style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } };
+          return (
+            <AdminChartCard title="All Technologies" subtitle={haulLabel(allTechsHaulType)}
+              csvData={rows}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <HaulBtn val="combined" label="Combined"      active={allTechsHaulType} setter={setAllTechsHaulType} />
+                <HaulBtn val="lh"       label="Line Haul"     active={allTechsHaulType} setter={setAllTechsHaulType} />
+                <HaulBtn val="rh"       label="Regional Haul" active={allTechsHaulType} setter={setAllTechsHaulType} />
+              </div>
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={rows} margin={{ top: 8, right: 8, left: 24, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={allTechsYLabel} />
+                  <Tooltip
+                    content={({ active, payload, label: yr }) => {
+                      if (!active || !payload?.length) return null;
+                      const top = [...payload]
+                        .filter(p => p.value != null)
+                        .sort((a, b) => b.value - a.value)
+                        .slice(0, 8);
+                      return (
+                        <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
+                                      padding: '6px 10px', fontSize: 10, maxWidth: 280 }}>
+                          <div style={{ fontWeight: 600, marginBottom: 4 }}>{yr}</div>
+                          {top.map(p => (
+                            <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                              <span style={{ color: p.stroke }}>{p.name}</span>
+                              <span style={{ fontWeight: 600 }}>{fmtPct(p.value)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    }}
+                  />
+                  {techMeta.map(({ key, label, group }) => (
+                    <Line key={key} type="monotone" dataKey={key} name={label}
+                      stroke={grpColor[group] ?? '#9CA3AF'} strokeWidth={1} strokeOpacity={0.55}
+                      dot={false} connectNulls isAnimationActive={false} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
