@@ -4511,7 +4511,7 @@ function AdminExplorerPage({ token }) {
                   }}
                 />
                 {allTechsData.techs.map(([tech, group]) => (
-                  <Line key={tech} type="monotone" dataKey={tech}
+                  <Line key={tech} type="monotone" dataKey={row => row[tech] ?? null} name={tech}
                     stroke={catColors[group]} strokeWidth={1} strokeOpacity={0.55}
                     dot={false} connectNulls isAnimationActive={false} />
                 ))}
