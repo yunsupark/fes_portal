@@ -4020,7 +4020,7 @@ function AdminExplorerPage({ token }) {
   const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
   const fmtMpg = v => v == null ? '—' : parseFloat(v).toFixed(2);
   const pctKey = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
-  const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'Combined';
+  const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'All Fleets';
 
   // ── Derived data ────────────────────────────────────────────────────────────
 
@@ -4288,7 +4288,7 @@ function AdminExplorerPage({ token }) {
           {view !== 'mpg' && (
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
               <span style={{ fontSize: 12, color: '#6B7280' }}>Duty cycle:</span>
-              <HaulBtn val="combined" label="Combined" />
+              <HaulBtn val="combined" label="All Fleets" />
               <HaulBtn val="lh"       label="Line Haul" />
               <HaulBtn val="rh"       label="Regional Haul" />
             </div>
@@ -4502,7 +4502,17 @@ function AdminExplorerPage({ token }) {
                   <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} label={<QuadrantLabels />} />
                   <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                   {Object.entries(visibleByCat).map(([cat, pts]) => (
-                    <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75} />
+                    <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
+                      shape={({ cx, cy, fill, payload }) => (
+                        <g key={payload.technology}>
+                          <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
+                          <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
+                            style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                            {payload.technology}
+                          </text>
+                        </g>
+                      )}
+                    />
                   ))}
                 </ScatterChart>
               </ResponsiveContainer>

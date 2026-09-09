@@ -3,15 +3,16 @@
 // Usage: node server.js (or nodemon server.js for dev)
 
 require("dotenv").config();
-const express    = require("express");
-const mysql      = require("mysql2/promise");
-const cors       = require("cors");
-const bcrypt     = require("bcryptjs");
-const jwt        = require("jsonwebtoken");
-const path       = require("path");
-const crypto     = require("crypto");
-const fs         = require("fs");
-const { Resend } = require("resend");
+const express      = require("express");
+const mysql        = require("mysql2/promise");
+const cors         = require("cors");
+const compression  = require("compression");
+const bcrypt       = require("bcryptjs");
+const jwt          = require("jsonwebtoken");
+const path         = require("path");
+const crypto       = require("crypto");
+const fs           = require("fs");
+const { Resend }   = require("resend");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -23,24 +24,37 @@ const APP_URL    = (process.env.APP_URL || process.env.FRONTEND_URL || "http://l
 const resend = new Resend(process.env.RESEND_API_KEY);
 const EMAIL_FROM = process.env.EMAIL_FROM || "noreply@nacfe.org";
 
-app.use(cors({
-  // Reflect the requesting origin for HTTPS and localhost.
-  // Safe because all sensitive routes are protected by JWT (not cookies).
+// Compression for all responses (gzip/brotli)
+app.use(compression());
+
+// CORS — explicit origin allowlist; public routes accept any origin without credentials
+const ALLOWED_ORIGINS = new Set([
+  APP_URL,
+  'http://localhost:3000',
+  'http://localhost:3001',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:3001',
+  'https://fes.nacfe.org',
+]);
+
+const corsPrivate = cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true); // curl / server-to-server
-    if (
-      origin.startsWith('https://') ||
-      origin.startsWith('http://localhost') ||
-      origin.startsWith('http://127.0.0.1')
-    ) {
-      return callback(null, origin);
-    }
+    if (ALLOWED_ORIGINS.has(origin)) return callback(null, origin);
     callback(new Error('CORS: origin not allowed'));
   },
   credentials: true,
   allowedHeaders: ['Content-Type', 'Authorization'],
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS']
-}));
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+});
+
+const corsPublic = cors({ origin: '*', credentials: false });
+
+app.use((req, res, next) => {
+  if (req.path.startsWith('/api/public/')) return corsPublic(req, res, next);
+  return corsPrivate(req, res, next);
+});
+
 app.use(express.json());
 
 /*
