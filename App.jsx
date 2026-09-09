@@ -8551,7 +8551,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
-  if (window.location.pathname === '/explorer') return <PublicExplorerPage />;
+  if (window.location.pathname.startsWith('/explorer')) return <PublicExplorerPage />;
   if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={() => window.location.href = '/'} />;
   if (!authed) return <LoginScreen onLogin={handleLogin} />;
   if (isAdmin) return <AdminView token={token} onSignOut={handleSignOut} />;
