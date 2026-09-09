@@ -2634,6 +2634,12 @@ app.get("/api/benchmark/data", requireAuth, async (req, res) => {
       [rawIds, fleetRow.default_duty_cycle, fleet_id]  // exclude self even if it slips in
     );
     const validIds = validRows.map(r => r.fleet_id);
+
+    // Require at least 3 comparison fleets so no single fleet can be inferred from the response
+    if (validIds.length < 3) {
+      return res.status(400).json({ error: "At least 3 comparison fleets are required for anonymisation." });
+    }
+
     const allIds = [fleet_id, ...validIds];
 
     // MPG per fleet per year
@@ -2663,8 +2669,12 @@ app.get("/api/benchmark/data", requireAuth, async (req, res) => {
       [allIds]
     );
 
-    // Shuffle comparison fleet IDs for anonymisation
-    const shuffled = [...validIds].sort(() => Math.random() - 0.5);
+    // Shuffle comparison fleet IDs for anonymisation (Fisher-Yates — uniform permutation)
+    const shuffled = [...validIds];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
     const labelMap = { [fleet_id]: 'You' };
     shuffled.forEach((id, i) => { labelMap[id] = `Fleet ${i + 1}`; });
 
