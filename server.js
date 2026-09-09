@@ -7,6 +7,7 @@ const express      = require("express");
 const mysql        = require("mysql2/promise");
 const cors         = require("cors");
 const compression  = require("compression");
+const rateLimit    = require("express-rate-limit");
 const bcrypt       = require("bcryptjs");
 const jwt          = require("jsonwebtoken");
 const path         = require("path");
@@ -54,6 +55,15 @@ app.use((req, res, next) => {
   if (req.path.startsWith('/api/public/')) return corsPublic(req, res, next);
   return corsPrivate(req, res, next);
 });
+
+// Rate-limit unauthenticated public API (100 req / 15 min per IP)
+app.use('/api/public', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many requests — please try again later.' },
+}));
 
 app.use(express.json());
 
