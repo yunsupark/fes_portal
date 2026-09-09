@@ -7637,6 +7637,601 @@ function AdminView({ token, onSignOut }) {
   );
 }
 
+// ─── Public Explorer Page ────────────────────────────────────────────────────
+// Standalone public page served at /explorer — no auth required.
+// Designed to be embedded as an iframe on nacfe.org.
+// Posts its height to the parent window via postMessage for auto-resize.
+function PublicExplorerPage() {
+  const CC = CHART_COLORS_30;
+  const containerRef = useRef(null);
+  const chartRef     = useRef(null);
+  const [data,         setData]         = useState(null);
+  const [loading,      setLoading]      = useState(true);
+  const [fetchError,   setFetchError]   = useState(null);
+  const [haulType,     setHaulType]     = useState('combined');
+  const [category,     setCategory]     = useState('');
+  const [view,         setView]         = useState('trends');
+  const [selectedTechs, setSelectedTechs] = useState([]);
+  const [techSearch,   setTechSearch]   = useState('');
+  const [landscapeCat, setLandscapeCat] = useState(null);
+
+  // Fetch from the public snapshot endpoint — no auth
+  const loadData = () => {
+    setLoading(true); setFetchError(null);
+    fetch('/api/public/explorer')
+      .then(r => {
+        if (r.status === 404) throw new Error('not_published');
+        if (!r.ok) throw new Error(`Server error ${r.status}`);
+        return r.json();
+      })
+      .then(d => {
+        setData(d);
+        if (!category && d.techRows?.length) setCategory(d.techRows[0].tech_group);
+      })
+      .catch(e => setFetchError(e.message || 'Failed to load data'))
+      .finally(() => setLoading(false));
+  };
+
+  useEffect(() => { loadData(); }, []); // eslint-disable-line
+
+  // Auto-resize: post height to parent whenever content changes
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const send = () => window.parent.postMessage({ type: 'nacfe-explorer-resize', height: el.scrollHeight }, '*');
+    send();
+    const ro = new ResizeObserver(send);
+    ro.observe(el);
+    return () => ro.disconnect();
+  });
+
+  const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
+  const fmtMpg = v => v == null ? '—' : parseFloat(v).toFixed(2);
+  const pctKey  = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
+  const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'All Fleets';
+
+  const categories = useMemo(() => {
+    if (!data?.techRows) return [];
+    return [...new Set(data.techRows.map(r => r.tech_group))].sort();
+  }, [data]);
+
+  const catColors = useMemo(() => {
+    const m = {}; categories.forEach((c, i) => { m[c] = CC[i % CC.length]; }); return m;
+  }, [categories]); // eslint-disable-line
+
+  const allTechs = useMemo(() => {
+    if (!data?.techRows) return [];
+    const seen = new Set(); const out = [];
+    data.techRows.forEach(r => {
+      if (!seen.has(r.tech_id)) { seen.add(r.tech_id); out.push({ tech_id: r.tech_id, tech_group: r.tech_group, technology: r.technology }); }
+    });
+    return out.sort((a, b) => a.tech_group.localeCompare(b.tech_group) || a.technology.localeCompare(b.technology));
+  }, [data]);
+
+  const filteredTechs = useMemo(() => {
+    const q = techSearch.toLowerCase();
+    return q ? allTechs.filter(t => t.technology.toLowerCase().includes(q) || t.tech_group.toLowerCase().includes(q)) : allTechs;
+  }, [allTechs, techSearch]);
+
+  const chartData = useMemo(() => {
+    if (!data?.techRows || !category) return { rows: [], techs: [] };
+    const byYear = {}; const techSet = new Set();
+    data.techRows.filter(r => r.tech_group === category).forEach(r => {
+      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
+      const v = r[pctKey]; if (v != null) { byYear[r.year][r.technology] = parseFloat(v); techSet.add(r.technology); }
+    });
+    const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
+    const techs = [...techSet].sort((a, b) => { const last = rows[rows.length - 1] || {}; return (last[b] ?? -1) - (last[a] ?? -1); });
+    return { rows, techs };
+  }, [data, category, pctKey]);
+
+  const compareData = useMemo(() => {
+    if (!data?.techRows || !selectedTechs.length) return [];
+    const byYear = {};
+    data.techRows.filter(r => selectedTechs.includes(r.tech_id)).forEach(r => {
+      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
+      const v = r[pctKey]; if (v != null) byYear[r.year][`tech_${r.tech_id}`] = parseFloat(v);
+    });
+    return Object.values(byYear).sort((a, b) => a.year - b.year);
+  }, [data, selectedTechs, pctKey]);
+
+  const allTechsData = useMemo(() => {
+    if (!data?.techRows) return { rows: [], techs: [] };
+    const byYear = {}; const techInfo = {};
+    data.techRows.forEach(r => {
+      const key = `tech_${r.tech_id}`;
+      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
+      const v = r[pctKey]; if (v != null) byYear[r.year][key] = parseFloat(v);
+      if (!techInfo[key]) techInfo[key] = { group: r.tech_group, label: r.technology };
+    });
+    const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
+    const techs = Object.entries(techInfo).sort((a, b) =>
+      a[1].group.localeCompare(b[1].group) || a[1].label.localeCompare(b[1].label));
+    return { rows, techs };
+  }, [data, pctKey]);
+
+  const scatterData = useMemo(() => {
+    if (!data?.techRows) return {};
+    const years = [...new Set(data.techRows.map(r => r.year))].sort((a, b) => a - b);
+    const maxYr = years[years.length - 1];
+    const priorYr = maxYr - 2;
+    const byTech = {};
+    data.techRows.forEach(r => {
+      const k = r.tech_id;
+      if (!byTech[k]) byTech[k] = { technology: r.technology, tech_group: r.tech_group, byYear: {} };
+      const v = r[pctKey]; if (v != null) byTech[k].byYear[r.year] = parseFloat(v);
+    });
+    const byCat = {};
+    Object.values(byTech).forEach(({ technology, tech_group, byYear }) => {
+      const curr = byYear[maxYr]; if (curr == null) return;
+      const prior = byYear[priorYr];
+      const delta = prior != null ? parseFloat((curr - prior).toFixed(1)) : null;
+      if (delta === null) return;
+      if (!byCat[tech_group]) byCat[tech_group] = [];
+      byCat[tech_group].push({ technology, tech_group, x: curr, y: delta });
+    });
+    return { byCat, maxYr, priorYr };
+  }, [data, pctKey]);
+
+  const mpgChartData = useMemo(() => {
+    if (!data?.mpgRows) return [];
+    const byYear = {};
+    data.mpgRows.forEach(r => {
+      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
+      if (r.duty_cycle === 'lh') byYear[r.year]['Line Haul'] = r.avg_mpg;
+      if (r.duty_cycle === 'rh') byYear[r.year]['Regional Haul'] = r.avg_mpg;
+    });
+    return Object.values(byYear).sort((a, b) => a.year - b.year);
+  }, [data]);
+
+  const toggleTech = techId => setSelectedTechs(prev =>
+    prev.includes(techId) ? prev.filter(t => t !== techId)
+      : prev.length < 8 ? [...prev, techId] : prev
+  );
+
+  const HaulBtn = ({ val, label }) => (
+    <button onClick={() => setHaulType(val)} style={{
+      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
+      borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
+      background:  haulType === val ? '#2563EB' : '#F9FAFB',
+      color:       haulType === val ? '#fff'    : '#374151',
+      fontWeight:  haulType === val ? 600       : 400,
+    }}>{label}</button>
+  );
+
+  const ViewBtn = ({ val, label }) => (
+    <button onClick={() => setView(val)} style={{
+      padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
+      borderColor: view === val ? '#374151' : '#D1D5DB',
+      background:  view === val ? '#374151' : '#F9FAFB',
+      color:       view === val ? '#fff'    : '#374151',
+      fontWeight:  view === val ? 600       : 400,
+    }}>{label}</button>
+  );
+
+  const MiniLegend = ({ items }) => (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 16px', marginBottom: 12 }}>
+      {items.map(([label, color]) => (
+        <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 11 }}>
+          <div style={{ width: 20, height: 2, background: color, borderRadius: 1 }} />
+          <span style={{ color: '#374151' }}>{label}</span>
+        </div>
+      ))}
+    </div>
+  );
+
+  const ScatterTooltip = ({ active, payload, priorYr }) => {
+    if (!active || !payload?.length) return null;
+    const d = payload[0]?.payload;
+    if (!d) return null;
+    return (
+      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '8px 12px', fontSize: 11, maxWidth: 220 }}>
+        <div style={{ fontWeight: 600, color: '#111827', marginBottom: 2 }}>{d.technology}</div>
+        <div style={{ color: '#9CA3AF', marginBottom: 6 }}>{d.tech_group}</div>
+        <div>Adoption: <b>{d.x?.toFixed(1)}%</b></div>
+        <div>Change vs {priorYr}: <b style={{ color: d.y >= 0 ? '#16a34a' : '#DC2626' }}>{d.y >= 0 ? '+' : ''}{d.y}pp</b></div>
+      </div>
+    );
+  };
+
+  const dlCsv = (rows, filename) => {
+    if (!rows?.length) return;
+    const keys = Object.keys(rows[0]);
+    const escape = v => {
+      const s = String(v ?? '');
+      const safe = /^[=+\-@]/.test(s) ? "'" + s : s;
+      return /[,"\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+    };
+    const BOM = '﻿';
+    const csv = BOM + [keys.join(','), ...rows.map(r => keys.map(k => escape(r[k])).join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const a = document.createElement('a');
+    a.href = url; a.download = filename + '.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 100);
+  };
+
+  const dlPng = (filename) => {
+    const svg = chartRef.current?.querySelector('svg');
+    if (!svg) return;
+    const { width, height } = svg.getBoundingClientRect();
+    const clone = svg.cloneNode(true);
+    clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+    const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    bg.setAttribute('width', '100%'); bg.setAttribute('height', '100%'); bg.setAttribute('fill', 'white');
+    clone.insertBefore(bg, clone.firstChild);
+    const svgStr = new XMLSerializer().serializeToString(clone);
+    const scale = 2;
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = width * scale; canvas.height = height * scale;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.scale(scale, scale); ctx.drawImage(img, 0, 0, width, height);
+      const a = document.createElement('a');
+      a.download = filename + '.png'; a.href = canvas.toDataURL('image/png'); a.click();
+    };
+    img.onerror = () => alert('PNG export failed — chart may not be rendered yet.');
+    img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
+  };
+
+  const DlBtn = ({ onClick, children }) => (
+    <button onClick={onClick} style={{
+      padding: '3px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 5,
+      border: '1px solid #D1D5DB', background: '#F9FAFB', color: '#374151',
+      display: 'flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap',
+    }}>{children}</button>
+  );
+
+  const DownloadBar = ({ csvRows, csvName, pngName }) => (
+    <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
+      <DlBtn onClick={() => dlCsv(csvRows, csvName)}>↓ CSV</DlBtn>
+      <DlBtn onClick={() => dlPng(pngName)}>↓ PNG</DlBtn>
+    </div>
+  );
+
+  return (
+    <div ref={containerRef} style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', background: '#F9FAFB', minHeight: '100vh' }}>
+
+      {/* Minimal NACFE header */}
+      <div style={{ background: '#1c3660', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
+        <img src="/nacfe-logo.png" alt="NACFE" style={{ height: 32, objectFit: 'contain' }} />
+        <div>
+          <div style={{ color: '#fff', fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>Fleet Efficiency Study</div>
+          <div style={{ color: '#93C5FD', fontSize: 11, marginTop: 1 }}>Technology Adoption & Fuel Economy Explorer</div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}>
+
+        {loading && (
+          <div style={{ color: '#9CA3AF', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Loading data…</div>
+        )}
+
+        {!loading && fetchError === 'not_published' && (
+          <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '40px 24px', textAlign: 'center', color: '#6B7280', fontSize: 14 }}>
+            <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
+            <div style={{ fontWeight: 600, color: '#111827', marginBottom: 8 }}>Explorer data not yet published</div>
+            <div>Check back soon.</div>
+          </div>
+        )}
+
+        {!loading && fetchError && fetchError !== 'not_published' && (
+          <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '16px 20px', color: '#DC2626', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <span>Failed to load data. Please try again.</span>
+            <button onClick={loadData} style={{ padding: '4px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 5, border: '1px solid #FECACA', background: '#fff', color: '#DC2626' }}>Retry</button>
+          </div>
+        )}
+
+        {!loading && !fetchError && data && (<>
+
+          {/* Controls row */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <ViewBtn val="trends"    label="Adoption Trends" />
+              <ViewBtn val="compare"   label="Compare" />
+              <ViewBtn val="landscape" label="Landscape" />
+              <ViewBtn val="all"       label="All Techs" />
+              <ViewBtn val="mpg"       label="Industry MPG" />
+            </div>
+            {view !== 'mpg' && (
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 12, color: '#6B7280' }}>Duty cycle:</span>
+                <HaulBtn val="combined" label="All Fleets" />
+                <HaulBtn val="lh"       label="Line Haul" />
+                <HaulBtn val="rh"       label="Regional Haul" />
+              </div>
+            )}
+          </div>
+
+          {/* ── Adoption Trends ── */}
+          {view === 'trends' && (<>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 20 }}>
+              {categories.map(cat => (
+                <button key={cat} onClick={() => setCategory(cat)} style={{
+                  padding: '5px 12px', fontSize: 11, cursor: 'pointer', borderRadius: 20, border: '1px solid',
+                  borderColor: category === cat ? '#1c3660' : '#D1D5DB',
+                  background:  category === cat ? '#1c3660' : '#F9FAFB',
+                  color:       category === cat ? '#fff'    : '#374151',
+                  fontWeight:  category === cat ? 600       : 400,
+                }}>{cat}</button>
+              ))}
+            </div>
+            <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>{category}</div>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · average adoption across participating fleets</div>
+                </div>
+                <DownloadBar
+                  csvRows={chartData.rows.map(r => { const o = { year: r.year }; chartData.techs.forEach(t => { o[t] = r[t] != null ? +r[t].toFixed(1) : ''; }); return o; })}
+                  csvName={`trends_${category.replace(/\s+/g,'_')}`}
+                  pngName={`trends_${category.replace(/\s+/g,'_')}`}
+                />
+              </div>
+              <MiniLegend items={chartData.techs.map((t, i) => [t, CC[i % CC.length]])} />
+              <ResponsiveContainer width="100%" height={320}>
+                <LineChart data={chartData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <Tooltip formatter={(v, n) => [fmtPct(v), n]} contentStyle={{ fontSize: 11 }} />
+                  {chartData.techs.map((tech, i) => (
+                    <Line key={tech} type="monotone" dataKey={tech} stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </>)}
+
+          {/* ── Compare Technologies ── */}
+          {view === 'compare' && (
+            <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div style={{ width: 260, flexShrink: 0, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ padding: '12px 14px', borderBottom: '1px solid #F3F4F6' }}>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: '#111827', marginBottom: 8 }}>
+                    Select technologies <span style={{ fontSize: 11, fontWeight: 400, color: '#9CA3AF' }}>({selectedTechs.length}/8)</span>
+                  </div>
+                  <input value={techSearch} onChange={e => setTechSearch(e.target.value)} placeholder="Search…"
+                    style={{ width: '100%', padding: '6px 10px', fontSize: 12, border: '1px solid #D1D5DB', borderRadius: 6, outline: 'none', boxSizing: 'border-box' }} />
+                </div>
+                <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+                  {(() => {
+                    const grouped = {};
+                    filteredTechs.forEach(t => { if (!grouped[t.tech_group]) grouped[t.tech_group] = []; grouped[t.tech_group].push(t); });
+                    return Object.entries(grouped).map(([grp, techs]) => (
+                      <div key={grp}>
+                        <div style={{ padding: '7px 14px 4px', fontSize: 10, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, background: '#F9FAFB', borderBottom: '1px solid #F3F4F6' }}>{grp}</div>
+                        {techs.map(t => {
+                          const sel = selectedTechs.includes(t.tech_id);
+                          const color = CC[t.tech_id % CC.length];
+                          return (
+                            <div key={t.tech_id} onClick={() => toggleTech(t.tech_id)} style={{
+                              display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12,
+                              background: sel ? '#EFF6FF' : 'transparent', color: '#374151', borderBottom: '1px solid #F9FAFB',
+                            }}>
+                              <div style={{ width: 12, height: 12, borderRadius: 3, border: `2px solid ${sel ? color : '#D1D5DB'}`, background: sel ? color : 'transparent', flexShrink: 0 }} />
+                              {t.technology}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ));
+                  })()}
+                </div>
+                {selectedTechs.length > 0 && (
+                  <div style={{ padding: '10px 14px', borderTop: '1px solid #F3F4F6' }}>
+                    <button onClick={() => setSelectedTechs([])} style={{ fontSize: 11, color: '#6B7280', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Clear all</button>
+                  </div>
+                )}
+              </div>
+              <div ref={chartRef} style={{ flex: 1, minWidth: 280, background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+                {selectedTechs.length === 0
+                  ? <div style={{ color: '#9CA3AF', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Select technologies from the list to compare them</div>
+                  : (<>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                        <div>
+                          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Comparison</div>
+                          <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · up to 8 technologies across any category</div>
+                        </div>
+                        <DownloadBar
+                          csvRows={compareData.map(r => {
+                            const o = { year: r.year };
+                            selectedTechs.forEach(id => {
+                              const info = allTechs.find(t => t.tech_id === id);
+                              o[info?.technology || String(id)] = r[`tech_${id}`] != null ? +r[`tech_${id}`].toFixed(1) : '';
+                            });
+                            return o;
+                          })}
+                          csvName="compare_technologies" pngName="compare_technologies"
+                        />
+                      </div>
+                      <MiniLegend items={selectedTechs.map(id => {
+                        const info = allTechs.find(t => t.tech_id === id);
+                        return [info?.technology || String(id), CC[id % CC.length]];
+                      })} />
+                      <ResponsiveContainer width="100%" height={360}>
+                        <LineChart data={compareData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                          <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                          <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                          <Tooltip formatter={(v, n) => [fmtPct(v), n]} contentStyle={{ fontSize: 11 }} />
+                          {selectedTechs.map(id => {
+                            const info = allTechs.find(t => t.tech_id === id);
+                            return <Line key={id} type="monotone" dataKey={`tech_${id}`} name={info?.technology || String(id)} stroke={CC[id % CC.length]} strokeWidth={2} dot={false} />;
+                          })}
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </>)
+                }
+              </div>
+            </div>
+          )}
+
+          {/* ── Landscape Scatter ── */}
+          {view === 'landscape' && (() => {
+            const { byCat = {}, maxYr, priorYr } = scatterData;
+            const catList = Object.keys(byCat).sort();
+            const visibleByCat = landscapeCat ? { [landscapeCat]: byCat[landscapeCat] || [] } : byCat;
+            const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
+            const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
+            const yDomain = [-maxAbsDelta, maxAbsDelta];
+            const QuadrantLabels = ({ viewBox }) => {
+              if (!viewBox) return null;
+              const { x, y, width } = viewBox;
+              const pad = 6;
+              return (
+                <g style={{ pointerEvents: 'none' }}>
+                  <text x={x + pad} y={y - pad} fill="#16a34a" fontSize={11} fontWeight={700} opacity={0.55} dominantBaseline="auto">Rising</text>
+                  <text x={x + width - pad} y={y - pad} fill="#2563EB" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="auto">Mainstream</text>
+                  <text x={x + pad} y={y + pad} fill="#9CA3AF" fontSize={11} fontWeight={700} opacity={0.7} dominantBaseline="hanging">Fading</text>
+                  <text x={x + width - pad} y={y + pad} fill="#DC2626" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="hanging">Declining</text>
+                </g>
+              );
+            };
+            return (
+              <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Landscape</div>
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.</div>
+                  </div>
+                  <DownloadBar
+                    csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
+                      pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
+                    ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
+                    csvName={`landscape_${maxYr}`} pngName={`landscape_${maxYr}`}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                  <button onClick={() => setLandscapeCat(null)} style={{
+                    padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                    borderColor: landscapeCat === null ? '#374151' : '#D1D5DB',
+                    background:  landscapeCat === null ? '#374151' : '#F9FAFB',
+                    color:       landscapeCat === null ? '#fff'    : '#374151',
+                    fontWeight:  landscapeCat === null ? 600       : 400,
+                  }}>All</button>
+                  {catList.map(cat => (
+                    <button key={cat} onClick={() => setLandscapeCat(landscapeCat === cat ? null : cat)} style={{
+                      padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                      borderColor: landscapeCat === cat ? catColors[cat] : '#D1D5DB',
+                      background:  landscapeCat === cat ? catColors[cat] : '#F9FAFB',
+                      color:       landscapeCat === cat ? '#fff'          : '#374151',
+                      fontWeight:  landscapeCat === cat ? 600             : 400,
+                    }}>{cat}</button>
+                  ))}
+                </div>
+                <MiniLegend items={catList.map(c => [c, catColors[c]])} />
+                <ResponsiveContainer width="100%" height={420}>
+                  <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 20 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                    <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
+                      tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                      label={{ value: `${maxYr} Adoption`, position: 'insideBottom', offset: -12, fontSize: 11, fill: '#6B7280' }} />
+                    <YAxis type="number" dataKey="y" name="Change (pp)" domain={yDomain}
+                      tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                      label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
+                    <ZAxis range={[40, 40]} />
+                    <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
+                    <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} label={<QuadrantLabels />} />
+                    <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
+                    {Object.entries(visibleByCat).map(([cat, pts]) => (
+                      <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
+                        shape={({ cx, cy, fill, payload }) => (
+                          <g key={payload.technology}>
+                            <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
+                            <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
+                              style={{ pointerEvents: 'none', userSelect: 'none' }}>{payload.technology}</text>
+                          </g>
+                        )}
+                      />
+                    ))}
+                  </ScatterChart>
+                </ResponsiveContainer>
+              </div>
+            );
+          })()}
+
+          {/* ── All Techs Spaghetti ── */}
+          {view === 'all' && (
+            <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>All Technologies — Adoption Trends</div>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · {allTechsData.techs.length} technologies · lines colored by category</div>
+                </div>
+                <DownloadBar
+                  csvRows={allTechsData.rows.map(r => { const o = { year: r.year }; allTechsData.techs.forEach(([key, { label }]) => { o[label] = r[key] != null ? +r[key].toFixed(1) : ''; }); return o; })}
+                  csvName="all_techs_adoption" pngName="all_techs_adoption"
+                />
+              </div>
+              <MiniLegend items={categories.map(c => [c, catColors[c]])} />
+              <ResponsiveContainer width="100%" height={400}>
+                <LineChart data={allTechsData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <Tooltip content={({ active, label, payload }) => {
+                    if (!active || !payload?.length) return null;
+                    const vals = payload.filter(p => p.value != null).sort((a, b) => b.value - a.value);
+                    const top = vals.slice(0, 8);
+                    return (
+                      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '8px 12px', fontSize: 11, maxWidth: 240 }}>
+                        <div style={{ fontWeight: 600, color: '#111827', marginBottom: 4 }}>{label}</div>
+                        {top.map(p => (
+                          <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                            <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{p.name}</span>
+                            <span style={{ fontWeight: 600, color: p.stroke, flexShrink: 0 }}>{p.value.toFixed(1)}%</span>
+                          </div>
+                        ))}
+                        {vals.length > 8 && <div style={{ color: '#9CA3AF', marginTop: 4 }}>+{vals.length - 8} more</div>}
+                      </div>
+                    );
+                  }} />
+                  {allTechsData.techs.map(([key, { group, label }]) => (
+                    <Line key={key} type="monotone" dataKey={key} name={label}
+                      stroke={catColors[group]} strokeWidth={1} strokeOpacity={0.55}
+                      dot={false} connectNulls isAnimationActive={false} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          {/* ── Industry MPG ── */}
+          {view === 'mpg' && (
+            <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Industry Average Fuel Economy</div>
+                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>IFTA miles per gallon · fleet average by duty cycle · diesel only</div>
+                </div>
+                <DownloadBar csvRows={mpgChartData} csvName="industry_mpg" pngName="industry_mpg" />
+              </div>
+              <MiniLegend items={[['Line Haul', '#1f77b4'], ['Regional Haul', '#ff7f0e']]} />
+              <ResponsiveContainer width="100%" height={320}>
+                <LineChart data={mpgChartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={['auto', 'auto']} tickFormatter={fmtMpg} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <Tooltip formatter={(v, n) => [fmtMpg(v) + ' mpg', n]} contentStyle={{ fontSize: 11 }} />
+                  <Line type="monotone" dataKey="Line Haul"     stroke="#1f77b4" strokeWidth={2} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="Regional Haul" stroke="#ff7f0e" strokeWidth={2} dot={false} connectNulls />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <div style={{ marginTop: 20, fontSize: 11, color: '#9CA3AF', textAlign: 'center' }}>
+            Data published {data.published_at ? new Date(data.published_at).toLocaleDateString() : ''}
+            {' · '}Aggregated from NACFE Fleet Efficiency Study participants · Individual fleet data not disclosed
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main App ────────────────────────────────────────────────────────────────
 export default function App() {
   const searchParams  = new URLSearchParams(window.location.search);
@@ -7956,6 +8551,7 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  if (window.location.pathname === '/explorer') return <PublicExplorerPage />;
   if (resetToken) return <ResetPasswordScreen token={resetToken} onDone={() => window.location.href = '/'} />;
   if (!authed) return <LoginScreen onLogin={handleLogin} />;
   if (isAdmin) return <AdminView token={token} onSignOut={handleSignOut} />;
