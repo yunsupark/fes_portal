@@ -3312,7 +3312,10 @@ app.post("/api/admin/charts/run-query", requireAuth, requireAdminRole, async (re
 });
 
 // ─── Public Explorer ──────────────────────────────────────────────────────────
-const EXPLORER_SNAPSHOT_PATH = path.join(__dirname, "explorer_snapshot.json");
+// Snapshot is stored in ffs_settings (key: 'explorer_snapshot') and cached in RAM.
+// The public GET endpoint serves from RAM — zero DB hits per request.
+// The cache is populated at startup and refreshed whenever an admin publishes.
+let explorerSnapshotCache = null; // null = not yet published
 
 /**
  * Runs the full Explorer aggregation and returns {techRows, mpgRows, published_at}.
@@ -3446,17 +3449,15 @@ async function generateExplorerData() {
 
 /**
  * GET /api/public/explorer
- * No authentication required. Serves the most recently saved snapshot only.
- * Returns 404 when no snapshot has been published yet.
+ * No authentication required. Serves the in-memory snapshot (populated at startup
+ * and refreshed on publish). Returns 404 when no snapshot has been published yet.
  */
 app.get("/api/public/explorer", (req, res) => {
   res.set("Cache-Control", "public, max-age=3600");
-  try {
-    const raw = fs.readFileSync(EXPLORER_SNAPSHOT_PATH, "utf8");
-    res.type("json").send(raw);
-  } catch {
-    res.status(404).json({ error: "No explorer snapshot published yet." });
+  if (!explorerSnapshotCache) {
+    return res.status(404).json({ error: "No explorer snapshot published yet." });
   }
+  res.type("json").send(explorerSnapshotCache);
 });
 
 /**
@@ -3476,20 +3477,26 @@ app.get("/api/admin/explorer/preview", requireAuth, requireAdmin, async (req, re
 
 /**
  * POST /api/admin/explorer/publish
- * Admin-only. Runs the full aggregation, saves a JSON snapshot to disk,
- * and records the publish timestamp. The public GET endpoint serves this file.
+ * Admin-only. Runs the full aggregation, saves the snapshot to ffs_settings,
+ * and refreshes the in-memory cache. The public GET endpoint serves from RAM.
  */
 app.post("/api/admin/explorer/publish", requireAuth, requireAdmin, async (req, res) => {
   try {
     const data = await generateExplorerData();
     const ts = new Date().toISOString();
     data.published_at = ts;
-    fs.writeFileSync(EXPLORER_SNAPSHOT_PATH, JSON.stringify(data));
+    const payload = JSON.stringify(data);
+    await db.query(
+      `INSERT INTO ffs_settings (setting_key, setting_value) VALUES ('explorer_snapshot', ?)
+       ON DUPLICATE KEY UPDATE setting_value = ?`,
+      [payload, payload]
+    );
     await db.query(
       `INSERT INTO ffs_settings (setting_key, setting_value) VALUES ('explorer_published_at', ?)
        ON DUPLICATE KEY UPDATE setting_value = ?`,
       [ts, ts]
     );
+    explorerSnapshotCache = payload; // refresh in-memory cache immediately
     res.json({ ok: true, published_at: ts, techRows: data.techRows, mpgRows: data.mpgRows });
   } catch (err) {
     console.error(err);
@@ -3518,4 +3525,20 @@ app.get(/^(?!\/api).*$/, (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
 });
 
-app.listen(PORT, () => console.log(`NACFE API running on http://localhost:${PORT}`));
+// Load persisted Explorer snapshot into RAM before accepting requests
+(async () => {
+  try {
+    const [[row]] = await db.query(
+      `SELECT setting_value FROM ffs_settings WHERE setting_key = 'explorer_snapshot'`
+    );
+    if (row?.setting_value) {
+      explorerSnapshotCache = row.setting_value;
+      console.log("Explorer snapshot loaded from DB into cache");
+    } else {
+      console.log("No Explorer snapshot found — publish one via Admin Management");
+    }
+  } catch (e) {
+    console.warn("Could not load Explorer snapshot at startup:", e.message);
+  }
+  app.listen(PORT, () => console.log(`NACFE API running on http://localhost:${PORT}`));
+})();
