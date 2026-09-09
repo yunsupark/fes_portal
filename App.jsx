@@ -3980,6 +3980,7 @@ function AdminExplorerPage({ token }) {
   const CC = CHART_COLORS_30;
   const [data,         setData]         = useState(null);
   const [loading,      setLoading]      = useState(true);
+  const [fetchError,   setFetchError]   = useState(null);
   const [publishing,   setPublishing]   = useState(false);
   const [pubMsg,       setPubMsg]       = useState('');
   const [haulType,     setHaulType]     = useState('combined');
@@ -3993,22 +3994,26 @@ function AdminExplorerPage({ token }) {
   const headers = { Authorization: `Bearer ${token}` };
 
   useEffect(() => {
-    setLoading(true);
-    fetch('/api/public/explorer')
-      .then(r => r.json())
+    setLoading(true); setFetchError(null);
+    fetch('/api/admin/explorer/preview', { headers })
+      .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); })
       .then(d => {
         setData(d);
         if (!category && d.techRows?.length) setCategory(d.techRows[0].tech_group);
       })
+      .catch(e => setFetchError(e.message || 'Failed to load explorer data'))
       .finally(() => setLoading(false));
   }, []); // eslint-disable-line
 
   const publish = () => {
     setPublishing(true); setPubMsg('');
     fetch('/api/admin/explorer/publish', { method: 'POST', headers })
-      .then(r => r.json())
-      .then(d => { setPubMsg(`Published ${new Date(d.published_at).toLocaleString()}`); setData(prev => prev ? { ...prev, published_at: d.published_at } : prev); })
-      .catch(() => setPubMsg('Publish failed'))
+      .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); })
+      .then(d => {
+        setPubMsg(`Updated ${new Date(d.published_at).toLocaleString()}`);
+        if (d.techRows) setData(prev => ({ ...prev, published_at: d.published_at, techRows: d.techRows, mpgRows: d.mpgRows }));
+      })
+      .catch(() => setPubMsg('Update failed'))
       .finally(() => setPublishing(false));
   };
 
@@ -4029,11 +4034,13 @@ function AdminExplorerPage({ token }) {
     const m = {}; categories.forEach((c, i) => { m[c] = CC[i % CC.length]; }); return m;
   }, [categories]); // eslint-disable-line
 
-  // All unique technologies (for picker)
+  // All unique technologies (for picker). Keyed on tech_id so names need not be unique.
   const allTechs = useMemo(() => {
     if (!data?.techRows) return [];
     const seen = new Set(); const out = [];
-    data.techRows.forEach(r => { const k = `${r.tech_group}||${r.technology}`; if (!seen.has(k)) { seen.add(k); out.push({ tech_group: r.tech_group, technology: r.technology }); }});
+    data.techRows.forEach(r => {
+      if (!seen.has(r.tech_id)) { seen.add(r.tech_id); out.push({ tech_id: r.tech_id, tech_group: r.tech_group, technology: r.technology }); }
+    });
     return out.sort((a, b) => a.tech_group.localeCompare(b.tech_group) || a.technology.localeCompare(b.technology));
   }, [data]);
 
@@ -4056,24 +4063,23 @@ function AdminExplorerPage({ token }) {
     return { rows, techs };
   }, [data, category, pctKey]);
 
-  // Compare view: selected techs overlaid
+  // Compare view: selected techs overlaid. Keys on tech_id so names need not be unique.
   const compareData = useMemo(() => {
     if (!data?.techRows || !selectedTechs.length) return [];
     const byYear = {};
-    data.techRows.filter(r => selectedTechs.includes(r.technology)).forEach(r => {
+    data.techRows.filter(r => selectedTechs.includes(r.tech_id)).forEach(r => {
       if (!byYear[r.year]) byYear[r.year] = { year: r.year };
-      const v = r[pctKey]; if (v != null) byYear[r.year][r.technology] = parseFloat(v);
+      const v = r[pctKey]; if (v != null) byYear[r.year][`tech_${r.tech_id}`] = parseFloat(v);
     });
     return Object.values(byYear).sort((a, b) => a.year - b.year);
   }, [data, selectedTechs, pctKey]);
 
-  // All-techs spaghetti chart — use sanitized keys so Recharts dot-path lookup never fires
+  // All-techs spaghetti chart — synthetic keys (tech_${tech_id}) so no special chars in dataKey
   const allTechsData = useMemo(() => {
     if (!data?.techRows) return { rows: [], techs: [] };
-    const sanitize = t => t.replace(/\./g, '·'); // replace dots with middle-dot (·)
     const byYear = {}; const techInfo = {};
     data.techRows.forEach(r => {
-      const key = sanitize(r.technology);
+      const key = `tech_${r.tech_id}`;
       if (!byYear[r.year]) byYear[r.year] = { year: r.year };
       const v = r[pctKey]; if (v != null) byYear[r.year][key] = parseFloat(v);
       if (!techInfo[key]) techInfo[key] = { group: r.tech_group, label: r.technology };
@@ -4084,7 +4090,9 @@ function AdminExplorerPage({ token }) {
     return { rows, techs };
   }, [data, pctKey]);
 
-  // Landscape scatter: latest year adoption vs delta from 2 years prior
+  // Landscape scatter: latest year adoption vs delta from 2 years prior.
+  // Points with no prior-year data are excluded — they would plot at y=0 and
+  // land misleadingly in the Mainstream/Fading quadrant.
   const scatterData = useMemo(() => {
     if (!data?.techRows) return {};
     const years = [...new Set(data.techRows.map(r => r.year))].sort((a, b) => a - b);
@@ -4092,16 +4100,18 @@ function AdminExplorerPage({ token }) {
     const priorYr = maxYr - 2;
     const byTech = {};
     data.techRows.forEach(r => {
-      if (!byTech[r.technology]) byTech[r.technology] = { tech_group: r.tech_group, byYear: {} };
-      const v = r[pctKey]; if (v != null) byTech[r.technology].byYear[r.year] = parseFloat(v);
+      const k = r.tech_id;
+      if (!byTech[k]) byTech[k] = { technology: r.technology, tech_group: r.tech_group, byYear: {} };
+      const v = r[pctKey]; if (v != null) byTech[k].byYear[r.year] = parseFloat(v);
     });
     const byCat = {};
-    Object.entries(byTech).forEach(([tech, { tech_group, byYear }]) => {
+    Object.values(byTech).forEach(({ technology, tech_group, byYear }) => {
       const curr = byYear[maxYr]; if (curr == null) return;
       const prior = byYear[priorYr];
       const delta = prior != null ? parseFloat((curr - prior).toFixed(1)) : null;
+      if (delta === null) return; // skip — no prior data, would plot falsely at y=0
       if (!byCat[tech_group]) byCat[tech_group] = [];
-      byCat[tech_group].push({ technology: tech, tech_group, x: curr, y: delta ?? 0, hasYoy: delta != null });
+      byCat[tech_group].push({ technology, tech_group, x: curr, y: delta });
     });
     return { byCat, maxYr, priorYr };
   }, [data, pctKey]);
@@ -4120,10 +4130,10 @@ function AdminExplorerPage({ token }) {
 
   // ── Helpers ─────────────────────────────────────────────────────────────────
 
-  const toggleTech = tech => {
+  const toggleTech = techId => {
     setSelectedTechs(prev =>
-      prev.includes(tech) ? prev.filter(t => t !== tech)
-        : prev.length < 8 ? [...prev, tech] : prev
+      prev.includes(techId) ? prev.filter(t => t !== techId)
+        : prev.length < 8 ? [...prev, techId] : prev
     );
   };
 
@@ -4158,7 +4168,7 @@ function AdminExplorerPage({ token }) {
     </div>
   );
 
-  const ScatterTooltip = ({ active, payload }) => {
+  const ScatterTooltip = ({ active, payload, priorYr }) => {
     if (!active || !payload?.length) return null;
     const d = payload[0]?.payload;
     if (!d) return null;
@@ -4167,9 +4177,7 @@ function AdminExplorerPage({ token }) {
         <div style={{ fontWeight: 600, color: '#111827', marginBottom: 2 }}>{d.technology}</div>
         <div style={{ color: '#9CA3AF', marginBottom: 6 }}>{d.tech_group}</div>
         <div>Adoption: <b>{d.x?.toFixed(1)}%</b></div>
-        {d.hasYoy
-          ? <div>YOY change: <b style={{ color: d.y >= 0 ? '#16a34a' : '#DC2626' }}>{d.y >= 0 ? '+' : ''}{d.y}pp</b></div>
-          : <div style={{ color: '#9CA3AF', fontSize: 10 }}>No prior-year data</div>}
+        <div>Change vs {priorYr}: <b style={{ color: d.y >= 0 ? '#16a34a' : '#DC2626' }}>{d.y >= 0 ? '+' : ''}{d.y}pp</b></div>
       </div>
     );
   };
@@ -4177,11 +4185,19 @@ function AdminExplorerPage({ token }) {
   const dlCsv = (rows, filename) => {
     if (!rows?.length) return;
     const keys = Object.keys(rows[0]);
-    const escape = v => { const s = v ?? ''; return String(s).includes(',') || String(s).includes('"') ? `"${String(s).replace(/"/g, '""')}"` : s; };
-    const csv = [keys.join(','), ...rows.map(r => keys.map(k => escape(r[k])).join(','))].join('\n');
+    const escape = v => {
+      const s = String(v ?? '');
+      // Prefix formula-leading chars so Excel doesn't execute them
+      const safe = /^[=+\-@]/.test(s) ? "'" + s : s;
+      // Quote when value contains comma, quote, or newline
+      return /[,"\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+    };
+    const BOM = '﻿';
+    const csv = BOM + [keys.join(','), ...rows.map(r => keys.map(k => escape(r[k])).join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
-    a.download = filename + '.csv'; a.click();
+    a.href = url; a.download = filename + '.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 100);
   };
 
   const dlPng = (filename) => {
@@ -4205,6 +4221,7 @@ function AdminExplorerPage({ token }) {
       const a = document.createElement('a');
       a.download = filename + '.png'; a.href = canvas.toDataURL('image/png'); a.click();
     };
+    img.onerror = () => alert('PNG export failed — chart may not be rendered yet.');
     img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgStr);
   };
 
@@ -4233,13 +4250,13 @@ function AdminExplorerPage({ token }) {
       {/* Publish panel */}
       <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px', marginBottom: 24, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
-          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Public Data Export</div>
+          <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Update Data Explorer</div>
           <div style={{ fontSize: 12, color: '#6B7280', marginTop: 2 }}>
-            Publishes aggregated data (no fleet-level values). {pubMsg || `Last published: ${pubDate}`}
+            Saves a public snapshot of aggregated data (no fleet-level values). {pubMsg || `Last updated: ${pubDate}`}
           </div>
         </div>
         <button onClick={publish} disabled={publishing || loading} style={{ padding: '8px 20px', fontSize: 13, fontWeight: 600, cursor: 'pointer', borderRadius: 6, border: 'none', background: publishing ? '#9CA3AF' : '#1c3660', color: '#fff', whiteSpace: 'nowrap' }}>
-          {publishing ? 'Publishing…' : '▶ Publish Data'}
+          {publishing ? 'Updating…' : '▶ Update Data Explorer'}
         </button>
       </div>
 
@@ -4247,7 +4264,17 @@ function AdminExplorerPage({ token }) {
 
       {loading && <div style={{ color: '#9CA3AF', fontSize: 13 }}>Loading…</div>}
 
-      {!loading && data && (<>
+      {!loading && fetchError && (
+        <div style={{ background: '#FEF2F2', border: '1px solid #FECACA', borderRadius: 8, padding: '16px 20px', color: '#DC2626', fontSize: 13 }}>
+          <b>Failed to load explorer data:</b> {fetchError}
+          <button onClick={() => { setFetchError(null); setLoading(true); fetch('/api/admin/explorer/preview', { headers }).then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); }).then(d => { setData(d); if (!category && d.techRows?.length) setCategory(d.techRows[0].tech_group); }).catch(e => setFetchError(e.message || 'Failed')).finally(() => setLoading(false)); }}
+            style={{ marginLeft: 16, padding: '4px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 5, border: '1px solid #FECACA', background: '#fff', color: '#DC2626' }}>
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !fetchError && data && (<>
 
         {/* Controls row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
@@ -4327,21 +4354,21 @@ function AdminExplorerPage({ token }) {
               <div style={{ maxHeight: 480, overflowY: 'auto' }}>
                 {(() => {
                   const grouped = {};
-                  filteredTechs.forEach(t => { if (!grouped[t.tech_group]) grouped[t.tech_group] = []; grouped[t.tech_group].push(t.technology); });
+                  filteredTechs.forEach(t => { if (!grouped[t.tech_group]) grouped[t.tech_group] = []; grouped[t.tech_group].push(t); });
                   return Object.entries(grouped).map(([grp, techs]) => (
                     <div key={grp}>
                       <div style={{ padding: '7px 14px 4px', fontSize: 10, fontWeight: 700, color: '#9CA3AF', textTransform: 'uppercase', letterSpacing: 0.5, background: '#F9FAFB', borderBottom: '1px solid #F3F4F6' }}>{grp}</div>
-                      {techs.map(tech => {
-                        const sel = selectedTechs.includes(tech);
-                        const idx = selectedTechs.indexOf(tech);
+                      {techs.map(t => {
+                        const sel = selectedTechs.includes(t.tech_id);
+                        const color = CC[t.tech_id % CC.length];
                         return (
-                          <div key={tech} onClick={() => toggleTech(tech)} style={{
+                          <div key={t.tech_id} onClick={() => toggleTech(t.tech_id)} style={{
                             display: 'flex', alignItems: 'center', gap: 8, padding: '7px 14px', cursor: 'pointer', fontSize: 12,
                             background: sel ? '#EFF6FF' : 'transparent', color: '#374151',
                             borderBottom: '1px solid #F9FAFB',
                           }}>
-                            <div style={{ width: 12, height: 12, borderRadius: 3, border: `2px solid ${sel ? CC[idx % CC.length] : '#D1D5DB'}`, background: sel ? CC[idx % CC.length] : 'transparent', flexShrink: 0 }} />
-                            {tech}
+                            <div style={{ width: 12, height: 12, borderRadius: 3, border: `2px solid ${sel ? color : '#D1D5DB'}`, background: sel ? color : 'transparent', flexShrink: 0 }} />
+                            {t.technology}
                           </div>
                         );
                       })}
@@ -4367,21 +4394,32 @@ function AdminExplorerPage({ token }) {
                         <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · up to 8 technologies across any category</div>
                       </div>
                       <DownloadBar
-                        csvRows={compareData.map(r => { const o = { year: r.year }; selectedTechs.forEach(t => { o[t] = r[t] != null ? +r[t].toFixed(1) : ''; }); return o; })}
+                        csvRows={compareData.map(r => {
+                          const o = { year: r.year };
+                          selectedTechs.forEach(id => {
+                            const info = allTechs.find(t => t.tech_id === id);
+                            o[info?.technology || String(id)] = r[`tech_${id}`] != null ? +r[`tech_${id}`].toFixed(1) : '';
+                          });
+                          return o;
+                        })}
                         csvName="compare_technologies"
                         pngName="compare_technologies"
                       />
                     </div>
-                    <MiniLegend items={selectedTechs.map((t, i) => [t, CC[i % CC.length]])} />
+                    <MiniLegend items={selectedTechs.map(id => {
+                      const info = allTechs.find(t => t.tech_id === id);
+                      return [info?.technology || String(id), CC[id % CC.length]];
+                    })} />
                     <ResponsiveContainer width="100%" height={380}>
                       <LineChart data={compareData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                         <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                         <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
                         <Tooltip formatter={(v, n) => [fmtPct(v), n]} contentStyle={{ fontSize: 11 }} />
-                        {selectedTechs.map((tech, i) => (
-                          <Line key={tech} type="monotone" dataKey={tech} stroke={CC[i % CC.length]} strokeWidth={2} dot={false} />
-                        ))}
+                        {selectedTechs.map(id => {
+                          const info = allTechs.find(t => t.tech_id === id);
+                          return <Line key={id} type="monotone" dataKey={`tech_${id}`} name={info?.technology || String(id)} stroke={CC[id % CC.length]} strokeWidth={2} dot={false} />;
+                        })}
                       </LineChart>
                     </ResponsiveContainer>
                   </>)
@@ -4462,7 +4500,7 @@ function AdminExplorerPage({ token }) {
                   <ZAxis range={[40, 40]} />
                   <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
                   <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} label={<QuadrantLabels />} />
-                  <Tooltip content={<ScatterTooltip />} />
+                  <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                   {Object.entries(visibleByCat).map(([cat, pts]) => (
                     <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75} />
                   ))}

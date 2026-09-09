@@ -10,11 +10,14 @@ const bcrypt     = require("bcryptjs");
 const jwt        = require("jsonwebtoken");
 const path       = require("path");
 const crypto     = require("crypto");
+const fs         = require("fs");
 const { Resend } = require("resend");
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
 const JWT_SECRET = process.env.JWT_SECRET || "change-me-in-production";
+if (process.env.NODE_ENV === "production" && !process.env.JWT_SECRET)
+  throw new Error("JWT_SECRET env var must be set in production");
 const APP_URL    = (process.env.APP_URL || process.env.FRONTEND_URL || "http://localhost:3001").replace(/\/$/, "");
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -3275,90 +3278,188 @@ app.post("/api/admin/charts/run-query", requireAuth, requireAdminRole, async (re
 });
 
 // ─── Public Explorer ──────────────────────────────────────────────────────────
+const EXPLORER_SNAPSHOT_PATH = path.join(__dirname, "explorer_snapshot.json");
+
+/**
+ * Runs the full Explorer aggregation and returns {techRows, mpgRows, published_at}.
+ * Shared by the admin preview and update-data endpoints.
+ * Applies all methodology fixes: config dedup, has_daycab RH logic, multiplier,
+ * fuel_type NULL guard, max_year gate, combined=lh+rh, per-cut n>=3 suppression.
+ */
+async function generateExplorerData() {
+  const [[maxYearRow]] = await db.query(
+    `SELECT setting_value FROM ffs_settings WHERE setting_key = 'charts_max_year'`
+  );
+  const maxYear = parseInt(maxYearRow?.setting_value) || new Date().getFullYear();
+
+  // Adoption aggregation:
+  //  Level 1 (pre): dedup configs — (fleet, year, tech, cab_type) → avg_pct
+  //  Level 2 (has_dc): per (fleet, year, tech) flag whether any Day Cab row exists
+  //  Outer: combined restricted to lh+rh fleets; rh uses has_daycab preference;
+  //         per-cut values suppressed to NULL when fewer than 3 distinct fleets contribute.
+  const [techRows] = await db.query(`
+    WITH pre AS (
+      SELECT fleet_id, adoption_year, tech_id, cab_type,
+             AVG(adoption_percent) AS avg_pct
+      FROM ffs_adoption
+      WHERE fleet_id NOT IN (0, 45, 46)
+        AND adoption_year >= 2003 AND adoption_year <= ?
+        AND adoption_percent <= 1
+      GROUP BY fleet_id, adoption_year, tech_id, cab_type
+    ),
+    has_dc AS (
+      SELECT fleet_id, adoption_year, tech_id,
+             MAX(CASE WHEN cab_type = 'Day Cab' THEN 1 ELSE 0 END) AS has_daycab
+      FROM pre
+      GROUP BY fleet_id, adoption_year, tech_id
+    )
+    SELECT t.tech_id, t.tech_group, t.technology, pre.adoption_year AS year,
+
+      /* Combined: lh+rh fleets only; suppress < 3 */
+      ROUND(CASE WHEN COUNT(DISTINCT pre.fleet_id) >= 3
+                 THEN AVG(pre.avg_pct) * 100 ELSE NULL END, 1)            AS combined_pct,
+      COUNT(DISTINCT pre.fleet_id)                                         AS n_combined,
+
+      /* LH: sleeper/unspecified cab; suppress < 3 */
+      ROUND(CASE WHEN COUNT(DISTINCT CASE
+                   WHEN LOWER(f.default_duty_cycle) = 'lh'
+                    AND (pre.cab_type IS NULL OR pre.cab_type != 'Day Cab')
+                   THEN pre.fleet_id END) >= 3
+                 THEN AVG(CASE
+                   WHEN LOWER(f.default_duty_cycle) = 'lh'
+                    AND (pre.cab_type IS NULL OR pre.cab_type != 'Day Cab')
+                   THEN pre.avg_pct END) * 100
+                 ELSE NULL END, 1)                                         AS lh_pct,
+      COUNT(DISTINCT CASE
+        WHEN LOWER(f.default_duty_cycle) = 'lh'
+         AND (pre.cab_type IS NULL OR pre.cab_type != 'Day Cab')
+        THEN pre.fleet_id END)                                             AS n_lh,
+
+      /* RH: prefers Day Cab for RH fleets (has_daycab logic); suppress < 3 */
+      ROUND(CASE WHEN COUNT(DISTINCT CASE
+                   WHEN (LOWER(f.default_duty_cycle) = 'rh' AND (
+                          (hd.has_daycab = 1 AND pre.cab_type = 'Day Cab') OR
+                          (hd.has_daycab = 0 AND (pre.cab_type IS NULL OR pre.cab_type != 'Day Cab'))
+                        ))
+                     OR (LOWER(f.default_duty_cycle) = 'lh' AND pre.cab_type = 'Day Cab')
+                   THEN pre.fleet_id END) >= 3
+                 THEN AVG(CASE
+                   WHEN (LOWER(f.default_duty_cycle) = 'rh' AND (
+                          (hd.has_daycab = 1 AND pre.cab_type = 'Day Cab') OR
+                          (hd.has_daycab = 0 AND (pre.cab_type IS NULL OR pre.cab_type != 'Day Cab'))
+                        ))
+                     OR (LOWER(f.default_duty_cycle) = 'lh' AND pre.cab_type = 'Day Cab')
+                   THEN pre.avg_pct END) * 100
+                 ELSE NULL END, 1)                                         AS rh_pct,
+      COUNT(DISTINCT CASE
+        WHEN (LOWER(f.default_duty_cycle) = 'rh' AND (
+               (hd.has_daycab = 1 AND pre.cab_type = 'Day Cab') OR
+               (hd.has_daycab = 0 AND (pre.cab_type IS NULL OR pre.cab_type != 'Day Cab'))
+             ))
+          OR (LOWER(f.default_duty_cycle) = 'lh' AND pre.cab_type = 'Day Cab')
+        THEN pre.fleet_id END)                                             AS n_rh
+
+    FROM pre
+    JOIN ffs_tech  t  ON pre.tech_id  = t.tech_id
+    JOIN ffs_fleet f  ON pre.fleet_id = f.fleet_id
+    JOIN has_dc    hd ON pre.fleet_id = hd.fleet_id
+                     AND pre.adoption_year = hd.adoption_year
+                     AND pre.tech_id = hd.tech_id
+    WHERE LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+      AND (t.active_to IS NULL OR pre.adoption_year <= t.active_to)
+    GROUP BY t.tech_id, t.tech_group, t.technology, pre.adoption_year
+    HAVING COUNT(DISTINCT pre.fleet_id) >= 3
+    ORDER BY t.tech_group, t.technology, pre.adoption_year
+  `, [maxYear]);
+
+  // MPG: uses COALESCE(multiplier,1) for Method-A consistency;
+  // COALESCE(fuel_type,'') so NULL fuel_type rows (not CNG) are not silently dropped.
+  const [mpgRows] = await db.query(`
+    SELECT year, duty_cycle, ROUND(AVG(fleet_mpg), 2) AS avg_mpg, COUNT(*) AS n_fleets
+    FROM (
+      SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
+             SUM(COALESCE(m.multiplier, 1) * m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0) AS fleet_mpg
+      FROM ffs_mpg   m
+      JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
+      WHERE COALESCE(m.mpg_quarter, '') = ''
+        AND m.fleet_id NOT IN (0, 45, 46)
+        AND COALESCE(m.fuel_type, '') <> 'CNG'
+        AND m.ifta_miles > 0 AND m.ifta_fuel > 0
+        AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+        AND m.mpg_year <= ?
+      GROUP BY m.mpg_year, m.fleet_id, LOWER(f.default_duty_cycle)
+    ) sub
+    GROUP BY year, duty_cycle
+    HAVING COUNT(*) >= 3
+    ORDER BY year, duty_cycle
+  `, [maxYear]);
+
+  const [[pubRow]] = await db.query(
+    `SELECT setting_value FROM ffs_settings WHERE setting_key = 'explorer_published_at'`
+  );
+
+  return {
+    generated_at: new Date().toISOString(),
+    published_at: pubRow?.setting_value || null,
+    techRows: techRows.map(r => ({
+      ...r,
+      tech_id: Number(r.tech_id), year: Number(r.year),
+      n_combined: Number(r.n_combined), n_lh: Number(r.n_lh), n_rh: Number(r.n_rh),
+    })),
+    mpgRows: mpgRows.map(r => ({ ...r, year: Number(r.year), avg_mpg: parseFloat(r.avg_mpg) })),
+  };
+}
+
 /**
  * GET /api/public/explorer
- * No authentication required. Returns ONLY pre-aggregated data —
- * no fleet IDs, no fleet names, no per-fleet values of any kind.
- * Safe to expose on a public website; fleet data is structurally absent.
+ * No authentication required. Serves the most recently saved snapshot only.
+ * Returns 404 when no snapshot has been published yet.
  */
-app.get("/api/public/explorer", async (req, res) => {
+app.get("/api/public/explorer", (req, res) => {
+  res.set("Cache-Control", "public, max-age=3600");
   try {
-    // Adoption: year + technology + all three duty-cycle cuts in one pass.
-    // Fleet identifiers never appear in the output.
-    const [techRows] = await db.query(`
-      SELECT t.tech_group, t.technology, a.adoption_year AS year,
-        ROUND(AVG(a.adoption_percent) * 100, 1)                                                              AS combined_pct,
-        ROUND(AVG(CASE WHEN LOWER(f.default_duty_cycle) = 'lh'
-                        AND (a.cab_type IS NULL OR a.cab_type != 'Day Cab')
-                   THEN a.adoption_percent END) * 100, 1)                                                    AS lh_pct,
-        ROUND(AVG(CASE WHEN LOWER(f.default_duty_cycle) = 'rh'
-                        OR (LOWER(f.default_duty_cycle) = 'lh' AND a.cab_type = 'Day Cab')
-                   THEN a.adoption_percent END) * 100, 1)                                                    AS rh_pct,
-        COUNT(DISTINCT a.fleet_id)                                                                           AS n_fleets
-      FROM ffs_adoption a
-      JOIN ffs_tech    t ON a.tech_id  = t.tech_id
-      JOIN ffs_fleet   f ON a.fleet_id = f.fleet_id
-      WHERE a.fleet_id NOT IN (0, 45, 46)
-        AND a.adoption_year >= 2003
-        AND a.adoption_percent <= 1
-        AND (t.active_to IS NULL OR a.adoption_year <= t.active_to)
-      GROUP BY t.tech_group, t.technology, a.adoption_year
-      ORDER BY t.tech_group, t.technology, a.adoption_year
-    `);
+    const raw = fs.readFileSync(EXPLORER_SNAPSHOT_PATH, "utf8");
+    res.type("json").send(raw);
+  } catch {
+    res.status(404).json({ error: "No explorer snapshot published yet." });
+  }
+});
 
-    // Industry-average MPG by year and duty cycle (no per-fleet rows).
-    const [mpgRows] = await db.query(`
-      SELECT year, duty_cycle, ROUND(AVG(fleet_mpg), 2) AS avg_mpg, COUNT(*) AS n_fleets
-      FROM (
-        SELECT m.mpg_year AS year, LOWER(f.default_duty_cycle) AS duty_cycle,
-               SUM(m.ifta_miles) / NULLIF(SUM(m.ifta_fuel), 0) AS fleet_mpg
-        FROM ffs_mpg   m
-        JOIN ffs_fleet f ON m.fleet_id = f.fleet_id
-        WHERE COALESCE(m.mpg_quarter, '') = ''
-          AND m.fleet_id NOT IN (0, 45, 46)
-          AND m.fuel_type != 'CNG'
-          AND m.ifta_miles > 0 AND m.ifta_fuel > 0
-          AND LOWER(f.default_duty_cycle) IN ('lh', 'rh')
-        GROUP BY m.mpg_year, m.fleet_id, LOWER(f.default_duty_cycle)
-      ) sub
-      GROUP BY year, duty_cycle
-      ORDER BY year, duty_cycle
-    `);
-
-    // Last publish timestamp from settings
-    const [[pubRow]] = await db.query(
-      `SELECT setting_value FROM ffs_settings WHERE setting_key = 'explorer_published_at'`
-    );
-
-    res.json({
-      generated_at:  new Date().toISOString(),
-      published_at:  pubRow?.setting_value || null,
-      techRows:      techRows.map(r => ({ ...r, year: Number(r.year) })),
-      mpgRows:       mpgRows.map(r => ({ ...r, year: Number(r.year), avg_mpg: parseFloat(r.avg_mpg) })),
-    });
+/**
+ * GET /api/admin/explorer/preview
+ * Admin-only live preview — runs the full aggregation against the live DB.
+ * Use this to review data before publishing.
+ */
+app.get("/api/admin/explorer/preview", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const data = await generateExplorerData();
+    res.json(data);
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to generate explorer data' });
+    res.status(500).json({ error: "Failed to generate explorer preview" });
   }
 });
 
 /**
  * POST /api/admin/explorer/publish
- * Admin-only. Records a publish timestamp (prototype).
- * Production version would push the aggregated JSON to a CDN here.
+ * Admin-only. Runs the full aggregation, saves a JSON snapshot to disk,
+ * and records the publish timestamp. The public GET endpoint serves this file.
  */
 app.post("/api/admin/explorer/publish", requireAuth, requireAdmin, async (req, res) => {
   try {
+    const data = await generateExplorerData();
     const ts = new Date().toISOString();
+    data.published_at = ts;
+    fs.writeFileSync(EXPLORER_SNAPSHOT_PATH, JSON.stringify(data));
     await db.query(
       `INSERT INTO ffs_settings (setting_key, setting_value) VALUES ('explorer_published_at', ?)
        ON DUPLICATE KEY UPDATE setting_value = ?`,
       [ts, ts]
     );
-    res.json({ ok: true, published_at: ts });
+    res.json({ ok: true, published_at: ts, techRows: data.techRows, mpgRows: data.mpgRows });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Publish failed' });
+    res.status(500).json({ error: "Update failed" });
   }
 });
 
