@@ -4008,12 +4008,12 @@ function AdminExplorerPage({ token }) {
   const publish = () => {
     setPublishing(true); setPubMsg('');
     fetch('/api/admin/explorer/publish', { method: 'POST', headers })
-      .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); })
+      .then(r => r.json().then(j => { if (!r.ok) throw new Error(j?.error || `Server error ${r.status}`); return j; }))
       .then(d => {
         setPubMsg(`Updated ${new Date(d.published_at).toLocaleString()}`);
         if (d.techRows) setData(prev => ({ ...prev, published_at: d.published_at, techRows: d.techRows, mpgRows: d.mpgRows }));
       })
-      .catch(() => setPubMsg('Update failed'))
+      .catch(e => setPubMsg(`Update failed: ${e?.message || 'unknown error'}`))
       .finally(() => setPublishing(false));
   };
 

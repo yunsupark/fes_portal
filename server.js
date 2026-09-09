@@ -121,8 +121,13 @@ const db = mysql.createPool({
     await db.query(`
       CREATE TABLE IF NOT EXISTS ffs_settings (
         setting_key   VARCHAR(64) NOT NULL PRIMARY KEY,
-        setting_value TEXT
+        setting_value MEDIUMTEXT
       )
+    `);
+    // Widen existing TEXT column to MEDIUMTEXT so the explorer snapshot (which can
+    // exceed 64 KB) fits. MODIFY is a no-op if the column is already MEDIUMTEXT.
+    await db.query(`
+      ALTER TABLE ffs_settings MODIFY COLUMN setting_value MEDIUMTEXT
     `);
     await db.query(`
       INSERT IGNORE INTO ffs_settings (setting_key, setting_value) VALUES
@@ -3499,8 +3504,8 @@ app.post("/api/admin/explorer/publish", requireAuth, requireAdmin, async (req, r
     explorerSnapshotCache = payload; // refresh in-memory cache immediately
     res.json({ ok: true, published_at: ts, techRows: data.techRows, mpgRows: data.mpgRows });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Update failed" });
+    console.error("Explorer publish error:", err);
+    res.status(500).json({ error: err?.message || "Update failed" });
   }
 });
 
