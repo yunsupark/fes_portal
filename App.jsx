@@ -3991,44 +3991,64 @@ function AdminExplorerPage({ token }) {
   const [landscapeCat, setLandscapeCat] = useState(null); // null = all categories
   const [showLabels,   setShowLabels]   = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [scatterYear,  setScatterYear]  = useState(null); // null = latest year
-  const [playing,      setPlaying]      = useState(false);
+  const [scatterYear,      setScatterYear]      = useState(null);
+  const [playing,          setPlaying]          = useState(false);
+  const [interpByCat,      setInterpByCat]      = useState(null); // 60fps lerped data during playback
   const chartRef   = useRef(null);
-  const sliderRef  = useRef(null);   // direct DOM update for smooth thumb
+  const sliderRef  = useRef(null);
   const animRef    = useRef(null);
-  const animMeta   = useRef({});     // { startTime, startIdx, sliderYears, maxYr }
+  const animMeta   = useRef({});
+  const lastYrIdx  = useRef(-1);
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
-  // rAF-based smooth animation
+  // rAF loop: interpolates dot positions at 60fps between discrete years
   useEffect(() => {
     if (animRef.current) cancelAnimationFrame(animRef.current);
-    if (!playing) return;
-    const { sliderYears = [], maxYr } = scatterData;
+    if (!playing) { setInterpByCat(null); return; }
+    const { sliderYears = [], maxYr, balancedByYear = {} } = scatterData;
     const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
     if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
-    const STEP_MS = 1200;
+    const STEP_MS = 1400;
     const minYr = sliderYears[0] ?? maxYr;
-    animMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS };
+    const steps = sliderYears.length - 1;
+    animMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS, balancedByYear };
+    lastYrIdx.current = startIdx;
+    const lerp = (a, b, t) => a + (b - a) * t;
     const tick = (now) => {
-      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms } = animMeta.current;
-      const steps = sy.length - 1;
-      const progress = si + (now - startTime) / ms; // float steps from index 0
+      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms, balancedByYear: bby } = animMeta.current;
+      const progress = si + (now - startTime) / ms;
       if (progress >= steps) {
         setScatterYear(sy[steps]);
-        if (sliderRef.current) sliderRef.current.value = sy[steps];
+        setInterpByCat(null);
+        if (sliderRef.current) sliderRef.current.value = my;
         setPlaying(false);
         return;
       }
-      const yearIdx = Math.min(steps - 1, Math.floor(progress));
-      setScatterYear(sy[yearIdx]);
-      // move thumb continuously
-      if (sliderRef.current) {
-        const fracYear = mn + (progress / steps) * (my - mn);
-        sliderRef.current.value = fracYear;
-      }
+      // slider thumb (smooth)
+      if (sliderRef.current) sliderRef.current.value = mn + (progress / steps) * (my - mn);
+      // year label (discrete, only on boundary)
+      const yrIdx = Math.min(steps - 1, Math.floor(progress));
+      if (yrIdx !== lastYrIdx.current) { lastYrIdx.current = yrIdx; setScatterYear(sy[yrIdx]); }
+      // interpolate dot positions
+      const t = progress - Math.floor(progress); // 0→1 within current step
+      const yr0 = sy[yrIdx];
+      const yr1 = sy[Math.min(steps, yrIdx + 1)];
+      const d0 = bby[yr0] || {};
+      const d1 = bby[yr1] || {};
+      const lookup1 = {};
+      Object.values(d1).flat().forEach(d => { lookup1[d.technology] = d; });
+      const interp = {};
+      Object.entries(d0).forEach(([cat, pts]) => {
+        interp[cat] = pts.map(p => {
+          const p1 = lookup1[p.technology];
+          if (!p1) return p;
+          return { ...p, x: lerp(p.x, p1.x, t), y: lerp(p.y, p1.y, t) };
+        });
+      });
+      setInterpByCat(interp);
       animRef.current = requestAnimationFrame(tick);
     };
     animRef.current = requestAnimationFrame(tick);
@@ -4519,8 +4539,8 @@ function AdminExplorerPage({ token }) {
           const { maxYr, sliderYears = [], balancedByYear = {}, balancedCount = 0 } = scatterData;
           const activeYear = sliderYears.includes(scatterYear) ? scatterYear : maxYr;
           const priorYr = activeYear - 1;
-          const byCat = balancedByYear[activeYear] || {};
-          const catList = Object.keys(byCat).sort();
+          const byCat = (playing && interpByCat) ? interpByCat : (balancedByYear[activeYear] || {});
+          const catList = Object.keys(balancedByYear[activeYear] || {}).sort();
           const visibleByCat = landscapeCat ? { [landscapeCat]: byCat[landscapeCat] || [] } : byCat;
           const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
           const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
@@ -4614,11 +4634,10 @@ function AdminExplorerPage({ token }) {
                       isAnimationActive={false}
                       shape={({ cx, cy, fill, payload }) => (
                         <g key={payload.technology}>
-                          <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75}
-                            style={{ transition: 'cx 1.2s linear, cy 1.2s linear' }} />
+                          <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
                           {showLabels && (
                             <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
-                              style={{ pointerEvents: 'none', userSelect: 'none', transition: 'x 1.2s linear, y 1.2s linear' }}>
+                              style={{ pointerEvents: 'none', userSelect: 'none' }}>
                               {payload.technology}
                             </text>
                           )}
@@ -7770,11 +7789,13 @@ function PublicExplorerPage() {
   const [nativeFs, setNativeFs]     = useState(false);
   const [fakeFs,   setFakeFs]       = useState(false);
   const isFullscreen = nativeFs || fakeFs;
-  const [scatterYear, setScatterYear] = useState(null);
-  const [playing,     setPlaying]     = useState(false);
-  const pubSliderRef = useRef(null);
-  const pubAnimRef   = useRef(null);
-  const pubAnimMeta  = useRef({});
+  const [scatterYear,     setScatterYear]     = useState(null);
+  const [playing,         setPlaying]         = useState(false);
+  const [pubInterpByCat,  setPubInterpByCat]  = useState(null);
+  const pubSliderRef  = useRef(null);
+  const pubAnimRef    = useRef(null);
+  const pubAnimMeta   = useRef({});
+  const pubLastYrIdx  = useRef(-1);
   useEffect(() => {
     const handler = () => setNativeFs(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
@@ -7935,32 +7956,48 @@ function PublicExplorerPage() {
     return { maxYr, sliderYears, balancedByYear, balancedCount: balancedNames.size };
   }, [data, pctKey]);
 
-  // rAF-based smooth animation
+  // rAF loop: interpolates dot positions at 60fps between discrete years
   useEffect(() => {
     if (pubAnimRef.current) cancelAnimationFrame(pubAnimRef.current);
-    if (!playing) return;
-    const { sliderYears = [], maxYr } = scatterData;
+    if (!playing) { setPubInterpByCat(null); return; }
+    const { sliderYears = [], maxYr, balancedByYear = {} } = scatterData;
     const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
     if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
-    const STEP_MS = 1200;
+    const STEP_MS = 1400;
     const minYr = sliderYears[0] ?? maxYr;
-    pubAnimMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS };
+    const steps = sliderYears.length - 1;
+    pubAnimMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS, balancedByYear };
+    pubLastYrIdx.current = startIdx;
+    const lerp = (a, b, t) => a + (b - a) * t;
     const tick = (now) => {
-      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms } = pubAnimMeta.current;
-      const steps = sy.length - 1;
+      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms, balancedByYear: bby } = pubAnimMeta.current;
       const progress = si + (now - startTime) / ms;
       if (progress >= steps) {
         setScatterYear(sy[steps]);
-        if (pubSliderRef.current) pubSliderRef.current.value = sy[steps];
+        setPubInterpByCat(null);
+        if (pubSliderRef.current) pubSliderRef.current.value = my;
         setPlaying(false);
         return;
       }
-      const yearIdx = Math.min(steps - 1, Math.floor(progress));
-      setScatterYear(sy[yearIdx]);
-      if (pubSliderRef.current) {
-        const fracYear = mn + (progress / steps) * (my - mn);
-        pubSliderRef.current.value = fracYear;
-      }
+      if (pubSliderRef.current) pubSliderRef.current.value = mn + (progress / steps) * (my - mn);
+      const yrIdx = Math.min(steps - 1, Math.floor(progress));
+      if (yrIdx !== pubLastYrIdx.current) { pubLastYrIdx.current = yrIdx; setScatterYear(sy[yrIdx]); }
+      const t = progress - Math.floor(progress);
+      const yr0 = sy[yrIdx];
+      const yr1 = sy[Math.min(steps, yrIdx + 1)];
+      const d0 = bby[yr0] || {};
+      const d1 = bby[yr1] || {};
+      const lookup1 = {};
+      Object.values(d1).flat().forEach(d => { lookup1[d.technology] = d; });
+      const interp = {};
+      Object.entries(d0).forEach(([cat, pts]) => {
+        interp[cat] = pts.map(p => {
+          const p1 = lookup1[p.technology];
+          if (!p1) return p;
+          return { ...p, x: lerp(p.x, p1.x, t), y: lerp(p.y, p1.y, t) };
+        });
+      });
+      setPubInterpByCat(interp);
       pubAnimRef.current = requestAnimationFrame(tick);
     };
     pubAnimRef.current = requestAnimationFrame(tick);
@@ -8273,8 +8310,8 @@ function PublicExplorerPage() {
             const { maxYr, sliderYears = [], balancedByYear = {}, balancedCount = 0 } = scatterData;
             const activeYear = sliderYears.includes(scatterYear) ? scatterYear : maxYr;
             const priorYr = activeYear - 1;
-            const byCat = balancedByYear[activeYear] || {};
-            const catList = Object.keys(byCat).sort();
+            const byCat = (playing && pubInterpByCat) ? pubInterpByCat : (balancedByYear[activeYear] || {});
+            const catList = Object.keys(balancedByYear[activeYear] || {}).sort();
             const visibleByCat = landscapeCat ? { [landscapeCat]: byCat[landscapeCat] || [] } : byCat;
             const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
             const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
@@ -8367,11 +8404,10 @@ function PublicExplorerPage() {
                         isAnimationActive={false}
                         shape={({ cx, cy, fill, payload }) => (
                           <g key={payload.technology}>
-                            <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75}
-                              style={{ transition: 'cx 1.2s linear, cy 1.2s linear' }} />
+                            <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
                             {showLabels && (
                               <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
-                                style={{ pointerEvents: 'none', userSelect: 'none', transition: 'x 1.2s linear, y 1.2s linear' }}>{payload.technology}</text>
+                                style={{ pointerEvents: 'none', userSelect: 'none' }}>{payload.technology}</text>
                             )}
                           </g>
                         )}
