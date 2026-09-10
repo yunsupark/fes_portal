@@ -4009,7 +4009,7 @@ function AdminExplorerPage({ token }) {
     const { sliderYears = [], maxYr } = scatterData;
     const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
     if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
-    const STEP_MS = 1400;
+    const STEP_MS = 1200;
     const minYr = sliderYears[0] ?? maxYr;
     animMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS };
     const tick = (now) => {
@@ -4611,13 +4611,14 @@ function AdminExplorerPage({ token }) {
                   <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                   {Object.entries(visibleByCat).map(([cat, pts]) => (
                     <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
-                      isAnimationActive={true} animationDuration={600} animationEasing="ease-in-out"
+                      isAnimationActive={false}
                       shape={({ cx, cy, fill, payload }) => (
                         <g key={payload.technology}>
-                          <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
+                          <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75}
+                            style={{ transition: 'cx 1.2s linear, cy 1.2s linear' }} />
                           {showLabels && (
                             <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
-                              style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                              style={{ pointerEvents: 'none', userSelect: 'none', transition: 'x 1.2s linear, y 1.2s linear' }}>
                               {payload.technology}
                             </text>
                           )}
@@ -7941,7 +7942,7 @@ function PublicExplorerPage() {
     const { sliderYears = [], maxYr } = scatterData;
     const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
     if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
-    const STEP_MS = 1400;
+    const STEP_MS = 1200;
     const minYr = sliderYears[0] ?? maxYr;
     pubAnimMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS };
     const tick = (now) => {
@@ -8363,13 +8364,14 @@ function PublicExplorerPage() {
                     <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                     {Object.entries(visibleByCat).map(([cat, pts]) => (
                       <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
-                        isAnimationActive={true} animationDuration={600} animationEasing="ease-in-out"
+                        isAnimationActive={false}
                         shape={({ cx, cy, fill, payload }) => (
                           <g key={payload.technology}>
-                            <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
+                            <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75}
+                              style={{ transition: 'cx 1.2s linear, cy 1.2s linear' }} />
                             {showLabels && (
                               <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
-                                style={{ pointerEvents: 'none', userSelect: 'none' }}>{payload.technology}</text>
+                                style={{ pointerEvents: 'none', userSelect: 'none', transition: 'x 1.2s linear, y 1.2s linear' }}>{payload.technology}</text>
                             )}
                           </g>
                         )}
