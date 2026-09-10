@@ -3990,7 +3990,13 @@ function AdminExplorerPage({ token }) {
   const [techSearch,   setTechSearch]   = useState('');
   const [landscapeCat, setLandscapeCat] = useState(null); // null = all categories
   const [showLabels,   setShowLabels]   = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const chartRef = useRef(null);
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -4238,14 +4244,13 @@ function AdminExplorerPage({ token }) {
     <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
       <DlBtn onClick={() => dlCsv(csvRows, csvName)}>↓ CSV</DlBtn>
       <DlBtn onClick={() => dlPng(pngName)}>↓ PNG</DlBtn>
-      <DlBtn onClick={() => chartRef.current?.requestFullscreen?.()}>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="15,3 21,3 21,9"/><polyline points="9,21 3,21 3,15"/>
-          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-        </svg>
-      </DlBtn>
     </div>
   );
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  };
 
   const pubDate = data?.published_at ? new Date(data.published_at).toLocaleString() : 'Never published';
 
@@ -4300,6 +4305,12 @@ function AdminExplorerPage({ token }) {
               <HaulBtn val="rh"       label="Regional Haul" />
             </div>
           )}
+          <button onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} style={{ marginLeft: 'auto', padding: '4px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid #D1D5DB', background: '#F9FAFB', color: '#374151', display: 'flex', alignItems: 'center' }}>
+            {isFullscreen
+              ? <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4,14 10,14 10,20"/><polyline points="20,10 14,10 14,4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg>
+              : <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15,3 21,3 21,9"/><polyline points="9,21 3,21 3,15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+            }
+          </button>
         </div>
 
         {/* ── Adoption Trends ── */}
@@ -7668,6 +7679,16 @@ function PublicExplorerPage() {
   const [techSearch,   setTechSearch]   = useState('');
   const [landscapeCat, setLandscapeCat] = useState(null);
   const [showLabels,   setShowLabels]   = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  useEffect(() => {
+    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+    else document.exitFullscreen?.();
+  };
 
   // Fetch from the public snapshot endpoint — no auth
   const loadData = () => {
@@ -7901,12 +7922,6 @@ function PublicExplorerPage() {
     <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
       <DlBtn onClick={() => dlCsv(csvRows, csvName)}>↓ CSV</DlBtn>
       <DlBtn onClick={() => dlPng(pngName)}>↓ PNG</DlBtn>
-      <DlBtn onClick={() => chartRef.current?.requestFullscreen?.()}>
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="15,3 21,3 21,9"/><polyline points="9,21 3,21 3,15"/>
-          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
-        </svg>
-      </DlBtn>
     </div>
   );
 
@@ -7916,10 +7931,16 @@ function PublicExplorerPage() {
       {/* Minimal NACFE header */}
       <div style={{ background: '#1c3660', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
         <img src="/nacfe-logo.png" alt="NACFE" style={{ height: 32, objectFit: 'contain' }} />
-        <div>
+        <div style={{ flex: 1 }}>
           <div style={{ color: '#fff', fontWeight: 700, fontSize: 15, lineHeight: 1.2 }}>Fleet Efficiency Study</div>
           <div style={{ color: '#93C5FD', fontSize: 11, marginTop: 1 }}>Technology Adoption & Fuel Economy Explorer</div>
         </div>
+        <button onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} style={{ padding: '5px 8px', cursor: 'pointer', borderRadius: 5, border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.1)', color: '#fff', display: 'flex', alignItems: 'center' }}>
+          {isFullscreen
+            ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="4,14 10,14 10,20"/><polyline points="20,10 14,10 14,4"/><line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/></svg>
+            : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="15,3 21,3 21,9"/><polyline points="9,21 3,21 3,15"/><line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/></svg>
+          }
+        </button>
       </div>
 
       <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}>
