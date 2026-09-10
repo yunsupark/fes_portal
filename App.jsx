@@ -3991,12 +3991,28 @@ function AdminExplorerPage({ token }) {
   const [landscapeCat, setLandscapeCat] = useState(null); // null = all categories
   const [showLabels,   setShowLabels]   = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [scatterYear,  setScatterYear]  = useState(null); // null = latest year
+  const [playing,      setPlaying]      = useState(false);
   const chartRef = useRef(null);
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
+  // Animation playback
+  useEffect(() => {
+    if (!playing) return;
+    const { sliderYears = [], maxYr } = scatterData;
+    const id = setInterval(() => {
+      setScatterYear(prev => {
+        const cur = prev ?? maxYr;
+        const idx = sliderYears.indexOf(cur);
+        if (idx < 0 || idx >= sliderYears.length - 1) { setPlaying(false); return cur; }
+        return sliderYears[idx + 1];
+      });
+    }, 900);
+    return () => clearInterval(id);
+  }, [playing, scatterData]);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -4104,23 +4120,49 @@ function AdminExplorerPage({ token }) {
     if (!data?.techRows) return {};
     const years = [...new Set(data.techRows.map(r => r.year))].sort((a, b) => a - b);
     const maxYr = years[years.length - 1];
-    const priorYr = maxYr - 2;
+    // Build per-tech lookup
     const byTech = {};
     data.techRows.forEach(r => {
-      const k = r.tech_id;
-      if (!byTech[k]) byTech[k] = { technology: r.technology, tech_group: r.tech_group, byYear: {} };
-      const v = r[pctKey]; if (v != null) byTech[k].byYear[r.year] = parseFloat(v);
+      if (!byTech[r.tech_id]) byTech[r.tech_id] = { technology: r.technology, tech_group: r.tech_group, byYear: {} };
+      const v = r[pctKey]; if (v != null) byTech[r.tech_id].byYear[r.year] = parseFloat(v);
     });
-    const byCat = {};
-    Object.values(byTech).forEach(({ technology, tech_group, byYear }) => {
-      const curr = byYear[maxYr]; if (curr == null) return;
-      const prior = byYear[priorYr];
-      const delta = prior != null ? parseFloat((curr - prior).toFixed(1)) : null;
-      if (delta === null) return; // skip — no prior data, would plot falsely at y=0
-      if (!byCat[tech_group]) byCat[tech_group] = [];
-      byCat[tech_group].push({ technology, tech_group, x: curr, y: delta });
+    const techList = Object.values(byTech);
+    // Years where a prior-year exists (year-over-year change)
+    const validYears = years.filter(y => years.includes(y - 1));
+    // Build per-year byCat for all eligible techs
+    const allByYear = {};
+    validYears.forEach(y => {
+      const byCat = {};
+      techList.forEach(({ technology, tech_group, byYear: tby }) => {
+        const curr = tby[y], prior = tby[y - 1];
+        if (curr == null || prior == null) return;
+        if (!byCat[tech_group]) byCat[tech_group] = [];
+        byCat[tech_group].push({ technology, tech_group, x: curr, y: parseFloat((curr - prior).toFixed(1)) });
+      });
+      allByYear[y] = byCat;
     });
-    return { byCat, maxYr, priorYr };
+    // Balanced panel: find the earliest year where ≥5 techs span the whole range to maxYr
+    let balancedNames = new Set(Object.values(allByYear[maxYr] || {}).flat().map(d => d.technology));
+    let balancedStart = maxYr;
+    for (let i = validYears.length - 2; i >= 0; i--) {
+      const y = validYears[i];
+      const here = new Set(Object.values(allByYear[y] || {}).flat().map(d => d.technology));
+      const next = new Set([...balancedNames].filter(t => here.has(t)));
+      if (next.size < 5) break;
+      balancedNames = next; balancedStart = y;
+    }
+    const sliderYears = validYears.filter(y => y >= balancedStart);
+    // Balanced byYear (only common techs)
+    const balancedByYear = {};
+    sliderYears.forEach(y => {
+      const byCat = {};
+      Object.entries(allByYear[y] || {}).forEach(([cat, pts]) => {
+        const f = pts.filter(p => balancedNames.has(p.technology));
+        if (f.length) byCat[cat] = f;
+      });
+      balancedByYear[y] = byCat;
+    });
+    return { maxYr, sliderYears, balancedByYear, balancedCount: balancedNames.size };
   }, [data, pctKey]);
 
   // MPG chart
@@ -4296,9 +4338,9 @@ function AdminExplorerPage({ token }) {
         {/* Controls row */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', gap: 6 }}>
-            <ViewBtn val="trends"    label="Adoption Trends" />
+            <ViewBtn val="trends"    label="Adoption" />
             <ViewBtn val="compare"   label="Compare" />
-            <ViewBtn val="landscape" label="Landscape" />
+            <ViewBtn val="landscape" label="Trends" />
             <ViewBtn val="all"       label="All Techs" />
             <ViewBtn val="mpg"       label="Industry MPG" />
           </div>
@@ -4451,22 +4493,25 @@ function AdminExplorerPage({ token }) {
           </div>
         )}
 
-        {/* ── Landscape Scatter ── */}
+        {/* ── Technology Trends (landscape scatter) ── */}
         {view === 'landscape' && (() => {
-          const { byCat = {}, maxYr, priorYr } = scatterData;
+          const { maxYr, sliderYears = [], balancedByYear = {}, balancedCount = 0 } = scatterData;
+          const activeYear = sliderYears.includes(scatterYear) ? scatterYear : maxYr;
+          const priorYr = activeYear - 1;
+          const byCat = balancedByYear[activeYear] || {};
           const catList = Object.keys(byCat).sort();
           const visibleByCat = landscapeCat ? { [landscapeCat]: byCat[landscapeCat] || [] } : byCat;
-          // Compute symmetric Y domain from all data (not just filtered)
           const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
           const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
           const yDomain = [-maxAbsDelta, maxAbsDelta];
+          const minYear = sliderYears[0] ?? activeYear;
           return (
             <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                 <div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Landscape</div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Trends</div>
                   <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-                    {haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.
+                    {haulLabel} · {activeYear} adoption vs. change from {priorYr} · {balancedCount} technologies (balanced panel)
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -4478,14 +4523,28 @@ function AdminExplorerPage({ token }) {
                   }}>Labels</button>
                   <DownloadBar
                     csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
-                      pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
+                      pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${activeYear}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
                     ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
-                    csvName={`landscape_${maxYr}`}
-                    pngName={`landscape_${maxYr}`}
+                    csvName={`trends_${activeYear}`}
+                    pngName={`trends_${activeYear}`}
                   />
                 </div>
               </div>
-              {/* Category filter — color dot doubles as legend swatch */}
+              {/* Year slider */}
+              {sliderYears.length > 1 && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 10px' }}>
+                  <button onClick={() => { if (playing) { setPlaying(false); } else { if (activeYear >= maxYr) setScatterYear(minYear); setPlaying(true); } }}
+                    style={{ padding: '3px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 5, border: '1px solid #D1D5DB', background: '#F9FAFB', minWidth: 52 }}>
+                    {playing ? '⏸ Pause' : '▶ Play'}
+                  </button>
+                  <input type="range" min={minYear} max={maxYr} step={1}
+                    value={activeYear}
+                    onChange={e => { setPlaying(false); setScatterYear(Number(e.target.value)); }}
+                    style={{ flex: 1, accentColor: '#1c3660' }} />
+                  <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', minWidth: 36, textAlign: 'right' }}>{activeYear}</span>
+                </div>
+              )}
+              {/* Category filter */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                 <button onClick={() => setLandscapeCat(null)} style={{
                   padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
@@ -4516,15 +4575,15 @@ function AdminExplorerPage({ token }) {
                   <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                   <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
                     tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                    label={{ value: `${maxYr} Adoption`, position: 'insideBottom', offset: -12, fontSize: 11, fill: '#6B7280' }} />
+                    label={{ value: `${activeYear} Adoption`, position: 'insideBottom', offset: -12, fontSize: 11, fill: '#6B7280' }} />
                   <YAxis type="number" dataKey="y" name="Change (pp)" domain={yDomain}
                     tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
                   <ZAxis range={[40, 40]} />
-                  <ReferenceArea x1={0}  x2={50}  y1={0}           y2={maxAbsDelta}  fill="#16a34a" fillOpacity={0.05} label={{ value: 'Rising',     position: 'center', fill: '#16a34a', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
-                  <ReferenceArea x1={50} x2={100} y1={0}           y2={maxAbsDelta}  fill="#2563EB" fillOpacity={0.05} label={{ value: 'Mainstream', position: 'center', fill: '#2563EB', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
-                  <ReferenceArea x1={0}  x2={50}  y1={-maxAbsDelta} y2={0}           fill="#9CA3AF" fillOpacity={0.05} label={{ value: 'Fading',     position: 'center', fill: '#9CA3AF', fontSize: 13, fontWeight: 700, opacity: 0.55 }} />
-                  <ReferenceArea x1={50} x2={100} y1={-maxAbsDelta} y2={0}           fill="#DC2626" fillOpacity={0.05} label={{ value: 'Declining',  position: 'center', fill: '#DC2626', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
+                  <ReferenceArea x1={0}  x2={50}  y1={0}            y2={maxAbsDelta}  fill="#16a34a" fillOpacity={0.05} label={{ value: 'Rising',     position: 'center', fill: '#16a34a', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
+                  <ReferenceArea x1={50} x2={100} y1={0}            y2={maxAbsDelta}  fill="#2563EB" fillOpacity={0.05} label={{ value: 'Mainstream', position: 'center', fill: '#2563EB', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
+                  <ReferenceArea x1={0}  x2={50}  y1={-maxAbsDelta} y2={0}            fill="#9CA3AF" fillOpacity={0.05} label={{ value: 'Fading',     position: 'center', fill: '#9CA3AF', fontSize: 13, fontWeight: 700, opacity: 0.55 }} />
+                  <ReferenceArea x1={50} x2={100} y1={-maxAbsDelta} y2={0}            fill="#DC2626" fillOpacity={0.05} label={{ value: 'Declining',  position: 'center', fill: '#DC2626', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
                   <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
                   <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} />
                   <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
@@ -7687,6 +7746,8 @@ function PublicExplorerPage() {
   const [nativeFs, setNativeFs]     = useState(false);
   const [fakeFs,   setFakeFs]       = useState(false);
   const isFullscreen = nativeFs || fakeFs;
+  const [scatterYear, setScatterYear] = useState(null);
+  const [playing,     setPlaying]     = useState(false);
   useEffect(() => {
     const handler = () => setNativeFs(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
@@ -7707,6 +7768,20 @@ function PublicExplorerPage() {
   };
 
   const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.50)) : normal;
+
+  useEffect(() => {
+    if (!playing) return;
+    const { sliderYears = [], maxYr } = scatterData;
+    const id = setInterval(() => {
+      setScatterYear(prev => {
+        const cur = prev ?? maxYr;
+        const idx = sliderYears.indexOf(cur);
+        if (idx < 0 || idx >= sliderYears.length - 1) { setPlaying(false); return cur; }
+        return sliderYears[idx + 1];
+      });
+    }, 900);
+    return () => clearInterval(id);
+  }, [playing, scatterData]);
 
   // Fetch from the public snapshot endpoint — no auth
   const loadData = () => {
@@ -7807,23 +7882,44 @@ function PublicExplorerPage() {
     if (!data?.techRows) return {};
     const years = [...new Set(data.techRows.map(r => r.year))].sort((a, b) => a - b);
     const maxYr = years[years.length - 1];
-    const priorYr = maxYr - 2;
     const byTech = {};
     data.techRows.forEach(r => {
-      const k = r.tech_id;
-      if (!byTech[k]) byTech[k] = { technology: r.technology, tech_group: r.tech_group, byYear: {} };
-      const v = r[pctKey]; if (v != null) byTech[k].byYear[r.year] = parseFloat(v);
+      if (!byTech[r.tech_id]) byTech[r.tech_id] = { technology: r.technology, tech_group: r.tech_group, byYear: {} };
+      const v = r[pctKey]; if (v != null) byTech[r.tech_id].byYear[r.year] = parseFloat(v);
     });
-    const byCat = {};
-    Object.values(byTech).forEach(({ technology, tech_group, byYear }) => {
-      const curr = byYear[maxYr]; if (curr == null) return;
-      const prior = byYear[priorYr];
-      const delta = prior != null ? parseFloat((curr - prior).toFixed(1)) : null;
-      if (delta === null) return;
-      if (!byCat[tech_group]) byCat[tech_group] = [];
-      byCat[tech_group].push({ technology, tech_group, x: curr, y: delta });
+    const techList = Object.values(byTech);
+    const validYears = years.filter(y => years.includes(y - 1));
+    const allByYear = {};
+    validYears.forEach(y => {
+      const byCat = {};
+      techList.forEach(({ technology, tech_group, byYear: tby }) => {
+        const curr = tby[y], prior = tby[y - 1];
+        if (curr == null || prior == null) return;
+        if (!byCat[tech_group]) byCat[tech_group] = [];
+        byCat[tech_group].push({ technology, tech_group, x: curr, y: parseFloat((curr - prior).toFixed(1)) });
+      });
+      allByYear[y] = byCat;
     });
-    return { byCat, maxYr, priorYr };
+    let balancedNames = new Set(Object.values(allByYear[maxYr] || {}).flat().map(d => d.technology));
+    let balancedStart = maxYr;
+    for (let i = validYears.length - 2; i >= 0; i--) {
+      const y = validYears[i];
+      const here = new Set(Object.values(allByYear[y] || {}).flat().map(d => d.technology));
+      const next = new Set([...balancedNames].filter(t => here.has(t)));
+      if (next.size < 5) break;
+      balancedNames = next; balancedStart = y;
+    }
+    const sliderYears = validYears.filter(y => y >= balancedStart);
+    const balancedByYear = {};
+    sliderYears.forEach(y => {
+      const byCat = {};
+      Object.entries(allByYear[y] || {}).forEach(([cat, pts]) => {
+        const f = pts.filter(p => balancedNames.has(p.technology));
+        if (f.length) byCat[cat] = f;
+      });
+      balancedByYear[y] = byCat;
+    });
+    return { maxYr, sliderYears, balancedByYear, balancedCount: balancedNames.size };
   }, [data, pctKey]);
 
   const mpgChartData = useMemo(() => {
@@ -7987,9 +8083,9 @@ function PublicExplorerPage() {
           {/* Controls row */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-              <ViewBtn val="trends"    label="Adoption Trends" />
+              <ViewBtn val="trends"    label="Adoption" />
               <ViewBtn val="compare"   label="Compare" />
-              <ViewBtn val="landscape" label="Landscape" />
+              <ViewBtn val="landscape" label="Trends" />
               <ViewBtn val="all"       label="All Techs" />
               <ViewBtn val="mpg"       label="Industry MPG" />
             </div>
@@ -8127,20 +8223,26 @@ function PublicExplorerPage() {
             </div>
           )}
 
-          {/* ── Landscape Scatter ── */}
+          {/* ── Technology Trends (landscape scatter) ── */}
           {view === 'landscape' && (() => {
-            const { byCat = {}, maxYr, priorYr } = scatterData;
+            const { maxYr, sliderYears = [], balancedByYear = {}, balancedCount = 0 } = scatterData;
+            const activeYear = sliderYears.includes(scatterYear) ? scatterYear : maxYr;
+            const priorYr = activeYear - 1;
+            const byCat = balancedByYear[activeYear] || {};
             const catList = Object.keys(byCat).sort();
             const visibleByCat = landscapeCat ? { [landscapeCat]: byCat[landscapeCat] || [] } : byCat;
             const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
             const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
             const yDomain = [-maxAbsDelta, maxAbsDelta];
+            const minYear = sliderYears[0] ?? activeYear;
             return (
               <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Landscape</div>
-                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.</div>
+                    <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Trends</div>
+                    <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
+                      {haulLabel} · {activeYear} adoption vs. change from {priorYr} · {balancedCount} technologies (balanced panel)
+                    </div>
                   </div>
                   <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                     <button onClick={() => setShowLabels(v => !v)} style={{
@@ -8151,12 +8253,27 @@ function PublicExplorerPage() {
                     }}>Labels</button>
                     <DownloadBar
                       csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
-                        pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
+                        pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${activeYear}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
                       ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
-                      csvName={`landscape_${maxYr}`} pngName={`landscape_${maxYr}`}
+                      csvName={`trends_${activeYear}`} pngName={`trends_${activeYear}`}
                     />
                   </div>
                 </div>
+                {/* Year slider */}
+                {sliderYears.length > 1 && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 10px' }}>
+                    <button onClick={() => { if (playing) { setPlaying(false); } else { if (activeYear >= maxYr) setScatterYear(minYear); setPlaying(true); } }}
+                      style={{ padding: '3px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 5, border: '1px solid #D1D5DB', background: '#F9FAFB', minWidth: 52 }}>
+                      {playing ? '⏸ Pause' : '▶ Play'}
+                    </button>
+                    <input type="range" min={minYear} max={maxYr} step={1}
+                      value={activeYear}
+                      onChange={e => { setPlaying(false); setScatterYear(Number(e.target.value)); }}
+                      style={{ flex: 1, accentColor: '#1c3660' }} />
+                    <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', minWidth: 36, textAlign: 'right' }}>{activeYear}</span>
+                  </div>
+                )}
+                {/* Category filter */}
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                   <button onClick={() => setLandscapeCat(null)} style={{
                     padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
@@ -8187,7 +8304,7 @@ function PublicExplorerPage() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                     <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
                       tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                      label={{ value: `${maxYr} Adoption`, position: 'insideBottom', offset: -12, fontSize: 11, fill: '#6B7280' }} />
+                      label={{ value: `${activeYear} Adoption`, position: 'insideBottom', offset: -12, fontSize: 11, fill: '#6B7280' }} />
                     <YAxis type="number" dataKey="y" name="Change (pp)" domain={yDomain}
                       tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                       label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
