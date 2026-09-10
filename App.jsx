@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from 'xlsx';
 
-import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine } from "recharts";
+import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine, Customized } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -4438,26 +4438,24 @@ function AdminExplorerPage({ token }) {
           const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
           const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
           const yDomain = [-maxAbsDelta, maxAbsDelta];
-          const QuadrantLabels = ({ viewBox }) => {
-            if (!viewBox) return null;
-            const { x, y, width, height } = viewBox;
-            // x=50 is always midpoint of [0,100] domain
-            const xMid = x + width * 0.5;
-            // y=0 position within the plot area (SVG y increases downward)
-            const [yMin, yMax] = yDomain;
-            const yMid = y + height * (1 - (0 - yMin) / (yMax - yMin));
+          const QuadrantBg = ({ xAxisMap, yAxisMap, offset }) => {
+            const xScale = xAxisMap && Object.values(xAxisMap)[0]?.scale;
+            const yScale = yAxisMap && Object.values(yAxisMap)[0]?.scale;
+            if (!xScale || !yScale || !offset) return null;
+            const L = offset.left, T = offset.top, R = L + offset.width, B = T + offset.height;
+            const xMid = xScale(50), yZero = yScale(0);
             const quads = [
-              { label: 'Rising',     fill: '#16a34a', tx: (x + xMid) / 2,          ty: (y + yMid) / 2,              rx: x,    ry: y,    rw: xMid - x,            rh: yMid - y },
-              { label: 'Mainstream', fill: '#2563EB', tx: (xMid + x + width) / 2,  ty: (y + yMid) / 2,              rx: xMid, ry: y,    rw: x + width - xMid,    rh: yMid - y },
-              { label: 'Fading',     fill: '#9CA3AF', tx: (x + xMid) / 2,          ty: (yMid + y + height) / 2,     rx: x,    ry: yMid, rw: xMid - x,            rh: y + height - yMid },
-              { label: 'Declining',  fill: '#DC2626', tx: (xMid + x + width) / 2,  ty: (yMid + y + height) / 2,     rx: xMid, ry: yMid, rw: x + width - xMid,    rh: y + height - yMid },
+              { label: 'Rising',     fill: '#16a34a', x: L,     y: T,     w: xMid - L, h: yZero - T },
+              { label: 'Mainstream', fill: '#2563EB', x: xMid,  y: T,     w: R - xMid, h: yZero - T },
+              { label: 'Fading',     fill: '#9CA3AF', x: L,     y: yZero, w: xMid - L, h: B - yZero },
+              { label: 'Declining',  fill: '#DC2626', x: xMid,  y: yZero, w: R - xMid, h: B - yZero },
             ];
             return (
               <g style={{ pointerEvents: 'none' }}>
-                {quads.map(({ label, fill, tx, ty, rx, ry, rw, rh }) => (
+                {quads.map(({ label, fill, x, y, w, h }) => (
                   <g key={label}>
-                    <rect x={rx} y={ry} width={rw} height={rh} fill={fill} fillOpacity={0.05} />
-                    <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
+                    <rect x={x} y={y} width={w} height={h} fill={fill} fillOpacity={0.06} />
+                    <text x={x + w / 2} y={y + h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
                   </g>
                 ))}
               </g>
@@ -4524,8 +4522,9 @@ function AdminExplorerPage({ token }) {
                     tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
                   <ZAxis range={[40, 40]} />
+                  <Customized component={QuadrantBg} />
                   <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
-                  <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} label={<QuadrantLabels />} />
+                  <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} />
                   <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                   {Object.entries(visibleByCat).map(([cat, pts]) => (
                     <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
@@ -8105,24 +8104,24 @@ function PublicExplorerPage() {
             const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
             const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
             const yDomain = [-maxAbsDelta, maxAbsDelta];
-            const QuadrantLabels = ({ viewBox }) => {
-              if (!viewBox) return null;
-              const { x, y, width, height } = viewBox;
-              const xMid = x + width * 0.5;
-              const [yMin, yMax] = yDomain;
-              const yMid = y + height * (1 - (0 - yMin) / (yMax - yMin));
+            const QuadrantBg = ({ xAxisMap, yAxisMap, offset }) => {
+              const xScale = xAxisMap && Object.values(xAxisMap)[0]?.scale;
+              const yScale = yAxisMap && Object.values(yAxisMap)[0]?.scale;
+              if (!xScale || !yScale || !offset) return null;
+              const L = offset.left, T = offset.top, R = L + offset.width, B = T + offset.height;
+              const xMid = xScale(50), yZero = yScale(0);
               const quads = [
-                { label: 'Rising',     fill: '#16a34a', tx: (x + xMid) / 2,          ty: (y + yMid) / 2,          rx: x,    ry: y,    rw: xMid - x,          rh: yMid - y },
-                { label: 'Mainstream', fill: '#2563EB', tx: (xMid + x + width) / 2,  ty: (y + yMid) / 2,          rx: xMid, ry: y,    rw: x + width - xMid,  rh: yMid - y },
-                { label: 'Fading',     fill: '#9CA3AF', tx: (x + xMid) / 2,          ty: (yMid + y + height) / 2, rx: x,    ry: yMid, rw: xMid - x,          rh: y + height - yMid },
-                { label: 'Declining',  fill: '#DC2626', tx: (xMid + x + width) / 2,  ty: (yMid + y + height) / 2, rx: xMid, ry: yMid, rw: x + width - xMid,  rh: y + height - yMid },
+                { label: 'Rising',     fill: '#16a34a', x: L,    y: T,     w: xMid - L, h: yZero - T },
+                { label: 'Mainstream', fill: '#2563EB', x: xMid, y: T,     w: R - xMid, h: yZero - T },
+                { label: 'Fading',     fill: '#9CA3AF', x: L,    y: yZero, w: xMid - L, h: B - yZero },
+                { label: 'Declining',  fill: '#DC2626', x: xMid, y: yZero, w: R - xMid, h: B - yZero },
               ];
               return (
                 <g style={{ pointerEvents: 'none' }}>
-                  {quads.map(({ label, fill, tx, ty, rx, ry, rw, rh }) => (
+                  {quads.map(({ label, fill, x, y, w, h }) => (
                     <g key={label}>
-                      <rect x={rx} y={ry} width={rw} height={rh} fill={fill} fillOpacity={0.05} />
-                      <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
+                      <rect x={x} y={y} width={w} height={h} fill={fill} fillOpacity={0.06} />
+                      <text x={x + w / 2} y={y + h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
                     </g>
                   ))}
                 </g>
@@ -8185,8 +8184,9 @@ function PublicExplorerPage() {
                       tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                       label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
                     <ZAxis range={[40, 40]} />
+                    <Customized component={QuadrantBg} />
                     <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
-                    <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} label={<QuadrantLabels />} />
+                    <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} />
                     <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                     {Object.entries(visibleByCat).map(([cat, pts]) => (
                       <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
