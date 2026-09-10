@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import * as XLSX from 'xlsx';
 
-import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine, Customized } from "recharts";
+import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine, ReferenceArea } from "recharts";
 
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
@@ -4238,6 +4238,12 @@ function AdminExplorerPage({ token }) {
     <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
       <DlBtn onClick={() => dlCsv(csvRows, csvName)}>↓ CSV</DlBtn>
       <DlBtn onClick={() => dlPng(pngName)}>↓ PNG</DlBtn>
+      <DlBtn onClick={() => chartRef.current?.requestFullscreen?.()}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="15,3 21,3 21,9"/><polyline points="9,21 3,21 3,15"/>
+          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+      </DlBtn>
     </div>
   );
 
@@ -4438,29 +4444,6 @@ function AdminExplorerPage({ token }) {
           const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
           const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
           const yDomain = [-maxAbsDelta, maxAbsDelta];
-          const QuadrantBg = ({ xAxisMap, yAxisMap, offset }) => {
-            const xScale = xAxisMap && Object.values(xAxisMap)[0]?.scale;
-            const yScale = yAxisMap && Object.values(yAxisMap)[0]?.scale;
-            if (!xScale || !yScale || !offset) return null;
-            const L = offset.left, T = offset.top, R = L + offset.width, B = T + offset.height;
-            const xMid = xScale(50), yZero = yScale(0);
-            const quads = [
-              { label: 'Rising',     fill: '#16a34a', x: L,     y: T,     w: xMid - L, h: yZero - T },
-              { label: 'Mainstream', fill: '#2563EB', x: xMid,  y: T,     w: R - xMid, h: yZero - T },
-              { label: 'Fading',     fill: '#9CA3AF', x: L,     y: yZero, w: xMid - L, h: B - yZero },
-              { label: 'Declining',  fill: '#DC2626', x: xMid,  y: yZero, w: R - xMid, h: B - yZero },
-            ];
-            return (
-              <g style={{ pointerEvents: 'none' }}>
-                {quads.map(({ label, fill, x, y, w, h }) => (
-                  <g key={label}>
-                    <rect x={x} y={y} width={w} height={h} fill={fill} fillOpacity={0.06} />
-                    <text x={x + w / 2} y={y + h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
-                  </g>
-                ))}
-              </g>
-            );
-          };
           return (
             <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
@@ -4522,7 +4505,10 @@ function AdminExplorerPage({ token }) {
                     tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                     label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
                   <ZAxis range={[40, 40]} />
-                  <Customized component={QuadrantBg} />
+                  <ReferenceArea x1={0}  x2={50}  y1={0}           y2={maxAbsDelta}  fill="#16a34a" fillOpacity={0.05} label={{ value: 'Rising',     position: 'center', fill: '#16a34a', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
+                  <ReferenceArea x1={50} x2={100} y1={0}           y2={maxAbsDelta}  fill="#2563EB" fillOpacity={0.05} label={{ value: 'Mainstream', position: 'center', fill: '#2563EB', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
+                  <ReferenceArea x1={0}  x2={50}  y1={-maxAbsDelta} y2={0}           fill="#9CA3AF" fillOpacity={0.05} label={{ value: 'Fading',     position: 'center', fill: '#9CA3AF', fontSize: 13, fontWeight: 700, opacity: 0.55 }} />
+                  <ReferenceArea x1={50} x2={100} y1={-maxAbsDelta} y2={0}           fill="#DC2626" fillOpacity={0.05} label={{ value: 'Declining',  position: 'center', fill: '#DC2626', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
                   <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
                   <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} />
                   <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
@@ -7915,6 +7901,12 @@ function PublicExplorerPage() {
     <div style={{ display: 'flex', gap: 5, flexShrink: 0 }}>
       <DlBtn onClick={() => dlCsv(csvRows, csvName)}>↓ CSV</DlBtn>
       <DlBtn onClick={() => dlPng(pngName)}>↓ PNG</DlBtn>
+      <DlBtn onClick={() => chartRef.current?.requestFullscreen?.()}>
+        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+          <polyline points="15,3 21,3 21,9"/><polyline points="9,21 3,21 3,15"/>
+          <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+        </svg>
+      </DlBtn>
     </div>
   );
 
@@ -8104,29 +8096,6 @@ function PublicExplorerPage() {
             const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
             const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
             const yDomain = [-maxAbsDelta, maxAbsDelta];
-            const QuadrantBg = ({ xAxisMap, yAxisMap, offset }) => {
-              const xScale = xAxisMap && Object.values(xAxisMap)[0]?.scale;
-              const yScale = yAxisMap && Object.values(yAxisMap)[0]?.scale;
-              if (!xScale || !yScale || !offset) return null;
-              const L = offset.left, T = offset.top, R = L + offset.width, B = T + offset.height;
-              const xMid = xScale(50), yZero = yScale(0);
-              const quads = [
-                { label: 'Rising',     fill: '#16a34a', x: L,    y: T,     w: xMid - L, h: yZero - T },
-                { label: 'Mainstream', fill: '#2563EB', x: xMid, y: T,     w: R - xMid, h: yZero - T },
-                { label: 'Fading',     fill: '#9CA3AF', x: L,    y: yZero, w: xMid - L, h: B - yZero },
-                { label: 'Declining',  fill: '#DC2626', x: xMid, y: yZero, w: R - xMid, h: B - yZero },
-              ];
-              return (
-                <g style={{ pointerEvents: 'none' }}>
-                  {quads.map(({ label, fill, x, y, w, h }) => (
-                    <g key={label}>
-                      <rect x={x} y={y} width={w} height={h} fill={fill} fillOpacity={0.06} />
-                      <text x={x + w / 2} y={y + h / 2} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
-                    </g>
-                  ))}
-                </g>
-              );
-            };
             return (
               <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
@@ -8184,7 +8153,10 @@ function PublicExplorerPage() {
                       tickFormatter={v => `${v > 0 ? '+' : ''}${v}pp`} stroke="#9CA3AF" tick={{ fontSize: 10 }}
                       label={{ value: `Change vs ${priorYr} (pp)`, angle: -90, position: 'insideLeft', offset: 12, fontSize: 11, fill: '#6B7280' }} />
                     <ZAxis range={[40, 40]} />
-                    <Customized component={QuadrantBg} />
+                    <ReferenceArea x1={0}  x2={50}  y1={0}            y2={maxAbsDelta}  fill="#16a34a" fillOpacity={0.05} label={{ value: 'Rising',     position: 'center', fill: '#16a34a', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
+                    <ReferenceArea x1={50} x2={100} y1={0}            y2={maxAbsDelta}  fill="#2563EB" fillOpacity={0.05} label={{ value: 'Mainstream', position: 'center', fill: '#2563EB', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
+                    <ReferenceArea x1={0}  x2={50}  y1={-maxAbsDelta} y2={0}            fill="#9CA3AF" fillOpacity={0.05} label={{ value: 'Fading',     position: 'center', fill: '#9CA3AF', fontSize: 13, fontWeight: 700, opacity: 0.55 }} />
+                    <ReferenceArea x1={50} x2={100} y1={-maxAbsDelta} y2={0}            fill="#DC2626" fillOpacity={0.05} label={{ value: 'Declining',  position: 'center', fill: '#DC2626', fontSize: 13, fontWeight: 700, opacity: 0.45 }} />
                     <ReferenceLine x={50} stroke="#E5E7EB" strokeDasharray="4 4" />
                     <ReferenceLine y={0} stroke="#9CA3AF" strokeWidth={1.5} />
                     <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
