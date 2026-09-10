@@ -4438,17 +4438,28 @@ function AdminExplorerPage({ token }) {
           const allDeltas = Object.values(byCat).flat().map(d => Math.abs(d.y)).filter(v => v > 0);
           const maxAbsDelta = allDeltas.length ? Math.ceil(Math.max(...allDeltas) / 5) * 5 : 20;
           const yDomain = [-maxAbsDelta, maxAbsDelta];
-          // Custom label component: renders all 4 quadrant labels inside the chart area
           const QuadrantLabels = ({ viewBox }) => {
             if (!viewBox) return null;
-            const { x, y, width } = viewBox;
-            const pad = 6;
+            const { x, y, width, height } = viewBox;
+            // x=50 is always midpoint of [0,100] domain
+            const xMid = x + width * 0.5;
+            // y=0 position within the plot area (SVG y increases downward)
+            const [yMin, yMax] = yDomain;
+            const yMid = y + height * (1 - (0 - yMin) / (yMax - yMin));
+            const quads = [
+              { label: 'Rising',     fill: '#16a34a', tx: (x + xMid) / 2,          ty: (y + yMid) / 2,              rx: x,    ry: y,    rw: xMid - x,            rh: yMid - y },
+              { label: 'Mainstream', fill: '#2563EB', tx: (xMid + x + width) / 2,  ty: (y + yMid) / 2,              rx: xMid, ry: y,    rw: x + width - xMid,    rh: yMid - y },
+              { label: 'Fading',     fill: '#9CA3AF', tx: (x + xMid) / 2,          ty: (yMid + y + height) / 2,     rx: x,    ry: yMid, rw: xMid - x,            rh: y + height - yMid },
+              { label: 'Declining',  fill: '#DC2626', tx: (xMid + x + width) / 2,  ty: (yMid + y + height) / 2,     rx: xMid, ry: yMid, rw: x + width - xMid,    rh: y + height - yMid },
+            ];
             return (
               <g style={{ pointerEvents: 'none' }}>
-                <text x={x + pad} y={y - pad} fill="#16a34a" fontSize={11} fontWeight={700} opacity={0.55} dominantBaseline="auto">Rising</text>
-                <text x={x + width - pad} y={y - pad} fill="#2563EB" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="auto">Mainstream</text>
-                <text x={x + pad} y={y + pad} fill="#9CA3AF" fontSize={11} fontWeight={700} opacity={0.7} dominantBaseline="hanging">Fading</text>
-                <text x={x + width - pad} y={y + pad} fill="#DC2626" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="hanging">Declining</text>
+                {quads.map(({ label, fill, tx, ty, rx, ry, rw, rh }) => (
+                  <g key={label}>
+                    <rect x={rx} y={ry} width={rw} height={rh} fill={fill} fillOpacity={0.05} />
+                    <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
+                  </g>
+                ))}
               </g>
             );
           };
@@ -4467,7 +4478,7 @@ function AdminExplorerPage({ token }) {
                     borderColor: showLabels ? '#374151' : '#D1D5DB',
                     background:  showLabels ? '#374151' : '#F9FAFB',
                     color:       showLabels ? '#fff'    : '#374151',
-                  }}>Labels {showLabels ? 'on' : 'off'}</button>
+                  }}>Labels</button>
                   <DownloadBar
                     csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
                       pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
@@ -4477,7 +4488,7 @@ function AdminExplorerPage({ token }) {
                   />
                 </div>
               </div>
-              {/* Category filter */}
+              {/* Category filter — color dot doubles as legend swatch */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                 <button onClick={() => setLandscapeCat(null)} style={{
                   padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
@@ -4486,17 +4497,23 @@ function AdminExplorerPage({ token }) {
                   color:       landscapeCat === null ? '#fff'    : '#374151',
                   fontWeight:  landscapeCat === null ? 600       : 400,
                 }}>All</button>
-                {catList.map(cat => (
-                  <button key={cat} onClick={() => setLandscapeCat(landscapeCat === cat ? null : cat)} style={{
-                    padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
-                    borderColor: landscapeCat === cat ? catColors[cat] : '#D1D5DB',
-                    background:  landscapeCat === cat ? catColors[cat] : '#F9FAFB',
-                    color:       landscapeCat === cat ? '#fff'          : '#374151',
-                    fontWeight:  landscapeCat === cat ? 600             : 400,
-                  }}>{cat}</button>
-                ))}
+                {catList.map(cat => {
+                  const active = landscapeCat === cat;
+                  return (
+                    <button key={cat} onClick={() => setLandscapeCat(active ? null : cat)} style={{
+                      display: 'flex', alignItems: 'center', gap: 5,
+                      padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                      borderColor: active ? catColors[cat] : '#D1D5DB',
+                      background:  active ? catColors[cat] : '#F9FAFB',
+                      color:       active ? '#fff'          : '#374151',
+                      fontWeight:  active ? 600             : 400,
+                    }}>
+                      {!active && <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: catColors[cat], flexShrink: 0 }} />}
+                      {cat}
+                    </button>
+                  );
+                })}
               </div>
-              <MiniLegend items={catList.map(c => [c, catColors[c]])} />
               <ResponsiveContainer width="100%" height={420}>
                 <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
@@ -8090,14 +8107,24 @@ function PublicExplorerPage() {
             const yDomain = [-maxAbsDelta, maxAbsDelta];
             const QuadrantLabels = ({ viewBox }) => {
               if (!viewBox) return null;
-              const { x, y, width } = viewBox;
-              const pad = 6;
+              const { x, y, width, height } = viewBox;
+              const xMid = x + width * 0.5;
+              const [yMin, yMax] = yDomain;
+              const yMid = y + height * (1 - (0 - yMin) / (yMax - yMin));
+              const quads = [
+                { label: 'Rising',     fill: '#16a34a', tx: (x + xMid) / 2,          ty: (y + yMid) / 2,          rx: x,    ry: y,    rw: xMid - x,          rh: yMid - y },
+                { label: 'Mainstream', fill: '#2563EB', tx: (xMid + x + width) / 2,  ty: (y + yMid) / 2,          rx: xMid, ry: y,    rw: x + width - xMid,  rh: yMid - y },
+                { label: 'Fading',     fill: '#9CA3AF', tx: (x + xMid) / 2,          ty: (yMid + y + height) / 2, rx: x,    ry: yMid, rw: xMid - x,          rh: y + height - yMid },
+                { label: 'Declining',  fill: '#DC2626', tx: (xMid + x + width) / 2,  ty: (yMid + y + height) / 2, rx: xMid, ry: yMid, rw: x + width - xMid,  rh: y + height - yMid },
+              ];
               return (
                 <g style={{ pointerEvents: 'none' }}>
-                  <text x={x + pad} y={y - pad} fill="#16a34a" fontSize={11} fontWeight={700} opacity={0.55} dominantBaseline="auto">Rising</text>
-                  <text x={x + width - pad} y={y - pad} fill="#2563EB" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="auto">Mainstream</text>
-                  <text x={x + pad} y={y + pad} fill="#9CA3AF" fontSize={11} fontWeight={700} opacity={0.7} dominantBaseline="hanging">Fading</text>
-                  <text x={x + width - pad} y={y + pad} fill="#DC2626" fontSize={11} fontWeight={700} opacity={0.55} textAnchor="end" dominantBaseline="hanging">Declining</text>
+                  {quads.map(({ label, fill, tx, ty, rx, ry, rw, rh }) => (
+                    <g key={label}>
+                      <rect x={rx} y={ry} width={rw} height={rh} fill={fill} fillOpacity={0.05} />
+                      <text x={tx} y={ty} textAnchor="middle" dominantBaseline="middle" fontSize={13} fontWeight={700} fill={fill} fillOpacity={0.45}>{label}</text>
+                    </g>
+                  ))}
                 </g>
               );
             };
@@ -8114,7 +8141,7 @@ function PublicExplorerPage() {
                       borderColor: showLabels ? '#374151' : '#D1D5DB',
                       background:  showLabels ? '#374151' : '#F9FAFB',
                       color:       showLabels ? '#fff'    : '#374151',
-                    }}>Labels {showLabels ? 'on' : 'off'}</button>
+                    }}>Labels</button>
                     <DownloadBar
                       csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
                         pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
@@ -8131,17 +8158,23 @@ function PublicExplorerPage() {
                     color:       landscapeCat === null ? '#fff'    : '#374151',
                     fontWeight:  landscapeCat === null ? 600       : 400,
                   }}>All</button>
-                  {catList.map(cat => (
-                    <button key={cat} onClick={() => setLandscapeCat(landscapeCat === cat ? null : cat)} style={{
-                      padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
-                      borderColor: landscapeCat === cat ? catColors[cat] : '#D1D5DB',
-                      background:  landscapeCat === cat ? catColors[cat] : '#F9FAFB',
-                      color:       landscapeCat === cat ? '#fff'          : '#374151',
-                      fontWeight:  landscapeCat === cat ? 600             : 400,
-                    }}>{cat}</button>
-                  ))}
+                  {catList.map(cat => {
+                    const active = landscapeCat === cat;
+                    return (
+                      <button key={cat} onClick={() => setLandscapeCat(active ? null : cat)} style={{
+                        display: 'flex', alignItems: 'center', gap: 5,
+                        padding: '3px 10px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                        borderColor: active ? catColors[cat] : '#D1D5DB',
+                        background:  active ? catColors[cat] : '#F9FAFB',
+                        color:       active ? '#fff'          : '#374151',
+                        fontWeight:  active ? 600             : 400,
+                      }}>
+                        {!active && <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%', background: catColors[cat], flexShrink: 0 }} />}
+                        {cat}
+                      </button>
+                    );
+                  })}
                 </div>
-                <MiniLegend items={catList.map(c => [c, catColors[c]])} />
                 <ResponsiveContainer width="100%" height={420}>
                   <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
