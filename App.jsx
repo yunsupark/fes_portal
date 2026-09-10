@@ -4187,12 +4187,13 @@ function AdminExplorerPage({ token }) {
     let balancedStart = maxYr;
     for (let i = validYears.length - 2; i >= 0; i--) {
       const y = validYears[i];
+      if (y < 2012) break;
       const here = new Set(Object.values(allByYear[y] || {}).flat().map(d => d.technology));
       const next = new Set([...balancedNames].filter(t => here.has(t)));
       if (next.size < 5) break;
       balancedNames = next; balancedStart = y;
     }
-    const sliderYears = validYears.filter(y => y >= balancedStart);
+    const sliderYears = validYears.filter(y => y >= Math.max(balancedStart, 2012));
     // Balanced byYear (only common techs)
     const balancedByYear = {};
     sliderYears.forEach(y => {
@@ -7938,12 +7939,13 @@ function PublicExplorerPage() {
     let balancedStart = maxYr;
     for (let i = validYears.length - 2; i >= 0; i--) {
       const y = validYears[i];
+      if (y < 2012) break;
       const here = new Set(Object.values(allByYear[y] || {}).flat().map(d => d.technology));
       const next = new Set([...balancedNames].filter(t => here.has(t)));
       if (next.size < 5) break;
       balancedNames = next; balancedStart = y;
     }
-    const sliderYears = validYears.filter(y => y >= balancedStart);
+    const sliderYears = validYears.filter(y => y >= Math.max(balancedStart, 2012));
     const balancedByYear = {};
     sliderYears.forEach(y => {
       const byCat = {};
