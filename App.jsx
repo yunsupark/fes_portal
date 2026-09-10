@@ -7769,20 +7769,6 @@ function PublicExplorerPage() {
 
   const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.50)) : normal;
 
-  useEffect(() => {
-    if (!playing) return;
-    const { sliderYears = [], maxYr } = scatterData;
-    const id = setInterval(() => {
-      setScatterYear(prev => {
-        const cur = prev ?? maxYr;
-        const idx = sliderYears.indexOf(cur);
-        if (idx < 0 || idx >= sliderYears.length - 1) { setPlaying(false); return cur; }
-        return sliderYears[idx + 1];
-      });
-    }, 900);
-    return () => clearInterval(id);
-  }, [playing, scatterData]);
-
   // Fetch from the public snapshot endpoint — no auth
   const loadData = () => {
     setLoading(true); setFetchError(null);
@@ -7921,6 +7907,20 @@ function PublicExplorerPage() {
     });
     return { maxYr, sliderYears, balancedByYear, balancedCount: balancedNames.size };
   }, [data, pctKey]);
+
+  useEffect(() => {
+    if (!playing) return;
+    const { sliderYears = [], maxYr } = scatterData;
+    const id = setInterval(() => {
+      setScatterYear(prev => {
+        const cur = prev ?? maxYr;
+        const idx = sliderYears.indexOf(cur);
+        if (idx < 0 || idx >= sliderYears.length - 1) { setPlaying(false); return cur; }
+        return sliderYears[idx + 1];
+      });
+    }, 900);
+    return () => clearInterval(id);
+  }, [playing, scatterData]);
 
   const mpgChartData = useMemo(() => {
     if (!data?.mpgRows) return [];
