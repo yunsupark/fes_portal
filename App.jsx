@@ -4248,13 +4248,16 @@ function AdminExplorerPage({ token }) {
   );
 
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-    else document.exitFullscreen?.();
+    if (document.fullscreenEnabled) {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    } else {
+      setIsFullscreen(v => !v);
+    }
   };
 
   const pubDate = data?.published_at ? new Date(data.published_at).toLocaleString() : 'Never published';
-  // When fullscreen, grow charts to ~75% of viewport height (floor at normal height)
-  const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.75)) : normal;
+  const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.50)) : normal;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -7681,18 +7684,29 @@ function PublicExplorerPage() {
   const [techSearch,   setTechSearch]   = useState('');
   const [landscapeCat, setLandscapeCat] = useState(null);
   const [showLabels,   setShowLabels]   = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [nativeFs, setNativeFs]     = useState(false);
+  const [fakeFs,   setFakeFs]       = useState(false);
+  const isFullscreen = nativeFs || fakeFs;
   useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
+    const handler = () => setNativeFs(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
+  useEffect(() => {
+    // Prevent background scroll when using fake fullscreen on mobile
+    document.body.style.overflow = fakeFs ? 'hidden' : '';
+    return () => { document.body.style.overflow = ''; };
+  }, [fakeFs]);
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
-    else document.exitFullscreen?.();
+    if (document.fullscreenEnabled) {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    } else {
+      setFakeFs(v => !v);
+    }
   };
 
-  const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.75)) : normal;
+  const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.50)) : normal;
 
   // Fetch from the public snapshot endpoint — no auth
   const loadData = () => {
@@ -7930,7 +7944,7 @@ function PublicExplorerPage() {
   );
 
   return (
-    <div ref={containerRef} style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', background: '#F9FAFB', minHeight: '100vh' }}>
+    <div ref={containerRef} style={{ fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', background: '#F9FAFB', minHeight: '100vh', ...(fakeFs ? { position: 'fixed', inset: 0, zIndex: 9999, overflowY: 'auto' } : {}) }}>
 
       {/* Minimal NACFE header */}
       <div style={{ background: '#1c3660', padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
