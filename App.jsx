@@ -3989,6 +3989,7 @@ function AdminExplorerPage({ token }) {
   const [selectedTechs, setSelectedTechs] = useState([]);
   const [techSearch,   setTechSearch]   = useState('');
   const [landscapeCat, setLandscapeCat] = useState(null); // null = all categories
+  const [showLabels,   setShowLabels]   = useState(false);
   const chartRef = useRef(null);
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -4460,13 +4461,21 @@ function AdminExplorerPage({ token }) {
                     {haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.
                   </div>
                 </div>
-                <DownloadBar
-                  csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
-                    pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
-                  ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
-                  csvName={`landscape_${maxYr}`}
-                  pngName={`landscape_${maxYr}`}
-                />
+                <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                  <button onClick={() => setShowLabels(v => !v)} style={{
+                    padding: '3px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                    borderColor: showLabels ? '#374151' : '#D1D5DB',
+                    background:  showLabels ? '#374151' : '#F9FAFB',
+                    color:       showLabels ? '#fff'    : '#374151',
+                  }}>Labels {showLabels ? 'on' : 'off'}</button>
+                  <DownloadBar
+                    csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
+                      pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
+                    ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
+                    csvName={`landscape_${maxYr}`}
+                    pngName={`landscape_${maxYr}`}
+                  />
+                </div>
               </div>
               {/* Category filter */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
@@ -4506,10 +4515,12 @@ function AdminExplorerPage({ token }) {
                       shape={({ cx, cy, fill, payload }) => (
                         <g key={payload.technology}>
                           <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
-                          <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
-                            style={{ pointerEvents: 'none', userSelect: 'none' }}>
-                            {payload.technology}
-                          </text>
+                          {showLabels && (
+                            <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
+                              style={{ pointerEvents: 'none', userSelect: 'none' }}>
+                              {payload.technology}
+                            </text>
+                          )}
                         </g>
                       )}
                     />
@@ -7654,6 +7665,7 @@ function PublicExplorerPage() {
   const [selectedTechs, setSelectedTechs] = useState([]);
   const [techSearch,   setTechSearch]   = useState('');
   const [landscapeCat, setLandscapeCat] = useState(null);
+  const [showLabels,   setShowLabels]   = useState(false);
 
   // Fetch from the public snapshot endpoint — no auth
   const loadData = () => {
@@ -8096,12 +8108,20 @@ function PublicExplorerPage() {
                     <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>Technology Landscape</div>
                     <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · {maxYr} adoption vs. change from {priorYr}. Each dot is one technology — hover for details.</div>
                   </div>
-                  <DownloadBar
-                    csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
-                      pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
-                    ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
-                    csvName={`landscape_${maxYr}`} pngName={`landscape_${maxYr}`}
-                  />
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    <button onClick={() => setShowLabels(v => !v)} style={{
+                      padding: '3px 9px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid',
+                      borderColor: showLabels ? '#374151' : '#D1D5DB',
+                      background:  showLabels ? '#374151' : '#F9FAFB',
+                      color:       showLabels ? '#fff'    : '#374151',
+                    }}>Labels {showLabels ? 'on' : 'off'}</button>
+                    <DownloadBar
+                      csvRows={Object.entries(visibleByCat).flatMap(([cat, pts]) =>
+                        pts.map(p => ({ technology: p.technology, category: cat, [`adoption_${maxYr}_pct`]: p.x?.toFixed(1), [`change_vs_${priorYr}_pp`]: p.y }))
+                      ).sort((a, b) => a.category.localeCompare(b.category) || a.technology.localeCompare(b.technology))}
+                      csvName={`landscape_${maxYr}`} pngName={`landscape_${maxYr}`}
+                    />
+                  </div>
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                   <button onClick={() => setLandscapeCat(null)} style={{
@@ -8140,8 +8160,10 @@ function PublicExplorerPage() {
                         shape={({ cx, cy, fill, payload }) => (
                           <g key={payload.technology}>
                             <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
-                            <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
-                              style={{ pointerEvents: 'none', userSelect: 'none' }}>{payload.technology}</text>
+                            {showLabels && (
+                              <text x={cx} y={cy - 9} textAnchor="middle" fontSize={8} fill="#374151"
+                                style={{ pointerEvents: 'none', userSelect: 'none' }}>{payload.technology}</text>
+                            )}
                           </g>
                         )}
                       />
