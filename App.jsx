@@ -4253,6 +4253,8 @@ function AdminExplorerPage({ token }) {
   };
 
   const pubDate = data?.published_at ? new Date(data.published_at).toLocaleString() : 'Never published';
+  // When fullscreen, grow charts to ~75% of viewport height (floor at normal height)
+  const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.75)) : normal;
 
   // ── Render ───────────────────────────────────────────────────────────────────
 
@@ -4339,7 +4341,7 @@ function AdminExplorerPage({ token }) {
               />
             </div>
             <MiniLegend items={chartData.techs.map((t, i) => [t, CC[i % CC.length]])} />
-            <ResponsiveContainer width="100%" height={320}>
+            <ResponsiveContainer width="100%" height={chartH(320)}>
               <LineChart data={chartData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                 <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
@@ -4428,7 +4430,7 @@ function AdminExplorerPage({ token }) {
                       const info = allTechs.find(t => t.tech_id === id);
                       return [info?.technology || String(id), CC[id % CC.length]];
                     })} />
-                    <ResponsiveContainer width="100%" height={380}>
+                    <ResponsiveContainer width="100%" height={chartH(380)}>
                       <LineChart data={compareData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                         <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                         <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
@@ -4506,7 +4508,7 @@ function AdminExplorerPage({ token }) {
                   );
                 })}
               </div>
-              <ResponsiveContainer width="100%" height={420}>
+              <ResponsiveContainer width="100%" height={chartH(420)}>
                 <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                   <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
@@ -4561,7 +4563,7 @@ function AdminExplorerPage({ token }) {
               />
             </div>
             <MiniLegend items={categories.map(c => [c, catColors[c]])} />
-            <ResponsiveContainer width="100%" height={400}>
+            <ResponsiveContainer width="100%" height={chartH(400)}>
               <LineChart data={allTechsData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                 <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
@@ -4606,7 +4608,7 @@ function AdminExplorerPage({ token }) {
               <DownloadBar csvRows={mpgChartData} csvName="industry_mpg" pngName="industry_mpg" />
             </div>
             <MiniLegend items={[['Line Haul', '#1f77b4'], ['Regional Haul', '#ff7f0e']]} />
-            <ResponsiveContainer width="100%" height={320}>
+            <ResponsiveContainer width="100%" height={chartH(320)}>
               <LineChart data={mpgChartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                 <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
@@ -7690,6 +7692,8 @@ function PublicExplorerPage() {
     else document.exitFullscreen?.();
   };
 
+  const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.75)) : normal;
+
   // Fetch from the public snapshot endpoint — no auth
   const loadData = () => {
     setLoading(true); setFetchError(null);
@@ -8011,7 +8015,7 @@ function PublicExplorerPage() {
                 />
               </div>
               <MiniLegend items={chartData.techs.map((t, i) => [t, CC[i % CC.length]])} />
-              <ResponsiveContainer width="100%" height={320}>
+              <ResponsiveContainer width="100%" height={chartH(320)}>
                 <LineChart data={chartData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
@@ -8091,7 +8095,7 @@ function PublicExplorerPage() {
                         const info = allTechs.find(t => t.tech_id === id);
                         return [info?.technology || String(id), CC[id % CC.length]];
                       })} />
-                      <ResponsiveContainer width="100%" height={360}>
+                      <ResponsiveContainer width="100%" height={chartH(360)}>
                         <LineChart data={compareData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                           <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                           <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
@@ -8164,7 +8168,7 @@ function PublicExplorerPage() {
                     );
                   })}
                 </div>
-                <ResponsiveContainer width="100%" height={420}>
+                <ResponsiveContainer width="100%" height={chartH(420)}>
                   <ScatterChart margin={{ top: 8, right: 16, left: 8, bottom: 20 }}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                     <XAxis type="number" dataKey="x" name="Adoption" domain={[0, 100]}
@@ -8214,7 +8218,7 @@ function PublicExplorerPage() {
                 />
               </div>
               <MiniLegend items={categories.map(c => [c, catColors[c]])} />
-              <ResponsiveContainer width="100%" height={400}>
+              <ResponsiveContainer width="100%" height={chartH(400)}>
                 <LineChart data={allTechsData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
@@ -8257,7 +8261,7 @@ function PublicExplorerPage() {
                 <DownloadBar csvRows={mpgChartData} csvName="industry_mpg" pngName="industry_mpg" />
               </div>
               <MiniLegend items={[['Line Haul', '#1f77b4'], ['Regional Haul', '#ff7f0e']]} />
-              <ResponsiveContainer width="100%" height={320}>
+              <ResponsiveContainer width="100%" height={chartH(320)}>
                 <LineChart data={mpgChartData} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
                   <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
