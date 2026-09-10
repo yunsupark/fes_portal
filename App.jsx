@@ -3993,25 +3993,46 @@ function AdminExplorerPage({ token }) {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [scatterYear,  setScatterYear]  = useState(null); // null = latest year
   const [playing,      setPlaying]      = useState(false);
-  const chartRef = useRef(null);
+  const chartRef   = useRef(null);
+  const sliderRef  = useRef(null);   // direct DOM update for smooth thumb
+  const animRef    = useRef(null);
+  const animMeta   = useRef({});     // { startTime, startIdx, sliderYears, maxYr }
   useEffect(() => {
     const handler = () => setIsFullscreen(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
-  // Animation playback
+  // rAF-based smooth animation
   useEffect(() => {
+    if (animRef.current) cancelAnimationFrame(animRef.current);
     if (!playing) return;
     const { sliderYears = [], maxYr } = scatterData;
-    const id = setInterval(() => {
-      setScatterYear(prev => {
-        const cur = prev ?? maxYr;
-        const idx = sliderYears.indexOf(cur);
-        if (idx < 0 || idx >= sliderYears.length - 1) { setPlaying(false); return cur; }
-        return sliderYears[idx + 1];
-      });
-    }, 900);
-    return () => clearInterval(id);
+    const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
+    if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
+    const STEP_MS = 1400;
+    const minYr = sliderYears[0] ?? maxYr;
+    animMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS };
+    const tick = (now) => {
+      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms } = animMeta.current;
+      const steps = sy.length - 1;
+      const progress = si + (now - startTime) / ms; // float steps from index 0
+      if (progress >= steps) {
+        setScatterYear(sy[steps]);
+        if (sliderRef.current) sliderRef.current.value = sy[steps];
+        setPlaying(false);
+        return;
+      }
+      const yearIdx = Math.min(steps - 1, Math.floor(progress));
+      setScatterYear(sy[yearIdx]);
+      // move thumb continuously
+      if (sliderRef.current) {
+        const fracYear = mn + (progress / steps) * (my - mn);
+        sliderRef.current.value = fracYear;
+      }
+      animRef.current = requestAnimationFrame(tick);
+    };
+    animRef.current = requestAnimationFrame(tick);
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
   }, [playing, scatterData]);
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -4533,14 +4554,15 @@ function AdminExplorerPage({ token }) {
               {/* Year slider */}
               {sliderYears.length > 1 && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 10px' }}>
+                  <style>{`.trends-slider{-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:#E5E7EB;outline:none;cursor:pointer}.trends-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#1c3660;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 2px #1c3660,0 2px 6px rgba(0,0,0,.25)}.trends-slider::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#1c3660;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 2px #1c3660,0 2px 6px rgba(0,0,0,.25)}`}</style>
                   <button onClick={() => { if (playing) { setPlaying(false); } else { if (activeYear >= maxYr) setScatterYear(minYear); setPlaying(true); } }}
                     style={{ padding: '3px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 5, border: '1px solid #D1D5DB', background: '#F9FAFB', minWidth: 52 }}>
                     {playing ? '⏸ Pause' : '▶ Play'}
                   </button>
-                  <input type="range" min={minYear} max={maxYr} step={1}
-                    value={activeYear}
-                    onChange={e => { setPlaying(false); setScatterYear(Number(e.target.value)); }}
-                    style={{ flex: 1, accentColor: '#1c3660' }} />
+                  <input ref={sliderRef} type="range" min={minYear} max={maxYr} step={0.01}
+                    defaultValue={activeYear}
+                    onChange={e => { setPlaying(false); setScatterYear(Math.round(Number(e.target.value))); }}
+                    className="trends-slider" style={{ flex: 1 }} />
                   <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', minWidth: 36, textAlign: 'right' }}>{activeYear}</span>
                 </div>
               )}
@@ -4589,6 +4611,7 @@ function AdminExplorerPage({ token }) {
                   <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                   {Object.entries(visibleByCat).map(([cat, pts]) => (
                     <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
+                      isAnimationActive={true} animationDuration={600} animationEasing="ease-in-out"
                       shape={({ cx, cy, fill, payload }) => (
                         <g key={payload.technology}>
                           <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
@@ -7748,6 +7771,9 @@ function PublicExplorerPage() {
   const isFullscreen = nativeFs || fakeFs;
   const [scatterYear, setScatterYear] = useState(null);
   const [playing,     setPlaying]     = useState(false);
+  const pubSliderRef = useRef(null);
+  const pubAnimRef   = useRef(null);
+  const pubAnimMeta  = useRef({});
   useEffect(() => {
     const handler = () => setNativeFs(!!document.fullscreenElement);
     document.addEventListener('fullscreenchange', handler);
@@ -7908,18 +7934,36 @@ function PublicExplorerPage() {
     return { maxYr, sliderYears, balancedByYear, balancedCount: balancedNames.size };
   }, [data, pctKey]);
 
+  // rAF-based smooth animation
   useEffect(() => {
+    if (pubAnimRef.current) cancelAnimationFrame(pubAnimRef.current);
     if (!playing) return;
     const { sliderYears = [], maxYr } = scatterData;
-    const id = setInterval(() => {
-      setScatterYear(prev => {
-        const cur = prev ?? maxYr;
-        const idx = sliderYears.indexOf(cur);
-        if (idx < 0 || idx >= sliderYears.length - 1) { setPlaying(false); return cur; }
-        return sliderYears[idx + 1];
-      });
-    }, 900);
-    return () => clearInterval(id);
+    const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
+    if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
+    const STEP_MS = 1400;
+    const minYr = sliderYears[0] ?? maxYr;
+    pubAnimMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS };
+    const tick = (now) => {
+      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms } = pubAnimMeta.current;
+      const steps = sy.length - 1;
+      const progress = si + (now - startTime) / ms;
+      if (progress >= steps) {
+        setScatterYear(sy[steps]);
+        if (pubSliderRef.current) pubSliderRef.current.value = sy[steps];
+        setPlaying(false);
+        return;
+      }
+      const yearIdx = Math.min(steps - 1, Math.floor(progress));
+      setScatterYear(sy[yearIdx]);
+      if (pubSliderRef.current) {
+        const fracYear = mn + (progress / steps) * (my - mn);
+        pubSliderRef.current.value = fracYear;
+      }
+      pubAnimRef.current = requestAnimationFrame(tick);
+    };
+    pubAnimRef.current = requestAnimationFrame(tick);
+    return () => { if (pubAnimRef.current) cancelAnimationFrame(pubAnimRef.current); };
   }, [playing, scatterData]);
 
   const mpgChartData = useMemo(() => {
@@ -8262,14 +8306,15 @@ function PublicExplorerPage() {
                 {/* Year slider */}
                 {sliderYears.length > 1 && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '8px 0 10px' }}>
+                    <style>{`.trends-slider{-webkit-appearance:none;appearance:none;height:6px;border-radius:3px;background:#E5E7EB;outline:none;cursor:pointer}.trends-slider::-webkit-slider-thumb{-webkit-appearance:none;width:20px;height:20px;border-radius:50%;background:#1c3660;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 2px #1c3660,0 2px 6px rgba(0,0,0,.25)}.trends-slider::-moz-range-thumb{width:20px;height:20px;border-radius:50%;background:#1c3660;cursor:pointer;border:2px solid #fff;box-shadow:0 0 0 2px #1c3660,0 2px 6px rgba(0,0,0,.25)}`}</style>
                     <button onClick={() => { if (playing) { setPlaying(false); } else { if (activeYear >= maxYr) setScatterYear(minYear); setPlaying(true); } }}
                       style={{ padding: '3px 10px', fontSize: 12, cursor: 'pointer', borderRadius: 5, border: '1px solid #D1D5DB', background: '#F9FAFB', minWidth: 52 }}>
                       {playing ? '⏸ Pause' : '▶ Play'}
                     </button>
-                    <input type="range" min={minYear} max={maxYr} step={1}
-                      value={activeYear}
-                      onChange={e => { setPlaying(false); setScatterYear(Number(e.target.value)); }}
-                      style={{ flex: 1, accentColor: '#1c3660' }} />
+                    <input ref={pubSliderRef} type="range" min={minYear} max={maxYr} step={0.01}
+                      defaultValue={activeYear}
+                      onChange={e => { setPlaying(false); setScatterYear(Math.round(Number(e.target.value))); }}
+                      className="trends-slider" style={{ flex: 1 }} />
                     <span style={{ fontSize: 13, fontWeight: 700, color: '#111827', minWidth: 36, textAlign: 'right' }}>{activeYear}</span>
                   </div>
                 )}
@@ -8318,6 +8363,7 @@ function PublicExplorerPage() {
                     <Tooltip content={<ScatterTooltip priorYr={priorYr} />} />
                     {Object.entries(visibleByCat).map(([cat, pts]) => (
                       <Scatter key={cat} name={cat} data={pts} fill={catColors[cat]} fillOpacity={0.75}
+                        isAnimationActive={true} animationDuration={600} animationEasing="ease-in-out"
                         shape={({ cx, cy, fill, payload }) => (
                           <g key={payload.technology}>
                             <circle cx={cx} cy={cy} r={5} fill={fill} fillOpacity={0.75} />
