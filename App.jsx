@@ -4138,22 +4138,6 @@ function AdminExplorerPage({ token }) {
     return Object.values(byYear).sort((a, b) => a.year - b.year);
   }, [data, selectedTechs, pctKey]);
 
-  // All-techs spaghetti chart — synthetic keys (tech_${tech_id}) so no special chars in dataKey
-  const allTechsData = useMemo(() => {
-    if (!data?.techRows) return { rows: [], techs: [] };
-    const byYear = {}; const techInfo = {};
-    data.techRows.forEach(r => {
-      const key = `tech_${r.tech_id}`;
-      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
-      const v = r[pctKey]; if (v != null) byYear[r.year][key] = parseFloat(v);
-      if (!techInfo[key]) techInfo[key] = { group: r.tech_group, label: r.technology };
-    });
-    const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
-    const techs = Object.entries(techInfo).sort((a, b) =>
-      a[1].group.localeCompare(b[1].group) || a[1].label.localeCompare(b[1].label));
-    return { rows, techs };
-  }, [data, pctKey]);
-
   // Landscape scatter: latest year adoption vs delta from 2 years prior.
   // Points with no prior-year data are excluded — they would plot at y=0 and
   // land misleadingly in the Mainstream/Fading quadrant.
@@ -4383,7 +4367,6 @@ function AdminExplorerPage({ token }) {
             <ViewBtn val="trends"    label="Adoption" />
             <ViewBtn val="compare"   label="Compare" />
             <ViewBtn val="landscape" label="Trends" />
-            <ViewBtn val="all"       label="All Techs" />
             <ViewBtn val="mpg"       label="Industry MPG" />
           </div>
           {view !== 'mpg' && (
@@ -4651,57 +4634,6 @@ function AdminExplorerPage({ token }) {
             </div>
           );
         })()}
-
-        {/* ── All Techs Spaghetti ── */}
-        {view === 'all' && (
-          <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-              <div>
-                <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>All Technologies — Adoption Trends</div>
-                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>
-                  {haulLabel} · {allTechsData.techs.length} technologies · lines colored by category
-                </div>
-              </div>
-              <DownloadBar
-                csvRows={allTechsData.rows.map(r => { const o = { year: r.year }; allTechsData.techs.forEach(([key, { label }]) => { o[label] = r[key] != null ? +r[key].toFixed(1) : ''; }); return o; })}
-                csvName="all_techs_adoption"
-                pngName="all_techs_adoption"
-              />
-            </div>
-            <MiniLegend items={categories.map(c => [c, catColors[c]])} />
-            <ResponsiveContainer width="100%" height={chartH(400)}>
-              <LineChart data={allTechsData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                <Tooltip
-                  content={({ active, label, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const vals = payload.filter(p => p.value != null).sort((a, b) => b.value - a.value);
-                    const top = vals.slice(0, 8);
-                    return (
-                      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '8px 12px', fontSize: 11, maxWidth: 240 }}>
-                        <div style={{ fontWeight: 600, color: '#111827', marginBottom: 4 }}>{label}</div>
-                        {top.map(p => (
-                          <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                            <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{p.name}</span>
-                            <span style={{ fontWeight: 600, color: p.stroke, flexShrink: 0 }}>{p.value.toFixed(1)}%</span>
-                          </div>
-                        ))}
-                        {vals.length > 8 && <div style={{ color: '#9CA3AF', marginTop: 4 }}>+{vals.length - 8} more</div>}
-                      </div>
-                    );
-                  }}
-                />
-                {allTechsData.techs.map(([key, { group, label }]) => (
-                  <Line key={key} type="monotone" dataKey={key} name={label}
-                    stroke={catColors[group]} strokeWidth={1} strokeOpacity={0.55}
-                    dot={false} connectNulls isAnimationActive={false} />
-                ))}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        )}
 
         {/* ── Industry MPG ── */}
         {view === 'mpg' && (
@@ -5582,7 +5514,6 @@ function AdminChartsPage({ token }) {
   // Per-chart haul-type filters (independent, no shared state)
   const [catHaulType,    setCatHaulType]    = useState('combined'); // category chart
   const [grpHaulType,    setGrpHaulType]    = useState('combined'); // per-group tech charts
-  const [allTechsHaulType, setAllTechsHaulType] = useState('combined'); // all-techs spaghetti
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -5814,39 +5745,6 @@ function AdminChartsPage({ token }) {
   };
 
   // Must be before early returns to satisfy Rules of Hooks
-  const allTechsChartData = useMemo(() => {
-    const grpOrder = ['Tractor Aerodynamics','Trailer Aerodynamics','Powertrain',
-                      'Chassis','Idle Reduction','Practices'];
-    const palette  = CHART_COLORS_30;
-    const gd = allTechsHaulType === 'combined' || !adoptByHaulType[allTechsHaulType]
-      ? groupData
-      : (adoptByHaulType[allTechsHaulType]?.groupData ?? {});
-    const sanitize = t => t.replace(/\./g, '·');
-    const allGroups = [...grpOrder, ...Object.keys(gd).filter(g => !grpOrder.includes(g)).sort()];
-    const grpColor = {};
-    allGroups.forEach((g, i) => { grpColor[g] = palette[i % palette.length]; });
-    const byYear = {};
-    const techMeta = [];
-    const seen = new Set();
-    allGroups.forEach(grp => {
-      if (!gd[grp]) return;
-      const { techs, data } = gd[grp];
-      techs.forEach(t => {
-        const key = sanitize(t);
-        if (!seen.has(key)) { seen.add(key); techMeta.push({ key, label: t, group: grp }); }
-      });
-      data.forEach(row => {
-        if (!byYear[row.year]) byYear[row.year] = { year: row.year };
-        techs.forEach(t => {
-          const key = sanitize(t);
-          if (row[t] != null) byYear[row.year][key] = row[t];
-        });
-      });
-    });
-    const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
-    return { rows, techMeta, grpColor };
-  }, [allTechsHaulType, groupData, adoptByHaulType]); // eslint-disable-line
-
   if (loading) return <div style={{ padding: 40, color: '#6B7280' }}>Loading charts…</div>;
   if (error)   return <div style={{ padding: 40, color: '#DC2626' }}>Error: {error}</div>;
 
@@ -6089,57 +5987,6 @@ ORDER BY t.technology, a.adoption_year`;
                   {sortedCats.map((cat, i) => (
                     <Line key={cat} type="monotone" dataKey={cat}
                       stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </AdminChartCard>
-          );
-        })()}
-
-        {/* All Technologies spaghetti */}
-        {(() => {
-          const { rows, techMeta, grpColor } = allTechsChartData;
-          const allTechsYLabel = { value: 'Technology Adoption', angle: -90, position: 'insideLeft',
-                                   style: { textAnchor: 'middle', fontSize: 10, fill: '#6B7280' } };
-          return (
-            <AdminChartCard title="All Technologies" subtitle={haulLabel(allTechsHaulType)}
-              csvData={rows}>
-              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
-                <HaulBtn val="combined" label="Combined"      active={allTechsHaulType} setter={setAllTechsHaulType} />
-                <HaulBtn val="lh"       label="Line Haul"     active={allTechsHaulType} setter={setAllTechsHaulType} />
-                <HaulBtn val="rh"       label="Regional Haul" active={allTechsHaulType} setter={setAllTechsHaulType} />
-              </div>
-              <ResponsiveContainer width="100%" height={CH}>
-                <LineChart data={rows} margin={{ top: 8, right: 8, left: 24, bottom: 8 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
-                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
-                    label={allTechsYLabel} />
-                  <Tooltip
-                    content={({ active, payload, label: yr }) => {
-                      if (!active || !payload?.length) return null;
-                      const top = [...payload]
-                        .filter(p => p.value != null)
-                        .sort((a, b) => b.value - a.value)
-                        .slice(0, 8);
-                      return (
-                        <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6,
-                                      padding: '6px 10px', fontSize: 10, maxWidth: 280 }}>
-                          <div style={{ fontWeight: 600, marginBottom: 4 }}>{yr}</div>
-                          {top.map(p => (
-                            <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                              <span style={{ color: p.stroke }}>{p.name}</span>
-                              <span style={{ fontWeight: 600 }}>{fmtPct(p.value)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      );
-                    }}
-                  />
-                  {techMeta.map(({ key, label, group }) => (
-                    <Line key={key} type="monotone" dataKey={key} name={label}
-                      stroke={grpColor[group] ?? '#9CA3AF'} strokeWidth={1} strokeOpacity={0.55}
-                      dot={false} connectNulls isAnimationActive={false} />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
@@ -7898,20 +7745,6 @@ function PublicExplorerPage() {
     return Object.values(byYear).sort((a, b) => a.year - b.year);
   }, [data, selectedTechs, pctKey]);
 
-  const allTechsData = useMemo(() => {
-    if (!data?.techRows) return { rows: [], techs: [] };
-    const byYear = {}; const techInfo = {};
-    data.techRows.forEach(r => {
-      const key = `tech_${r.tech_id}`;
-      if (!byYear[r.year]) byYear[r.year] = { year: r.year };
-      const v = r[pctKey]; if (v != null) byYear[r.year][key] = parseFloat(v);
-      if (!techInfo[key]) techInfo[key] = { group: r.tech_group, label: r.technology };
-    });
-    const rows = Object.values(byYear).sort((a, b) => a.year - b.year);
-    const techs = Object.entries(techInfo).sort((a, b) =>
-      a[1].group.localeCompare(b[1].group) || a[1].label.localeCompare(b[1].label));
-    return { rows, techs };
-  }, [data, pctKey]);
 
   const scatterData = useMemo(() => {
     if (!data?.techRows) return {};
@@ -8141,7 +7974,15 @@ function PublicExplorerPage() {
         </button>
       </div>
 
-      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}>
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '24px 16px' }}
+        onTouchStart={e => {
+          if (!e.target.closest('.recharts-wrapper')) {
+            document.querySelectorAll('.recharts-wrapper').forEach(el =>
+              el.dispatchEvent(new MouseEvent('mouseleave', { bubbles: true }))
+            );
+          }
+        }}
+      >
 
         {loading && (
           <div style={{ color: '#9CA3AF', fontSize: 13, padding: '40px 0', textAlign: 'center' }}>Loading data…</div>
@@ -8170,7 +8011,6 @@ function PublicExplorerPage() {
               <ViewBtn val="trends"    label="Adoption" />
               <ViewBtn val="compare"   label="Compare" />
               <ViewBtn val="landscape" label="Trends" />
-              <ViewBtn val="all"       label="All Techs" />
               <ViewBtn val="mpg"       label="Industry MPG" />
             </div>
             {view !== 'mpg' && (
@@ -8421,51 +8261,6 @@ function PublicExplorerPage() {
             );
           })()}
 
-          {/* ── All Techs Spaghetti ── */}
-          {view === 'all' && (
-            <div ref={chartRef} style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 8, padding: '16px 20px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 4 }}>
-                <div>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: '#111827' }}>All Technologies — Adoption Trends</div>
-                  <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 2 }}>{haulLabel} · {allTechsData.techs.length} technologies · lines colored by category</div>
-                </div>
-                <DownloadBar
-                  csvRows={allTechsData.rows.map(r => { const o = { year: r.year }; allTechsData.techs.forEach(([key, { label }]) => { o[label] = r[key] != null ? +r[key].toFixed(1) : ''; }); return o; })}
-                  csvName="all_techs_adoption" pngName="all_techs_adoption"
-                />
-              </div>
-              <MiniLegend items={categories.map(c => [c, catColors[c]])} />
-              <ResponsiveContainer width="100%" height={chartH(400)}>
-                <LineChart data={allTechsData.rows} margin={{ top: 4, right: 16, left: 8, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#F3F4F6" />
-                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                  <YAxis domain={[0, 100]} tickFormatter={v => `${v}%`} stroke="#9CA3AF" tick={{ fontSize: 10 }} />
-                  <Tooltip content={({ active, label, payload }) => {
-                    if (!active || !payload?.length) return null;
-                    const vals = payload.filter(p => p.value != null).sort((a, b) => b.value - a.value);
-                    const top = vals.slice(0, 8);
-                    return (
-                      <div style={{ background: '#fff', border: '1px solid #E5E7EB', borderRadius: 6, padding: '8px 12px', fontSize: 11, maxWidth: 240 }}>
-                        <div style={{ fontWeight: 600, color: '#111827', marginBottom: 4 }}>{label}</div>
-                        {top.map(p => (
-                          <div key={p.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
-                            <span style={{ color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>{p.name}</span>
-                            <span style={{ fontWeight: 600, color: p.stroke, flexShrink: 0 }}>{p.value.toFixed(1)}%</span>
-                          </div>
-                        ))}
-                        {vals.length > 8 && <div style={{ color: '#9CA3AF', marginTop: 4 }}>+{vals.length - 8} more</div>}
-                      </div>
-                    );
-                  }} />
-                  {allTechsData.techs.map(([key, { group, label }]) => (
-                    <Line key={key} type="monotone" dataKey={key} name={label}
-                      stroke={catColors[group]} strokeWidth={1} strokeOpacity={0.55}
-                      dot={false} connectNulls isAnimationActive={false} />
-                  ))}
-                </LineChart>
-              </ResponsiveContainer>
-            </div>
-          )}
 
           {/* ── Industry MPG ── */}
           {view === 'mpg' && (
