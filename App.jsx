@@ -4004,56 +4004,6 @@ function AdminExplorerPage({ token }) {
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
-  // rAF loop: interpolates dot positions at 60fps between discrete years
-  useEffect(() => {
-    if (animRef.current) cancelAnimationFrame(animRef.current);
-    if (!playing) { setInterpByCat(null); return; }
-    const { sliderYears = [], maxYr, balancedByYear = {} } = scatterData;
-    const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
-    if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
-    const STEP_MS = 1400;
-    const minYr = sliderYears[0] ?? maxYr;
-    const steps = sliderYears.length - 1;
-    animMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS, balancedByYear };
-    lastYrIdx.current = startIdx;
-    const lerp = (a, b, t) => a + (b - a) * t;
-    const tick = (now) => {
-      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms, balancedByYear: bby } = animMeta.current;
-      const progress = si + (now - startTime) / ms;
-      if (progress >= steps) {
-        setScatterYear(sy[steps]);
-        setInterpByCat(null);
-        if (sliderRef.current) sliderRef.current.value = my;
-        setPlaying(false);
-        return;
-      }
-      // slider thumb (smooth)
-      if (sliderRef.current) sliderRef.current.value = mn + (progress / steps) * (my - mn);
-      // year label (discrete, only on boundary)
-      const yrIdx = Math.min(steps - 1, Math.floor(progress));
-      if (yrIdx !== lastYrIdx.current) { lastYrIdx.current = yrIdx; setScatterYear(sy[yrIdx]); }
-      // interpolate dot positions
-      const t = progress - Math.floor(progress); // 0→1 within current step
-      const yr0 = sy[yrIdx];
-      const yr1 = sy[Math.min(steps, yrIdx + 1)];
-      const d0 = bby[yr0] || {};
-      const d1 = bby[yr1] || {};
-      const lookup1 = {};
-      Object.values(d1).flat().forEach(d => { lookup1[d.technology] = d; });
-      const interp = {};
-      Object.entries(d0).forEach(([cat, pts]) => {
-        interp[cat] = pts.map(p => {
-          const p1 = lookup1[p.technology];
-          if (!p1) return p;
-          return { ...p, x: lerp(p.x, p1.x, t), y: lerp(p.y, p1.y, t) };
-        });
-      });
-      setInterpByCat(interp);
-      animRef.current = requestAnimationFrame(tick);
-    };
-    animRef.current = requestAnimationFrame(tick);
-    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
-  }, [playing, scatterData]);
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -4190,6 +4140,57 @@ function AdminExplorerPage({ token }) {
     });
     return { maxYr, sliderYears, balancedByYear, balancedCount: balancedNames.size };
   }, [data, pctKey]);
+
+  // rAF loop: interpolates dot positions at 60fps between discrete years
+  useEffect(() => {
+    if (animRef.current) cancelAnimationFrame(animRef.current);
+    if (!playing) { setInterpByCat(null); return; }
+    const { sliderYears = [], maxYr, balancedByYear = {} } = scatterData;
+    const startIdx = Math.max(0, sliderYears.indexOf(scatterYear ?? maxYr));
+    if (startIdx >= sliderYears.length - 1) { setPlaying(false); return; }
+    const STEP_MS = 1400;
+    const minYr = sliderYears[0] ?? maxYr;
+    const steps = sliderYears.length - 1;
+    animMeta.current = { startTime: performance.now(), startIdx, sliderYears, maxYr, minYr, STEP_MS, balancedByYear };
+    lastYrIdx.current = startIdx;
+    const lerp = (a, b, t) => a + (b - a) * t;
+    const tick = (now) => {
+      const { startTime, startIdx: si, sliderYears: sy, maxYr: my, minYr: mn, STEP_MS: ms, balancedByYear: bby } = animMeta.current;
+      const progress = si + (now - startTime) / ms;
+      if (progress >= steps) {
+        setScatterYear(sy[steps]);
+        setInterpByCat(null);
+        if (sliderRef.current) sliderRef.current.value = my;
+        setPlaying(false);
+        return;
+      }
+      // slider thumb (smooth)
+      if (sliderRef.current) sliderRef.current.value = mn + (progress / steps) * (my - mn);
+      // year label (discrete, only on boundary)
+      const yrIdx = Math.min(steps - 1, Math.floor(progress));
+      if (yrIdx !== lastYrIdx.current) { lastYrIdx.current = yrIdx; setScatterYear(sy[yrIdx]); }
+      // interpolate dot positions
+      const t = progress - Math.floor(progress); // 0→1 within current step
+      const yr0 = sy[yrIdx];
+      const yr1 = sy[Math.min(steps, yrIdx + 1)];
+      const d0 = bby[yr0] || {};
+      const d1 = bby[yr1] || {};
+      const lookup1 = {};
+      Object.values(d1).flat().forEach(d => { lookup1[d.technology] = d; });
+      const interp = {};
+      Object.entries(d0).forEach(([cat, pts]) => {
+        interp[cat] = pts.map(p => {
+          const p1 = lookup1[p.technology];
+          if (!p1) return p;
+          return { ...p, x: lerp(p.x, p1.x, t), y: lerp(p.y, p1.y, t) };
+        });
+      });
+      setInterpByCat(interp);
+      animRef.current = requestAnimationFrame(tick);
+    };
+    animRef.current = requestAnimationFrame(tick);
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+  }, [playing, scatterData]);
 
   // MPG chart
   const mpgChartData = useMemo(() => {
@@ -4356,6 +4357,12 @@ function AdminExplorerPage({ token }) {
             style={{ marginLeft: 16, padding: '4px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 5, border: '1px solid #FECACA', background: '#fff', color: '#DC2626' }}>
             Retry
           </button>
+        </div>
+      )}
+
+      {!loading && !fetchError && !data && (
+        <div style={{ color: '#9CA3AF', fontSize: 13 }}>
+          No data loaded. Try clicking <b>▶ Update Data Explorer</b> above, or reload the page.
         </div>
       )}
 
