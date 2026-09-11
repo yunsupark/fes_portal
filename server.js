@@ -3547,8 +3547,6 @@ app.get(/^(?!\/api).*$/, (req, res) => {
 });
 
 // ─── Analytics ───────────────────────────────────────────────────────────────
-const crypto = require("crypto");
-
 function hashIp(ip) {
   if (!ip) return null;
   return crypto.createHash("sha256").update(ip + (process.env.ANALYTICS_SALT || "ffs-salt")).digest("hex");
