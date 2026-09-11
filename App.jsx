@@ -3,6 +3,65 @@ import * as XLSX from 'xlsx';
 
 import { ComposedChart, LineChart, ScatterChart, Scatter, Bar, Line, XAxis, YAxis, ZAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend, ReferenceLine, ReferenceArea } from "recharts";
 
+// ─── Analytics ───────────────────────────────────────────────────────────────
+function getOrCreateSessionId() {
+  let sid = sessionStorage.getItem('_ffs_sid');
+  if (!sid) { sid = crypto.randomUUID(); sessionStorage.setItem('_ffs_sid', sid); }
+  return sid;
+}
+function trackEvent(event_type, page, event_data) {
+  try {
+    fetch('/api/analytics/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: getOrCreateSessionId(), event_type, page, event_data }),
+    }).catch(() => {});
+  } catch (_) {}
+}
+function useExplorerAnalytics(page, { metric, category, playing }) {
+  const startRef = useRef(Date.now());
+  const prevMetricRef  = useRef(null);
+  const prevCategoryRef = useRef(null);
+  const playFiredRef = useRef(false);
+
+  // page view on mount, session duration on unmount
+  useEffect(() => {
+    trackEvent('page_view', page, null);
+    startRef.current = Date.now();
+    return () => {
+      const duration_s = Math.round((Date.now() - startRef.current) / 1000);
+      trackEvent('session_end', page, { duration_s });
+    };
+  }, []); // eslint-disable-line
+
+  // metric change (debounced — only fires after value settles)
+  useEffect(() => {
+    if (metric == null || metric === prevMetricRef.current) return;
+    const t = setTimeout(() => {
+      prevMetricRef.current = metric;
+      trackEvent('metric_change', page, { metric });
+    }, 800);
+    return () => clearTimeout(t);
+  }, [metric]);
+
+  // category filter change
+  useEffect(() => {
+    if (category === prevCategoryRef.current) return;
+    prevCategoryRef.current = category;
+    if (category !== null && category !== undefined)
+      trackEvent('filter_change', page, { category });
+  }, [category]);
+
+  // animation play
+  useEffect(() => {
+    if (playing && !playFiredRef.current) {
+      playFiredRef.current = true;
+      trackEvent('animation_play', page, null);
+    }
+    if (!playing) playFiredRef.current = false;
+  }, [playing]);
+}
+
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
 const fmt = (n) => n?.toLocaleString() ?? "—";
@@ -4007,6 +4066,8 @@ function AdminExplorerPage({ token }) {
 
   const headers = { Authorization: `Bearer ${token}` };
 
+  useExplorerAnalytics('admin', { metric: null, category, playing });
+
   useEffect(() => {
     setLoading(true); setFetchError(null);
     fetch('/api/admin/explorer/preview', { headers })
@@ -6249,6 +6310,181 @@ ORDER BY t.technology, a.adoption_year`;
   );
 }
 
+function AdminAnalyticsPage({ token }) {
+  const [days, setDays] = useState(30);
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
+
+  useEffect(() => {
+    setLoading(true); setErr(null);
+    fetch(`/api/admin/analytics?days=${days}`, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => { if (!r.ok) throw new Error(`Server error ${r.status}`); return r.json(); })
+      .then(d => { setData(d); setLoading(false); })
+      .catch(e => { setErr(e.message); setLoading(false); });
+  }, [days, token]);
+
+  const card = { background: '#fff', border: '1px solid #E5E7EB', borderRadius: 10, padding: 20 };
+  const statStyle = { fontSize: 28, fontWeight: 700, color: '#1c3660' };
+  const labelStyle = { fontSize: 12, color: '#6B7280', marginTop: 2 };
+
+  const fmtDur = (s) => {
+    if (s == null) return '—';
+    if (s < 60) return `${Math.round(s)}s`;
+    return `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+  };
+
+  const EVENT_LABELS = {
+    page_view: 'Page views',
+    session_end: 'Sessions ended',
+    metric_change: 'Metric changes',
+    filter_change: 'Filter changes',
+    animation_play: 'Animation plays',
+  };
+
+  // Build a simple sparkline from daily data
+  const Sparkline = ({ daily }) => {
+    if (!daily?.length) return null;
+    const vals = daily.map(d => d.views);
+    const max = Math.max(...vals, 1);
+    const W = 180, H = 36, PAD = 4;
+    const pts = vals.map((v, i) => {
+      const x = PAD + (i / Math.max(vals.length - 1, 1)) * (W - PAD * 2);
+      const y = H - PAD - ((v / max) * (H - PAD * 2));
+      return `${x},${y}`;
+    }).join(' ');
+    return (
+      <svg width={W} height={H} style={{ display: 'block', marginTop: 6 }}>
+        <polyline points={pts} fill="none" stroke="#1c3660" strokeWidth={2} strokeLinejoin="round" />
+        {vals.map((v, i) => {
+          const x = PAD + (i / Math.max(vals.length - 1, 1)) * (W - PAD * 2);
+          const y = H - PAD - ((v / max) * (H - PAD * 2));
+          return <circle key={i} cx={x} cy={y} r={2.5} fill="#1c3660" />;
+        })}
+      </svg>
+    );
+  };
+
+  return (
+    <div style={{ maxWidth: 1100, margin: '24px auto', padding: '0 20px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <h2 style={{ margin: 0, fontSize: 18, fontWeight: 700, color: '#111827' }}>Explorer Analytics</h2>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          {[7, 30, 90].map(d => (
+            <button key={d} onClick={() => setDays(d)} style={{
+              background: days === d ? '#1c3660' : '#F3F4F6',
+              color: days === d ? '#fff' : '#374151',
+              border: 'none', borderRadius: 6, padding: '5px 14px', fontSize: 12, cursor: 'pointer', fontWeight: 600,
+            }}>Last {d}d</button>
+          ))}
+        </div>
+      </div>
+
+      {loading && <div style={{ color: '#6B7280', fontSize: 14 }}>Loading…</div>}
+      {err && <div style={{ color: '#EF4444', fontSize: 13 }}>Error: {err}</div>}
+      {data && !loading && (<>
+
+        {/* Summary tiles */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 14, marginBottom: 20 }}>
+          {[
+            { val: data.summary.unique_visitors, label: 'Unique visitors' },
+            { val: data.summary.total_sessions, label: 'Total sessions' },
+            { val: data.summary.public_sessions, label: 'Public sessions' },
+            { val: data.summary.admin_sessions, label: 'Admin sessions' },
+            { val: fmtDur(data.avg_duration_s), label: 'Avg session duration', raw: true },
+          ].map(({ val, label, raw }) => (
+            <div key={label} style={card}>
+              <div style={raw ? { ...statStyle, fontSize: 22 } : statStyle}>{val ?? '—'}</div>
+              <div style={labelStyle}>{label}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* Daily chart + event breakdown */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+
+          {/* Daily pageviews sparkline */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: '#111827' }}>Daily pageviews</div>
+            <div style={{ fontSize: 12, color: '#6B7280', marginBottom: 4 }}>
+              {data.daily.length ? `${data.daily[0].date} → ${data.daily[data.daily.length-1].date}` : 'No data yet'}
+            </div>
+            <Sparkline daily={data.daily} />
+            {data.daily.length > 0 && (
+              <div style={{ marginTop: 10, maxHeight: 200, overflowY: 'auto' }}>
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>
+                      <th style={{ textAlign: 'left', padding: '3px 0', fontWeight: 600 }}>Date</th>
+                      <th style={{ textAlign: 'right', fontWeight: 600 }}>Views</th>
+                      <th style={{ textAlign: 'right', fontWeight: 600 }}>Sessions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...data.daily].reverse().map(row => (
+                      <tr key={row.date} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                        <td style={{ padding: '3px 0', color: '#374151' }}>{row.date}</td>
+                        <td style={{ textAlign: 'right', color: '#111827', fontWeight: 600 }}>{row.views}</td>
+                        <td style={{ textAlign: 'right', color: '#6B7280' }}>{row.sessions}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          {/* Event breakdown */}
+          <div style={card}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10, color: '#111827' }}>Event breakdown</div>
+            {data.events.length === 0
+              ? <div style={{ color: '#9CA3AF', fontSize: 12 }}>No events yet</div>
+              : (
+                <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                  <thead>
+                    <tr style={{ color: '#6B7280', borderBottom: '1px solid #E5E7EB' }}>
+                      <th style={{ textAlign: 'left', padding: '3px 0', fontWeight: 600 }}>Event</th>
+                      <th style={{ textAlign: 'left', fontWeight: 600 }}>Page</th>
+                      <th style={{ textAlign: 'right', fontWeight: 600 }}>Count</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.events.map((row, i) => (
+                      <tr key={i} style={{ borderBottom: '1px solid #F3F4F6' }}>
+                        <td style={{ padding: '3px 0', color: '#374151' }}>{EVENT_LABELS[row.event_type] || row.event_type}</td>
+                        <td style={{ color: '#6B7280' }}>{row.page}</td>
+                        <td style={{ textAlign: 'right', color: '#111827', fontWeight: 600 }}>{row.cnt}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )
+            }
+          </div>
+        </div>
+
+        {/* Top metrics */}
+        {data.top_metrics?.length > 0 && (
+          <div style={card}>
+            <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 10, color: '#111827' }}>Most explored metrics</div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {data.top_metrics.map((m, i) => (
+                <div key={i} style={{
+                  background: '#EFF6FF', color: '#1c3660', border: '1px solid #BFDBFE',
+                  borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600,
+                }}>
+                  {m.metric} <span style={{ fontWeight: 400, opacity: 0.7 }}>×{m.cnt}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+      </>)}
+    </div>
+  );
+}
+
 function AdminView({ token, onSignOut }) {
   const { adminName, isAdminRole } = (() => {
     try {
@@ -6784,7 +7020,7 @@ function AdminView({ token, onSignOut }) {
       {/* ── Page tabs ── */}
       <div style={{ background: '#fff', borderBottom: '2px solid #E5E7EB' }}>
         <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 20px', display: 'flex' }}>
-          {[['data', 'Management'], ['charts', 'Charts'], ['tables', 'Tables'], ['explorer', 'Explorer']].map(([key, label]) => (
+          {[['data', 'Management'], ['charts', 'Charts'], ['tables', 'Tables'], ['explorer', 'Explorer'], ['analytics', 'Analytics']].map(([key, label]) => (
             <button key={key} onClick={() => setAdminPage(key)} style={{
               background: 'none', border: 'none', padding: '10px 20px',
               fontSize: 13, fontWeight: adminPage === key ? 700 : 400,
@@ -6796,9 +7032,10 @@ function AdminView({ token, onSignOut }) {
         </div>
       </div>
 
-      {adminPage === 'charts'   && <AdminChartsPage   token={token} />}
-      {adminPage === 'tables'   && <AdminTablesPage   token={token} />}
-      {adminPage === 'explorer' && <AdminExplorerPage token={token} />}
+      {adminPage === 'charts'    && <AdminChartsPage    token={token} />}
+      {adminPage === 'tables'    && <AdminTablesPage    token={token} />}
+      {adminPage === 'explorer'  && <AdminExplorerPage  token={token} />}
+      {adminPage === 'analytics' && <AdminAnalyticsPage token={token} />}
 
       {adminPage === 'data' && <>
       <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px', display: 'flex', gap: 16, alignItems: 'flex-start' }}>
@@ -7669,6 +7906,8 @@ function PublicExplorerPage() {
       setFakeFs(v => !v);
     }
   };
+
+  useExplorerAnalytics('public', { metric: null, category, playing });
 
   const chartH = (normal) => isFullscreen ? Math.max(normal, Math.round(window.innerHeight * 0.50)) : normal;
 

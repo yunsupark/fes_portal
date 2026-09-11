@@ -281,6 +281,22 @@ const db = mysql.createPool({
       await db.query(`ALTER TABLE ffs_contact ADD COLUMN receives_assist_email TINYINT(1) NOT NULL DEFAULT 0`);
       console.log("Added receives_assist_email column to ffs_contact");
     }
+    await db.query(`
+      CREATE TABLE IF NOT EXISTS ffs_analytics (
+        id         BIGINT AUTO_INCREMENT PRIMARY KEY,
+        session_id VARCHAR(36)  NOT NULL,
+        event_type VARCHAR(50)  NOT NULL,
+        page       VARCHAR(20)  NOT NULL DEFAULT 'public',
+        event_data JSON         NULL,
+        ip_hash    CHAR(64)     NULL,
+        fleet_id   INT          NULL,
+        created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_session  (session_id),
+        INDEX idx_event    (event_type),
+        INDEX idx_page     (page),
+        INDEX idx_created  (created_at)
+      )
+    `);
   } catch (e) { console.error("DB init error:", e); }
 })();
 
@@ -3528,6 +3544,98 @@ app.use(express.static(path.join(__dirname, "dist")));
 // Catch-all: serve index.html for any non-API route (React Router support)
 app.get(/^(?!\/api).*$/, (req, res) => {
   res.sendFile(path.join(__dirname, "dist", "index.html"));
+});
+
+// ─── Analytics ───────────────────────────────────────────────────────────────
+const crypto = require("crypto");
+
+function hashIp(ip) {
+  if (!ip) return null;
+  return crypto.createHash("sha256").update(ip + (process.env.ANALYTICS_SALT || "ffs-salt")).digest("hex");
+}
+
+// Record an analytics event — no auth required (public visitors too)
+app.post("/api/analytics/event", async (req, res) => {
+  try {
+    const { session_id, event_type, page, event_data } = req.body || {};
+    if (!session_id || !event_type) return res.status(400).json({ error: "session_id and event_type required" });
+    const raw_ip = req.headers["x-forwarded-for"]?.split(",")[0].trim() || req.socket.remoteAddress;
+    const ip_hash = hashIp(raw_ip);
+    const fleet_id = req.user?.fleet_id ?? null;
+    await db.query(
+      `INSERT INTO ffs_analytics (session_id, event_type, page, event_data, ip_hash, fleet_id)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [session_id, event_type, page || "public", event_data ? JSON.stringify(event_data) : null, ip_hash, fleet_id]
+    );
+    res.json({ ok: true });
+  } catch (e) { console.error("Analytics insert error:", e); res.status(500).json({ error: "db error" }); }
+});
+
+// Admin analytics summary
+app.get("/api/admin/analytics", requireAuth, requireAdmin, async (req, res) => {
+  try {
+    const { days = 30 } = req.query;
+    const since = `DATE_SUB(NOW(), INTERVAL ${parseInt(days)} DAY)`;
+
+    const [[{ total_events }]] = await db.query(
+      `SELECT COUNT(*) AS total_events FROM ffs_analytics WHERE created_at >= ${since}`
+    );
+    const [[{ total_sessions }]] = await db.query(
+      `SELECT COUNT(DISTINCT session_id) AS total_sessions FROM ffs_analytics WHERE created_at >= ${since}`
+    );
+    const [[{ unique_visitors }]] = await db.query(
+      `SELECT COUNT(DISTINCT ip_hash) AS unique_visitors FROM ffs_analytics WHERE created_at >= ${since} AND ip_hash IS NOT NULL`
+    );
+    const [[{ public_sessions }]] = await db.query(
+      `SELECT COUNT(DISTINCT session_id) AS public_sessions FROM ffs_analytics WHERE created_at >= ${since} AND page = 'public'`
+    );
+    const [[{ admin_sessions }]] = await db.query(
+      `SELECT COUNT(DISTINCT session_id) AS admin_sessions FROM ffs_analytics WHERE created_at >= ${since} AND page = 'admin'`
+    );
+
+    // Daily pageviews (page_view events only)
+    const [daily] = await db.query(
+      `SELECT DATE(created_at) AS date, COUNT(*) AS views, COUNT(DISTINCT session_id) AS sessions
+       FROM ffs_analytics
+       WHERE event_type = 'page_view' AND created_at >= ${since}
+       GROUP BY DATE(created_at)
+       ORDER BY date ASC`
+    );
+
+    // Event breakdown
+    const [events] = await db.query(
+      `SELECT event_type, page, COUNT(*) AS cnt
+       FROM ffs_analytics WHERE created_at >= ${since}
+       GROUP BY event_type, page
+       ORDER BY cnt DESC`
+    );
+
+    // Avg session duration (for sessions that have a session_end event)
+    const [[{ avg_duration_s }]] = await db.query(
+      `SELECT AVG(CAST(JSON_UNQUOTE(JSON_EXTRACT(event_data, '$.duration_s')) AS DECIMAL(10,1))) AS avg_duration_s
+       FROM ffs_analytics
+       WHERE event_type = 'session_end' AND created_at >= ${since}
+         AND JSON_EXTRACT(event_data, '$.duration_s') IS NOT NULL`
+    );
+
+    // Top metrics explored
+    const [top_metrics] = await db.query(
+      `SELECT JSON_UNQUOTE(JSON_EXTRACT(event_data, '$.metric')) AS metric, COUNT(*) AS cnt
+       FROM ffs_analytics
+       WHERE event_type = 'metric_change' AND created_at >= ${since}
+         AND JSON_EXTRACT(event_data, '$.metric') IS NOT NULL
+       GROUP BY metric ORDER BY cnt DESC LIMIT 10`
+    );
+
+    res.json({
+      period_days: parseInt(days),
+      summary: { total_events, total_sessions, unique_visitors, public_sessions, admin_sessions },
+      avg_duration_s: avg_duration_s ? parseFloat(avg_duration_s) : null,
+      daily,
+      events,
+      top_metrics,
+    });
+  } catch (e) { console.error("Analytics query error:", e); res.status(500).json({ error: "db error" }); }
 });
 
 // Load persisted Explorer snapshot into RAM before accepting requests
