@@ -3430,6 +3430,77 @@ async function generateExplorerData() {
     ORDER BY t.tech_group, t.technology, pre.adoption_year
   `, [maxYear]);
 
+  // Weighted adoption: same fleet/year filtering as above, but avg over cab_types
+  // per fleet first, then weight by tractor count (fallback: IFTA miles proxy).
+  const [weightedRows] = await db.query(`
+    WITH pre AS (
+      SELECT fleet_id, adoption_year, tech_id,
+             AVG(adoption_percent) AS fleet_avg_pct
+      FROM ffs_adoption
+      WHERE fleet_id NOT IN (0, 45, 46)
+        AND adoption_year >= 2003 AND adoption_year <= ?
+        AND adoption_percent <= 1
+      GROUP BY fleet_id, adoption_year, tech_id
+    ),
+    wt AS (
+      SELECT fleet_id, utilization_year AS year,
+             NULLIF(SUM(utliz_tractor_qty), 0) AS tractors
+      FROM ffs_equip_utilization
+      WHERE fleet_id NOT IN (0, 45, 46)
+      GROUP BY fleet_id, utilization_year
+    ),
+    miles_wt AS (
+      SELECT fleet_id, mpg_year AS year,
+             SUM(ifta_miles) AS total_miles
+      FROM ffs_mpg
+      WHERE fleet_id NOT IN (0, 45, 46)
+        AND COALESCE(mpg_quarter, '') = ''
+        AND ifta_miles > 0
+      GROUP BY fleet_id, mpg_year
+    )
+    SELECT t.tech_id, pre.adoption_year AS year,
+      ROUND(
+        CASE WHEN COUNT(DISTINCT pre.fleet_id) >= 3
+             THEN SUM(pre.fleet_avg_pct * COALESCE(wt.tractors, miles_wt.total_miles))
+                  / NULLIF(SUM(CASE WHEN pre.fleet_avg_pct IS NOT NULL
+                                    THEN COALESCE(wt.tractors, miles_wt.total_miles) ELSE 0 END), 0) * 100
+             ELSE NULL END, 1) AS combined_pct_w,
+      ROUND(
+        CASE WHEN COUNT(DISTINCT CASE WHEN LOWER(f.default_duty_cycle) = 'lh' THEN pre.fleet_id END) >= 3
+             THEN SUM(CASE WHEN LOWER(f.default_duty_cycle) = 'lh'
+                           THEN pre.fleet_avg_pct * COALESCE(wt.tractors, miles_wt.total_miles) ELSE 0 END)
+                  / NULLIF(SUM(CASE WHEN LOWER(f.default_duty_cycle) = 'lh' AND pre.fleet_avg_pct IS NOT NULL
+                                    THEN COALESCE(wt.tractors, miles_wt.total_miles) ELSE 0 END), 0) * 100
+             ELSE NULL END, 1) AS lh_pct_w,
+      ROUND(
+        CASE WHEN COUNT(DISTINCT CASE WHEN LOWER(f.default_duty_cycle) = 'rh' THEN pre.fleet_id END) >= 3
+             THEN SUM(CASE WHEN LOWER(f.default_duty_cycle) = 'rh'
+                           THEN pre.fleet_avg_pct * COALESCE(wt.tractors, miles_wt.total_miles) ELSE 0 END)
+                  / NULLIF(SUM(CASE WHEN LOWER(f.default_duty_cycle) = 'rh' AND pre.fleet_avg_pct IS NOT NULL
+                                    THEN COALESCE(wt.tractors, miles_wt.total_miles) ELSE 0 END), 0) * 100
+             ELSE NULL END, 1) AS rh_pct_w
+    FROM pre
+    JOIN ffs_tech  t        ON pre.tech_id  = t.tech_id
+    JOIN ffs_fleet f        ON pre.fleet_id = f.fleet_id
+    LEFT JOIN wt            ON pre.fleet_id = wt.fleet_id       AND pre.adoption_year = wt.year
+    LEFT JOIN miles_wt      ON pre.fleet_id = miles_wt.fleet_id AND pre.adoption_year = miles_wt.year
+    WHERE LOWER(f.default_duty_cycle) IN ('lh', 'rh')
+      AND (t.active_to IS NULL OR pre.adoption_year <= t.active_to)
+    GROUP BY t.tech_id, pre.adoption_year
+    HAVING COUNT(DISTINCT pre.fleet_id) >= 3
+    ORDER BY t.tech_id, pre.adoption_year
+  `, [maxYear]);
+
+  // Index weighted rows by "techId_year" for O(1) merge
+  const weightedIdx = {};
+  weightedRows.forEach(r => {
+    weightedIdx[`${r.tech_id}_${r.year}`] = {
+      combined_pct_w: r.combined_pct_w != null ? parseFloat(r.combined_pct_w) : null,
+      lh_pct_w:       r.lh_pct_w       != null ? parseFloat(r.lh_pct_w)       : null,
+      rh_pct_w:       r.rh_pct_w       != null ? parseFloat(r.rh_pct_w)       : null,
+    };
+  });
+
   // MPG: uses COALESCE(multiplier,1) for Method-A consistency;
   // COALESCE(fuel_type,'') so NULL fuel_type rows (not CNG) are not silently dropped.
   const [mpgRows] = await db.query(`
@@ -3463,6 +3534,7 @@ async function generateExplorerData() {
       ...r,
       tech_id: Number(r.tech_id), year: Number(r.year),
       n_combined: Number(r.n_combined), n_lh: Number(r.n_lh), n_rh: Number(r.n_rh),
+      ...(weightedIdx[`${r.tech_id}_${r.year}`] || { combined_pct_w: null, lh_pct_w: null, rh_pct_w: null }),
     })),
     mpgRows: mpgRows.map(r => ({ ...r, year: Number(r.year), avg_mpg: parseFloat(r.avg_mpg) })),
   };

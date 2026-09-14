@@ -4043,6 +4043,7 @@ function AdminExplorerPage({ token }) {
   const [publishing,   setPublishing]   = useState(false);
   const [pubMsg,       setPubMsg]       = useState('');
   const [haulType,     setHaulType]     = useState('combined');
+  const [weighted,     setWeighted]     = useState(false);
   const [category,     setCategory]     = useState('');
   const [view,         setView]         = useState('trends'); // 'trends'|'mpg'|'compare'|'landscape'
   const [selectedTechs, setSelectedTechs] = useState([]);
@@ -4094,7 +4095,8 @@ function AdminExplorerPage({ token }) {
 
   const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
   const fmtMpg = v => v == null ? '—' : parseFloat(v).toFixed(2);
-  const pctKey = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
+  const pctBase = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
+  const pctKey  = weighted ? `${pctBase}_w` : pctBase;
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'All Fleets';
 
   // ── Derived data ────────────────────────────────────────────────────────────
@@ -4444,6 +4446,15 @@ function AdminExplorerPage({ token }) {
               <HaulBtn val="lh"       label="Line Haul" />
               <HaulBtn val="rh"       label="Regional Haul" />
             </div>
+          )}
+          {view !== 'mpg' && (
+            <button onClick={() => setWeighted(w => !w)} title="Weight adoption % by fleet size (tractor count)" style={{
+              padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
+              borderColor: weighted ? '#7C3AED' : '#D1D5DB',
+              background:  weighted ? '#7C3AED' : '#F9FAFB',
+              color:       weighted ? '#fff'    : '#374151',
+              fontWeight:  weighted ? 600       : 400,
+            }}>Fleet-size weighted</button>
           )}
           <button onClick={toggleFullscreen} title={isFullscreen ? 'Exit fullscreen' : 'Fullscreen'} style={{ marginLeft: 'auto', padding: '4px 8px', fontSize: 11, cursor: 'pointer', borderRadius: 5, border: '1px solid #D1D5DB', background: '#F9FAFB', color: '#374151', display: 'flex', alignItems: 'center' }}>
             {isFullscreen
@@ -7872,6 +7883,7 @@ function PublicExplorerPage() {
   const [loading,      setLoading]      = useState(true);
   const [fetchError,   setFetchError]   = useState(null);
   const [haulType,     setHaulType]     = useState('combined');
+  const [weighted,     setWeighted]     = useState(false);
   const [category,     setCategory]     = useState('');
   const [view,         setView]         = useState('trends');
   const [selectedTechs, setSelectedTechs] = useState([]);
@@ -7943,7 +7955,8 @@ function PublicExplorerPage() {
 
   const fmtPct = v => v == null ? '—' : `${parseFloat(v).toFixed(1)}%`;
   const fmtMpg = v => v == null ? '—' : parseFloat(v).toFixed(2);
-  const pctKey  = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
+  const pctBase = haulType === 'lh' ? 'lh_pct' : haulType === 'rh' ? 'rh_pct' : 'combined_pct';
+  const pctKey  = weighted ? `${pctBase}_w` : pctBase;
   const haulLabel = haulType === 'lh' ? 'Line Haul' : haulType === 'rh' ? 'Regional Haul' : 'All Fleets';
 
   const categories = useMemo(() => {
@@ -8266,6 +8279,15 @@ function PublicExplorerPage() {
                 <HaulBtn val="lh"       label="Line Haul" />
                 <HaulBtn val="rh"       label="Regional Haul" />
               </div>
+            )}
+            {view !== 'mpg' && (
+              <button onClick={() => setWeighted(w => !w)} title="Weight adoption % by fleet size (tractor count)" style={{
+                padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
+                borderColor: weighted ? '#7C3AED' : 'rgba(255,255,255,0.3)',
+                background:  weighted ? '#7C3AED' : 'rgba(255,255,255,0.08)',
+                color:       weighted ? '#fff'    : 'rgba(255,255,255,0.75)',
+                fontWeight:  weighted ? 600       : 400,
+              }}>Fleet-size weighted</button>
             )}
           </div>
 
