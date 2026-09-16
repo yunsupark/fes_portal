@@ -79,46 +79,45 @@ const WEIGHT_OPTIONS = [
 function AdoptionWeightToggle({ weighted, setWeighted }) {
   const [hoverKey, setHoverKey] = React.useState(null);
   const active = weighted ? 'unit' : 'decision';
+  const hoveredOpt = WEIGHT_OPTIONS.find(o => o.key === hoverKey);
   return (
-    <div style={{ display: 'inline-flex', border: '1px solid #D1D5DB', borderRadius: 20, overflow: 'visible', flexShrink: 0 }}>
+    <div
+      style={{ position: 'relative', display: 'inline-flex', border: '1px solid #D1D5DB', borderRadius: 20, flexShrink: 0 }}
+      onMouseLeave={() => setHoverKey(null)}
+    >
       {WEIGHT_OPTIONS.map(opt => (
-        <div key={opt.key} style={{ position: 'relative' }}
+        <button
+          key={opt.key}
+          onClick={() => setWeighted(opt.key === 'unit')}
           onMouseEnter={() => setHoverKey(opt.key)}
-          onMouseLeave={() => setHoverKey(null)}
-        >
-          <button
-            onClick={() => setWeighted(opt.key === 'unit')}
-            style={{
-              padding: '5px 14px', fontSize: 12, cursor: 'pointer', border: 'none',
-              borderRadius: opt.key === 'decision' ? '20px 0 0 20px' : '0 20px 20px 0',
-              background: active === opt.key ? '#1c3660' : '#F9FAFB',
-              color:      active === opt.key ? '#fff'    : '#6B7280',
-              fontWeight: active === opt.key ? 600       : 400,
-              lineHeight: 1,
-            }}
-          >{opt.label}</button>
-          {hoverKey === opt.key && (
-            <div style={{
-              position: 'absolute', bottom: 'calc(100% + 8px)',
-              left: '50%', transform: 'translateX(-50%)',
-              background: '#1c3660', color: '#fff',
-              fontSize: 11, lineHeight: 1.45,
-              padding: '7px 10px', borderRadius: 6,
-              width: 210, textAlign: 'center',
-              zIndex: 200, pointerEvents: 'none',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
-            }}>
-              {opt.tooltip}
-              <div style={{
-                position: 'absolute', top: '100%', left: '50%',
-                transform: 'translateX(-50%)',
-                borderWidth: '5px 5px 0', borderStyle: 'solid',
-                borderColor: '#1c3660 transparent transparent',
-              }} />
-            </div>
-          )}
-        </div>
+          style={{
+            padding: '5px 14px', fontSize: 12, cursor: 'pointer', border: 'none',
+            borderRadius: opt.key === 'decision' ? '20px 0 0 20px' : '0 20px 20px 0',
+            background: active === opt.key ? '#1c3660' : '#F9FAFB',
+            color:      active === opt.key ? '#fff'    : '#6B7280',
+            fontWeight: active === opt.key ? 600       : 400,
+            lineHeight: 1,
+          }}
+        >{opt.label}</button>
       ))}
+      {hoveredOpt && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 8px)', left: 0,
+          background: '#1c3660', color: '#fff',
+          fontSize: 11, lineHeight: 1.5,
+          padding: '7px 10px', borderRadius: 6,
+          width: 210, textAlign: 'left',
+          zIndex: 200, pointerEvents: 'none',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+        }}>
+          {hoveredOpt.tooltip}
+          <div style={{
+            position: 'absolute', bottom: '100%', left: 16,
+            borderWidth: '0 5px 5px', borderStyle: 'solid',
+            borderColor: 'transparent transparent #1c3660',
+          }} />
+        </div>
+      )}
     </div>
   );
 }
@@ -4340,8 +4339,8 @@ function AdminExplorerPage({ token }) {
   const HaulBtn = ({ val, label }) => (
     <button onClick={() => setHaulType(val)} style={{
       padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
-      borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
-      background:  haulType === val ? '#2563EB' : '#F9FAFB',
+      borderColor: haulType === val ? '#1c3660' : '#D1D5DB',
+      background:  haulType === val ? '#1c3660' : '#F9FAFB',
       color:       haulType === val ? '#fff'    : '#374151',
       fontWeight:  haulType === val ? 600       : 400,
     }}>{label}</button>
@@ -4865,8 +4864,8 @@ function AdminTablesPage({ token }) {
     <button onClick={() => setHaulType(val)} style={{
       padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6,
       border: '1px solid', transition: 'background 0.15s',
-      borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
-      background:  haulType === val ? '#2563EB' : '#F9FAFB',
+      borderColor: haulType === val ? '#1c3660' : '#D1D5DB',
+      background:  haulType === val ? '#1c3660' : '#F9FAFB',
       color:       haulType === val ? '#fff'    : '#374151',
       fontWeight:  haulType === val ? 600       : 400,
     }}>{label}</button>
@@ -8178,8 +8177,8 @@ function PublicExplorerPage() {
   const HaulBtn = ({ val, label }) => (
     <button onClick={() => setHaulType(val)} style={{
       padding: '5px 14px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
-      borderColor: haulType === val ? '#2563EB' : '#D1D5DB',
-      background:  haulType === val ? '#2563EB' : '#F9FAFB',
+      borderColor: haulType === val ? '#1c3660' : '#D1D5DB',
+      background:  haulType === val ? '#1c3660' : '#F9FAFB',
       color:       haulType === val ? '#fff'    : '#374151',
       fontWeight:  haulType === val ? 600       : 400,
     }}>{label}</button>
