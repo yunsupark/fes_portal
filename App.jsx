@@ -62,6 +62,67 @@ function useExplorerAnalytics(page, { metric, category, playing }) {
   }, [playing]);
 }
 
+// ─── Adoption weight toggle ──────────────────────────────────────────────────
+const WEIGHT_OPTIONS = [
+  {
+    key: 'decision',
+    label: 'Decision',
+    tooltip: 'Each fleet counted equally — measures how widely a technology has been adopted across operators, regardless of fleet size.',
+  },
+  {
+    key: 'unit',
+    label: 'Unit',
+    tooltip: 'Weighted by each fleet\'s tractor count — measures what share of trucks in the study have adopted a technology.',
+  },
+];
+
+function AdoptionWeightToggle({ weighted, setWeighted }) {
+  const [hoverKey, setHoverKey] = React.useState(null);
+  const active = weighted ? 'unit' : 'decision';
+  return (
+    <div style={{ display: 'inline-flex', border: '1px solid #D1D5DB', borderRadius: 20, overflow: 'visible', flexShrink: 0 }}>
+      {WEIGHT_OPTIONS.map(opt => (
+        <div key={opt.key} style={{ position: 'relative' }}
+          onMouseEnter={() => setHoverKey(opt.key)}
+          onMouseLeave={() => setHoverKey(null)}
+        >
+          <button
+            onClick={() => setWeighted(opt.key === 'unit')}
+            style={{
+              padding: '5px 14px', fontSize: 12, cursor: 'pointer', border: 'none',
+              borderRadius: opt.key === 'decision' ? '20px 0 0 20px' : '0 20px 20px 0',
+              background: active === opt.key ? '#1c3660' : '#F9FAFB',
+              color:      active === opt.key ? '#fff'    : '#6B7280',
+              fontWeight: active === opt.key ? 600       : 400,
+              lineHeight: 1,
+            }}
+          >{opt.label}</button>
+          {hoverKey === opt.key && (
+            <div style={{
+              position: 'absolute', bottom: 'calc(100% + 8px)',
+              left: '50%', transform: 'translateX(-50%)',
+              background: '#1c3660', color: '#fff',
+              fontSize: 11, lineHeight: 1.45,
+              padding: '7px 10px', borderRadius: 6,
+              width: 210, textAlign: 'center',
+              zIndex: 200, pointerEvents: 'none',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.18)',
+            }}>
+              {opt.tooltip}
+              <div style={{
+                position: 'absolute', top: '100%', left: '50%',
+                transform: 'translateX(-50%)',
+                borderWidth: '5px 5px 0', borderStyle: 'solid',
+                borderColor: '#1c3660 transparent transparent',
+              }} />
+            </div>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ─── Utility ──────────────────────────────────────────────────────────────────
 const pct = (v) => v == null ? "—" : `${Math.round(v * 100)}%`;
 const fmt = (n) => n?.toLocaleString() ?? "—";
@@ -8281,13 +8342,7 @@ function PublicExplorerPage() {
               </div>
             )}
             {view !== 'mpg' && (
-              <button onClick={() => setWeighted(w => !w)} title="Weight adoption % by fleet size (tractor count)" style={{
-                padding: '5px 12px', fontSize: 12, cursor: 'pointer', borderRadius: 6, border: '1px solid',
-                borderColor: weighted ? '#7C3AED' : '#D1D5DB',
-                background:  weighted ? '#7C3AED' : '#F9FAFB',
-                color:       weighted ? '#fff'    : '#374151',
-                fontWeight:  weighted ? 600       : 400,
-              }}>Fleet-size weighted</button>
+              <AdoptionWeightToggle weighted={weighted} setWeighted={setWeighted} />
             )}
           </div>
 
