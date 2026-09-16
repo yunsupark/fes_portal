@@ -4391,8 +4391,14 @@ function AdminExplorerPage({ token }) {
       // Quote when value contains comma, quote, or newline
       return /[,"\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
     };
+    const year = new Date().getFullYear();
     const BOM = '﻿';
-    const csv = BOM + [keys.join(','), ...rows.map(r => keys.map(k => escape(r[k])).join(','))].join('\n');
+    const attrib = [
+      `"Source: NACFE Fleet Efficiency Study ${year} — fes.nacfe.org"`,
+      `"When using this data please acknowledge: NACFE Fleet Efficiency Study ${year} (fes.nacfe.org)"`,
+      `""`,
+    ].join('\n');
+    const csv = BOM + attrib + '\n' + [keys.join(','), ...rows.map(r => keys.map(k => escape(r[k])).join(','))].join('\n');
     const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
     const a = document.createElement('a');
     a.href = url; a.download = filename + '.csv'; a.click();
@@ -4417,6 +4423,12 @@ function AdminExplorerPage({ token }) {
       const ctx = canvas.getContext('2d');
       ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.scale(scale, scale); ctx.drawImage(img, 0, 0, width, height);
+      const year = new Date().getFullYear();
+      ctx.font = '10px Arial, sans-serif';
+      ctx.fillStyle = 'rgba(80,80,80,0.8)';
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(`Source: NACFE Fleet Efficiency Study ${year}  |  fes.nacfe.org`, width - 8, height - 5);
       const a = document.createElement('a');
       a.download = filename + '.png'; a.href = canvas.toDataURL('image/png'); a.click();
     };
