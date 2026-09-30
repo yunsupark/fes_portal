@@ -6169,7 +6169,7 @@ ORDER BY t.technology, a.adoption_year`;
           const legItems  = sortedAll.map((t, i) => ({ value: t, color: CC[i % CC.length] }));
           return (
             <AdminChartCard title="Adoption — All Technologies" subtitle={`All tech series · ${haulLabel(spagHaulType)}`}
-              legendItems={legItems} csvData={spagData}>
+              csvData={spagData}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
                 <HaulBtn val="combined" label="Combined" active={spagHaulType} setter={setSpagHaulType} />
                 <HaulBtn val="lh"       label="Line Haul" active={spagHaulType} setter={setSpagHaulType} />
