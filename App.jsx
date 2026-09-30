@@ -5175,11 +5175,18 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     const LEG_W   = legendItems?.length ? 190 : 0;
     const PADDING = legendItems?.length ?  12 : 0;
 
-    // Extra left bleed: Recharts YAxis labels/ticks can render at near-zero or
-    // negative x coordinates. Inline SVGs visibly overflow their box, but when
-    // serialized as a standalone image the browser clips at the viewBox edge.
-    // Expanding the viewBox leftward by LEFT_BLEED captures that content.
-    const LEFT_BLEED = 24;
+    // Measure the actual leftmost extent of SVG content (tick labels, axis label,
+    // etc. can render at or below x=0).  getBBox() returns the tight bounding box
+    // of all rendered content in SVG coordinates; if it extends left of x=0 we
+    // expand the viewBox leftward by exactly that amount (plus an 8 px buffer).
+    let LEFT_BLEED = 8;
+    try {
+      const bbox = svgEl.getBBox();
+      if (bbox.x < 0) LEFT_BLEED = Math.ceil(-bbox.x) + 8;
+    } catch {
+      // getBBox not available – fall back to a generous static bleed
+      LEFT_BLEED = 48;
+    }
 
     const scale   = 2;
     const canvas  = document.createElement('canvas');
