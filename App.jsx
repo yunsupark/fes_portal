@@ -5175,18 +5175,10 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     const LEG_W   = legendItems?.length ? 190 : 0;
     const PADDING = legendItems?.length ?  12 : 0;
 
-    // Measure the actual leftmost extent of SVG content (tick labels, axis label,
-    // etc. can render at or below x=0).  getBBox() returns the tight bounding box
-    // of all rendered content in SVG coordinates; if it extends left of x=0 we
-    // expand the viewBox leftward by exactly that amount (plus an 8 px buffer).
-    let LEFT_BLEED = 8;
-    try {
-      const bbox = svgEl.getBBox();
-      if (bbox.x < 0) LEFT_BLEED = Math.ceil(-bbox.x) + 8;
-    } catch {
-      // getBBox not available – fall back to a generous static bleed
-      LEFT_BLEED = 48;
-    }
+    // Generous left-side padding so YAxis ticks/labels/rotated title are never
+    // clipped in the exported image.  The root SVG's getBBox() returns the viewport
+    // box (not content), so we use a large static value instead.
+    const LEFT_BLEED = 60;
 
     const scale   = 2;
     const canvas  = document.createElement('canvas');
@@ -5281,7 +5273,18 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     clone.setAttribute('width',  (svgW + LEFT_BLEED) * scale);
     clone.setAttribute('height', svgH * scale);
     clone.style.width = ''; clone.style.height = '';
-    const svgStr  = new XMLSerializer().serializeToString(clone);
+
+    // Uniquify every id= / url(#…) in the serialized string so fragment
+    // references in the standalone SVG img cannot accidentally resolve against
+    // same-named elements in the outer document (a known Chromium behaviour
+    // where clip-path url(#id) leaks out of the img sandbox).
+    const uid = `_x${Date.now()}`;
+    let svgStr = new XMLSerializer().serializeToString(clone);
+    svgStr = svgStr
+      .replace(/\bid="([^"]+)"/g,      `id="$1${uid}"`)
+      .replace(/url\(#([^)]+)\)/g,     `url(#$1${uid})`)
+      .replace(/xlink:href="#([^"]+)"/g, `xlink:href="#$1${uid}"`)
+      .replace(/href="#([^"]+)"/g,     `href="#$1${uid}"`);
     const blob    = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
     const blobUrl = URL.createObjectURL(blob);
 
