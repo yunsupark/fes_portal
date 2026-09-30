@@ -5175,9 +5175,15 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     const LEG_W   = legendItems?.length ? 190 : 0;
     const PADDING = legendItems?.length ?  12 : 0;
 
+    // Extra left bleed: Recharts YAxis labels/ticks can render at near-zero or
+    // negative x coordinates. Inline SVGs visibly overflow their box, but when
+    // serialized as a standalone image the browser clips at the viewBox edge.
+    // Expanding the viewBox leftward by LEFT_BLEED captures that content.
+    const LEFT_BLEED = 24;
+
     const scale   = 2;
     const canvas  = document.createElement('canvas');
-    canvas.width  = (svgW + LEG_W + PADDING) * scale;
+    canvas.width  = (LEFT_BLEED + svgW + LEG_W + PADDING) * scale;
     canvas.height = (TITLE_H + svgH + LEG_ROW_H) * scale;
     const ctx = canvas.getContext('2d');
     ctx.scale(scale, scale);
@@ -5201,18 +5207,18 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
       ctx.textBaseline = 'top';
       ctx.fillStyle = '#111827';
       ctx.font = 'bold 13px system-ui,sans-serif';
-      ctx.fillText(title, 0, 6);
+      ctx.fillText(title, LEFT_BLEED, 6);
       if (subtitle) {
         ctx.fillStyle = '#6B7280';
         ctx.font = '11px system-ui,sans-serif';
-        ctx.fillText(subtitle, 0, 26);
+        ctx.fillText(subtitle, LEFT_BLEED, 26);
       }
     };
 
     // Sidebar legend (right side, for category/tech charts)
     const drawSidebarLegend = () => {
       if (!legendItems?.length) return;
-      const x0 = svgW + PADDING;
+      const x0 = LEFT_BLEED + svgW + PADDING;
       const lineH = 16, gap = 4, maxTxtW = LEG_W - 26;
       ctx.font = '10px system-ui,sans-serif';
       ctx.textBaseline = 'middle';
@@ -5238,7 +5244,7 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
       const y0 = TITLE_H + svgH + 8;
       ctx.font = '10px system-ui,sans-serif';
       ctx.textBaseline = 'middle';
-      let x = 0;
+      let x = LEFT_BLEED;
       for (const item of domLegItems) {
         const dash = (lineDashes && lineDashes[item.text]) ? lineDashes[item.text] : item.dash;
         ctx.strokeStyle = item.color;
@@ -5249,7 +5255,7 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
         ctx.fillStyle = '#374151';
         ctx.fillText(item.text, x + 26, y0 + 5);
         x += 26 + ctx.measureText(item.text).width + 16;
-        if (x > svgW - 60) { x = 0; /* next row would need more height — acceptable for now */ }
+        if (x > LEFT_BLEED + svgW - 60) { x = LEFT_BLEED; }
       }
     };
 
@@ -5257,9 +5263,16 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     const clone = svgEl.cloneNode(true);
     clone.setAttribute('xmlns',       'http://www.w3.org/2000/svg');
     clone.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-    clone.setAttribute('width',  svgW * scale);
+    // Expand viewBox leftward by LEFT_BLEED so YAxis overflow content is captured
+    const existingVB = clone.getAttribute('viewBox');
+    if (existingVB) {
+      const [vx, vy, vw, vh] = existingVB.trim().split(/[\s,]+/).map(Number);
+      clone.setAttribute('viewBox', `${vx - LEFT_BLEED} ${vy} ${vw + LEFT_BLEED} ${vh}`);
+    } else {
+      clone.setAttribute('viewBox', `${-LEFT_BLEED} 0 ${svgW + LEFT_BLEED} ${svgH}`);
+    }
+    clone.setAttribute('width',  (svgW + LEFT_BLEED) * scale);
     clone.setAttribute('height', svgH * scale);
-    if (!clone.getAttribute('viewBox')) clone.setAttribute('viewBox', `0 0 ${svgW} ${svgH}`);
     clone.style.width = ''; clone.style.height = '';
     const svgStr  = new XMLSerializer().serializeToString(clone);
     const blob    = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' });
@@ -5269,9 +5282,9 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     img.onload = () => {
       try {
         ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, svgW + LEG_W + PADDING, TITLE_H + svgH + LEG_ROW_H);
+        ctx.fillRect(0, 0, LEFT_BLEED + svgW + LEG_W + PADDING, TITLE_H + svgH + LEG_ROW_H);
         drawTitle();
-        ctx.drawImage(img, 0, TITLE_H, svgW, svgH);
+        ctx.drawImage(img, 0, TITLE_H, svgW + LEFT_BLEED, svgH);
         URL.revokeObjectURL(blobUrl);
         drawSidebarLegend();
         drawBottomLegend();
