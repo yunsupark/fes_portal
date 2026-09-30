@@ -5664,6 +5664,7 @@ function AdminChartsPage({ token }) {
   const [maxYearMsg,     setMaxYearMsg]     = useState('');
   // Per-chart haul-type filters (independent, no shared state)
   const [catHaulType,    setCatHaulType]    = useState('combined'); // category chart
+  const [spagHaulType,   setSpagHaulType]   = useState('combined'); // all-techs spaghetti chart
   const [grpHaulType,    setGrpHaulType]    = useState('combined'); // per-group tech charts
 
   const headers = { Authorization: `Bearer ${token}` };
@@ -5914,6 +5915,7 @@ function AdminChartsPage({ token }) {
   });
 
   const { catData: activeCatData }   = resolveAdopt(catHaulType, catData, groupData);
+  const { groupData: activeSpagData }  = resolveAdopt(spagHaulType, catData, groupData);
   const { groupData: activeGroupData } = resolveAdopt(grpHaulType, catData, groupData);
 
   const sortedGroups = [
@@ -6138,6 +6140,51 @@ ORDER BY t.technology, a.adoption_year`;
                   {sortedCats.map((cat, i) => (
                     <Line key={cat} type="monotone" dataKey={cat}
                       stroke={CC[i % CC.length]} strokeWidth={2} dot={false} connectNulls />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </AdminChartCard>
+          );
+        })()}
+
+        {/* All-technologies spaghetti chart */}
+        {(() => {
+          // Merge all tech series across all groups into one flat dataset keyed by year
+          const allTechs = [];
+          const byYear = {};
+          const spagGroups = [
+            ...groupOrder.filter(g => activeSpagData[g]),
+            ...Object.keys(activeSpagData).filter(g => !groupOrder.includes(g)).sort(),
+          ];
+          spagGroups.forEach(grp => {
+            const { techs, data } = activeSpagData[grp] || { techs: [], data: [] };
+            techs.forEach(t => { if (!allTechs.includes(t)) allTechs.push(t); });
+            data.forEach(row => {
+              if (!byYear[row.year]) byYear[row.year] = { year: row.year };
+              techs.forEach(t => { if (row[t] != null) byYear[row.year][t] = row[t]; });
+            });
+          });
+          const spagData  = Object.values(byYear).sort((a, b) => a.year - b.year);
+          const sortedAll = byLastValue(allTechs, spagData);
+          const legItems  = sortedAll.map((t, i) => ({ value: t, color: CC[i % CC.length] }));
+          return (
+            <AdminChartCard title="Adoption — All Technologies" subtitle={`All tech series · ${haulLabel(spagHaulType)}`}
+              legendItems={legItems} csvData={spagData}>
+              <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
+                <HaulBtn val="combined" label="Combined" active={spagHaulType} setter={setSpagHaulType} />
+                <HaulBtn val="lh"       label="Line Haul" active={spagHaulType} setter={setSpagHaulType} />
+                <HaulBtn val="rh"       label="Regional Haul" active={spagHaulType} setter={setSpagHaulType} />
+              </div>
+              <ResponsiveContainer width="100%" height={CH}>
+                <LineChart data={spagData} margin={{ top: 8, right: 8, left: 16, bottom: 8 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#E5E7EB" />
+                  <XAxis dataKey="year" stroke="#9CA3AF" tick={{ fontSize: 10 }} />
+                  <YAxis domain={[0, 100]} tickFormatter={fmtPct} stroke="#9CA3AF" tick={{ fontSize: 10 }}
+                    label={adoptYLabel} />
+                  <Tooltip formatter={(v, n) => [v != null ? fmtPct(v) : '—', n]} contentStyle={{ fontSize: 10 }} />
+                  {sortedAll.map((tech, i) => (
+                    <Line key={tech} type="monotone" dataKey={tech}
+                      stroke={CC[i % CC.length]} strokeWidth={1.5} dot={false} connectNulls />
                   ))}
                 </LineChart>
               </ResponsiveContainer>
