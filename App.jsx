@@ -6001,19 +6001,24 @@ GROUP BY m.mpg_year, LOWER(f.default_duty_cycle),
          CASE WHEN m.fuel_type = 'CNG' THEN 'cng' ELSE 'diesel' END
 ORDER BY m.mpg_year`;
 
+  // Duty-cycle clause injected into adoption SQLs when a specific haul type is active.
+  // These are used by both the category chart and per-group charts.
+  const dcJoin  = (ht) => ht !== 'combined' ? `\nJOIN ffs_fleet f ON a.fleet_id = f.fleet_id` : '';
+  const dcWhere = (ht) => ht !== 'combined' ? `\n  AND LOWER(f.default_duty_cycle) = '${ht}'` : '';
+
   const sqlCat = customSqlSettings['chart_sql_cat']
     ? applySqlYear(customSqlSettings['chart_sql_cat'], yr)
     : `SELECT t.tech_group,
        a.adoption_year AS year,
        AVG(a.adoption_percent) * 100 AS adoption
 FROM ffs_adoption a
-JOIN ffs_tech t ON a.tech_id = t.tech_id
+JOIN ffs_tech t ON a.tech_id = t.tech_id${dcJoin(catHaulType)}
 WHERE a.fleet_id NOT IN (0, 45, 46)
-  AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}
+  AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}${dcWhere(catHaulType)}
 GROUP BY t.tech_group, a.adoption_year
 ORDER BY t.tech_group, a.adoption_year`;
 
-  const sqlTech = (grp) => {
+  const sqlTech = (grp, ht = grpHaulType) => {
     const key = `chart_sql_tech_${grp}`;
     return customSqlSettings[key]
       ? applySqlYear(customSqlSettings[key], yr)
@@ -6021,10 +6026,10 @@ ORDER BY t.tech_group, a.adoption_year`;
        a.adoption_year AS year,
        AVG(a.adoption_percent) * 100 AS adoption
 FROM ffs_adoption a
-JOIN ffs_tech t ON a.tech_id = t.tech_id
+JOIN ffs_tech t ON a.tech_id = t.tech_id${dcJoin(ht)}
 WHERE a.fleet_id NOT IN (0, 45, 46)
   AND t.tech_group = '${grp.replace(/'/g, "''")}'
-  AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}
+  AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}${dcWhere(ht)}
 GROUP BY t.technology, a.adoption_year
 ORDER BY t.technology, a.adoption_year`;
   };
