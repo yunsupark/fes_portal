@@ -5689,6 +5689,7 @@ function AdminChartsPage({ token }) {
   const [catHaulType,    setCatHaulType]    = useState('combined'); // category chart
   const [spagHaulType,   setSpagHaulType]   = useState('combined'); // all-techs spaghetti chart
   const [grpHaulType,    setGrpHaulType]    = useState('combined'); // per-group tech charts
+  const [spagCustomData, setSpagCustomData] = useState(null);       // override from custom SQL run
 
   const headers = { Authorization: `Bearer ${token}` };
 
@@ -5916,6 +5917,17 @@ function AdminChartsPage({ token }) {
         ...prev,
         [groupKey]: { techs, data: Object.values(byYear).sort((a, b) => a.year - b.year) },
       }));
+    } else if (type === 'spag') {
+      // Expected columns: technology, year, adoption
+      const byYear = {};
+      const techs  = [];
+      rows.forEach(row => {
+        const yr = row.year ?? row.adoption_year;
+        if (!byYear[yr]) byYear[yr] = { year: yr };
+        byYear[yr][row.technology] = parseFloat(row.adoption);
+        if (!techs.includes(row.technology)) techs.push(row.technology);
+      });
+      setSpagCustomData({ allTechs: techs, spagData: Object.values(byYear).sort((a, b) => a.year - b.year) });
     }
   };
 
@@ -6033,6 +6045,18 @@ WHERE a.fleet_id NOT IN (0, 45, 46)
 GROUP BY t.technology, a.adoption_year
 ORDER BY t.technology, a.adoption_year`;
   };
+
+  const sqlSpag = customSqlSettings['chart_sql_spag']
+    ? applySqlYear(customSqlSettings['chart_sql_spag'], yr)
+    : `SELECT t.technology,
+       a.adoption_year AS year,
+       AVG(a.adoption_percent) * 100 AS adoption
+FROM ffs_adoption a
+JOIN ffs_tech t ON a.tech_id = t.tech_id${dcJoin(spagHaulType)}
+WHERE a.fleet_id NOT IN (0, 45, 46)
+  AND a.adoption_year >= 2003 AND a.adoption_year <= ${yr}${dcWhere(spagHaulType)}
+GROUP BY t.technology, a.adoption_year
+ORDER BY t.technology, a.adoption_year`;
 
   return (
     <div style={{ maxWidth: 1280, margin: '24px auto', padding: '0 20px',
@@ -6178,25 +6202,32 @@ ORDER BY t.technology, a.adoption_year`;
         {/* All-technologies spaghetti chart */}
         {(() => {
           // Merge all tech series across all groups into one flat dataset keyed by year
-          const allTechs = [];
-          const byYear = {};
-          const spagGroups = [
-            ...groupOrder.filter(g => activeSpagData[g]),
-            ...Object.keys(activeSpagData).filter(g => !groupOrder.includes(g)).sort(),
-          ];
-          spagGroups.forEach(grp => {
-            const { techs, data } = activeSpagData[grp] || { techs: [], data: [] };
-            techs.forEach(t => { if (!allTechs.includes(t)) allTechs.push(t); });
-            data.forEach(row => {
-              if (!byYear[row.year]) byYear[row.year] = { year: row.year };
-              techs.forEach(t => { if (row[t] != null) byYear[row.year][t] = row[t]; });
+          let allTechs, spagData;
+          if (spagCustomData) {
+            ({ allTechs, spagData } = spagCustomData);
+          } else {
+            allTechs = [];
+            const byYear = {};
+            const spagGroups = [
+              ...groupOrder.filter(g => activeSpagData[g]),
+              ...Object.keys(activeSpagData).filter(g => !groupOrder.includes(g)).sort(),
+            ];
+            spagGroups.forEach(grp => {
+              const { techs, data } = activeSpagData[grp] || { techs: [], data: [] };
+              techs.forEach(t => { if (!allTechs.includes(t)) allTechs.push(t); });
+              data.forEach(row => {
+                if (!byYear[row.year]) byYear[row.year] = { year: row.year };
+                techs.forEach(t => { if (row[t] != null) byYear[row.year][t] = row[t]; });
+              });
             });
-          });
-          const spagData  = Object.values(byYear).sort((a, b) => a.year - b.year);
+            spagData = Object.values(byYear).sort((a, b) => a.year - b.year);
+          }
           const sortedAll = byLastValue(allTechs, spagData);
           const legItems  = sortedAll.map((t, i) => ({ value: t, color: CC[i % CC.length] }));
           return (
             <AdminChartCard title="Adoption — All Technologies" subtitle={`All tech series · ${haulLabel(spagHaulType)}`}
+              isAdmin={isAdminRole} defaultSql={sqlSpag} sqlKey="chart_sql_spag"
+              onRunQuery={sql => runChartQuery(sql, 'spag')} onSaveSql={saveSqlPermanent}
               csvData={spagData}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 8 }}>
                 <HaulBtn val="combined" label="Combined" active={spagHaulType} setter={setSpagHaulType} />
