@@ -5180,7 +5180,7 @@ function AdminChartCard({ title, subtitle, children, legendItems, lineDashes, is
     // box (not content), so we use a large static value instead.
     const LEFT_BLEED = 60;
 
-    const scale   = 3;
+    const scale   = 5;
     const canvas  = document.createElement('canvas');
     canvas.width  = (LEFT_BLEED + svgW + LEG_W + PADDING) * scale;
     canvas.height = (TITLE_H + svgH + LEG_ROW_H) * scale;
